@@ -1,0 +1,33 @@
+[package]
+name = "dguesser-realtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "realtime"
+path = "src/main.rs"
+
+[dependencies]
+dguesser-core = { path = "../core" }
+dguesser-db = { path = "../db" }
+dguesser-auth = { path = "../auth" }
+dguesser-protocol = { path = "../protocol" }
+
+axum.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+socketioxide.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dotenvy.workspace = true
+config.workspace = true
+redis.workspace = true

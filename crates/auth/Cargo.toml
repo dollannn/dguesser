@@ -1,0 +1,22 @@
+[package]
+name = "dguesser-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+dguesser-db = { path = "../db" }
+
+axum.workspace = true
+tokio.workspace = true
+oauth2.workspace = true
+jsonwebtoken.workspace = true
+argon2.workspace = true
+rand.workspace = true
+serde.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+redis.workspace = true

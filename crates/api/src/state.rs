@@ -1,0 +1,23 @@
+//! Application state
+
+use anyhow::Result;
+use dguesser_db::DbPool;
+
+use crate::config::Config;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: DbPool,
+    pub config: Config,
+}
+
+impl AppState {
+    pub async fn new(config: &Config) -> Result<Self> {
+        let db = dguesser_db::create_pool(&config.database_url).await?;
+
+        Ok(Self {
+            db,
+            config: config.clone(),
+        })
+    }
+}
