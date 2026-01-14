@@ -32,3 +32,4 @@ dotenvy.workspace = true
 config.workspace = true
 redis.workspace = true
 rand.workspace = true
+sqlx.workspace = true

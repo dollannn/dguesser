@@ -1,0 +1,44 @@
+name: Database Backup
+
+on:
+  schedule:
+    # Run daily at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    # Allow manual triggers
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Create backup
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          BACKUP_FILE="backup_$(date +%Y%m%d_%H%M%S).sql.gz"
+          pg_dump "$DATABASE_URL" | gzip > "$BACKUP_FILE"
+          echo "BACKUP_FILE=$BACKUP_FILE" >> $GITHUB_ENV
+
+      - name: Upload to S3/R2 (optional)
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Upload backup to S3
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        run: |
+          aws s3 cp "$BACKUP_FILE" "s3://${{ secrets.S3_BACKUP_BUCKET }}/"
+
+      - name: Upload backup as artifact (fallback)
+        if: ${{ secrets.AWS_ACCESS_KEY_ID == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-backup
+          path: backup_*.sql.gz
+          retention-days: 30

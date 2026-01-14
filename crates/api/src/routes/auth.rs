@@ -101,7 +101,7 @@ pub async fn create_guest(
     // Get the created user
     let user = dguesser_db::users::get_by_id(state.db(), &result.user_id)
         .await?
-        .ok_or_else(|| ApiError::internal("Failed to create user"))?;
+        .ok_or_else(|| ApiError::internal().with_internal("Failed to create user"))?;
 
     // Build session cookie
     let cookie = build_cookie_header(

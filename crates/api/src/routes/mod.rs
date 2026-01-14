@@ -1,10 +1,11 @@
 //! API routes
 
-use axum::Router;
+use axum::{Router, middleware};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::middleware::rate_limit;
 use crate::state::AppState;
 
 pub mod auth;
@@ -17,6 +18,8 @@ pub mod users;
 #[openapi(
     paths(
         health::health_check,
+        health::liveness,
+        health::readiness,
         auth::create_guest,
         auth::get_current_user,
         auth::logout,
@@ -49,6 +52,8 @@ pub mod users;
         games::GameSummary,
         games::SubmitGuessRequest,
         health::HealthResponse,
+        health::HealthChecks,
+        health::CheckResult,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -69,11 +74,17 @@ pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
     let api_routes = Router::new()
         .nest("/auth", auth::router())
         .nest("/users", users::router())
-        .nest("/games", games::router());
+        .nest("/games", games::router())
+        // Apply rate limiting to API routes
+        .layer(middleware::from_fn_with_state(state.clone(), rate_limit));
 
     // Create the main application router with state
     let app = Router::new()
+        // Health endpoints (no rate limiting)
         .route("/health", axum::routing::get(health::health_check))
+        .route("/livez", axum::routing::get(health::liveness))
+        .route("/readyz", axum::routing::get(health::readiness))
+        // API routes with rate limiting
         .nest("/api/v1", api_routes)
         .with_state(state);
 

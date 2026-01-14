@@ -1,0 +1,42 @@
+# Build stage
+FROM rust:1.83-bookworm AS builder
+
+WORKDIR /app
+
+# Install sqlx-cli for migrations (optional, migrations run at startup)
+# RUN cargo install sqlx-cli --no-default-features --features postgres
+
+# Copy manifests first for dependency caching
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Build release binary
+RUN cargo build --release -p dguesser-api
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the binary
+COPY --from=builder /app/target/release/api ./api
+
+# Copy migrations for runtime migration
+COPY migrations ./migrations
+
+# Railway sets PORT env var automatically
+ENV PORT=3001
+ENV RUST_LOG=info,dguesser=debug
+
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3001/health || exit 1
+
+CMD ["./api"]
