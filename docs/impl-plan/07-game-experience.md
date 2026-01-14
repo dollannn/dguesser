@@ -12,6 +12,7 @@
 - Build real-time multiplayer experience
 - Add round results and final standings views
 - Implement game timer
+- **Handle prefixed nanoid IDs in all components**
 
 ## Deliverables
 
@@ -719,6 +720,7 @@
   export let game: GameDetails;
 
   $: standings = $gameStore.finalStandings;
+  // user_id is prefixed nanoid (usr_xxxxxxxxxxxx), safe string comparison
   $: myRank = standings.find(s => s.user_id === $user?.id)?.rank;
   $: winner = standings[0];
 
@@ -904,6 +906,26 @@ If Google Maps is not preferred, here's a Leaflet-based alternative:
 - [ ] Final standings show correctly
 - [ ] Multiplayer real-time updates work
 - [ ] Disconnection handling works
+- [ ] **User matching uses prefixed nanoid IDs correctly**
+
+## Technical Notes
+
+### ID Handling in Components
+
+All IDs in the frontend are strings with prefixes:
+- User IDs: `usr_xxxxxxxxxxxx`
+- Game IDs: `gam_xxxxxxxxxxxx`
+
+When comparing user IDs (e.g., to highlight current user in standings):
+```typescript
+// Safe string comparison - both are prefixed nanoids
+standings.find(s => s.user_id === $user?.id)
+```
+
+Game IDs are used directly in routes (URL-safe):
+```typescript
+goto(`/game/${game.id}`)  // e.g., /game/gam_FybH2oF9Xaw8
+```
 
 ## Next Phase
 

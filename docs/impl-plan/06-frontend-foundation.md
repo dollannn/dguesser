@@ -12,6 +12,7 @@
 - Create Socket.IO client wrapper
 - Implement authentication stores
 - Build core layout and navigation
+- **Use prefixed nanoid IDs in TypeScript types** (`usr_xxx`, `gam_xxx`, etc.)
 
 ## Deliverables
 
@@ -219,7 +220,12 @@ export const api = new ApiClient(`${API_BASE}/api/v1`);
 ```typescript
 import { api } from './client';
 
+/**
+ * User entity from the API.
+ * All IDs use prefixed nanoid format (e.g., usr_V1StGXR8_Z5j)
+ */
 export interface User {
+  /** User ID (prefixed nanoid: usr_xxxxxxxxxxxx) */
   id: string;
   display_name: string;
   email: string | null;
@@ -280,12 +286,18 @@ export interface CreateGameRequest {
   settings?: Partial<GameSettings>;
 }
 
+/**
+ * Response when creating a new game.
+ * IDs use prefixed nanoid format.
+ */
 export interface CreateGameResponse {
+  /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   id: string;
   join_code: string | null;
 }
 
 export interface Player {
+  /** User ID (prefixed nanoid: usr_xxxxxxxxxxxx) */
   user_id: string;
   display_name: string;
   is_host: boolean;
@@ -293,6 +305,7 @@ export interface Player {
 }
 
 export interface GameDetails {
+  /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   id: string;
   mode: string;
   status: string;
@@ -325,6 +338,7 @@ export interface GuessResult {
 }
 
 export interface GameSummary {
+  /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   id: string;
   mode: string;
   status: string;
@@ -503,11 +517,13 @@ export interface RoundStartPayload {
 }
 
 export interface PlayerGuessedPayload {
+  /** User ID (prefixed nanoid: usr_xxxxxxxxxxxx) */
   user_id: string;
   display_name: string;
 }
 
 export interface RoundResult {
+  /** User ID (prefixed nanoid: usr_xxxxxxxxxxxx) */
   user_id: string;
   display_name: string;
   guess_lat: number;
@@ -525,17 +541,20 @@ export interface RoundEndPayload {
 
 export interface FinalStanding {
   rank: number;
+  /** User ID (prefixed nanoid: usr_xxxxxxxxxxxx) */
   user_id: string;
   display_name: string;
   total_score: number;
 }
 
 export interface GameEndPayload {
+  /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   game_id: string;
   final_standings: FinalStanding[];
 }
 
 export interface GameState {
+  /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   gameId: string | null;
   status: 'idle' | 'lobby' | 'playing' | 'round_end' | 'finished';
   currentRound: number;
@@ -546,6 +565,7 @@ export interface GameState {
   hasGuessed: boolean;
   results: RoundResult[];
   finalStandings: FinalStanding[];
+  /** Map keyed by user_id (usr_xxxxxxxxxxxx) */
   players: Map<string, { displayName: string; hasGuessed: boolean }>;
 }
 
@@ -1158,6 +1178,24 @@ frontend/
 - [ ] OAuth redirects work
 - [ ] Header shows user info
 - [ ] Home page renders correctly
+- [ ] **All ID types documented with prefixed format**
+
+## Technical Notes
+
+### ID Format Reference (Frontend)
+
+All entity IDs from the API use prefixed nanoid format. In TypeScript, these are `string` types:
+
+| Entity | Format | Example |
+|--------|--------|---------|
+| User ID | `usr_xxxxxxxxxxxx` | `usr_V1StGXR8_Z5j` |
+| Game ID | `gam_xxxxxxxxxxxx` | `gam_FybH2oF9Xaw8` |
+| Round ID | `rnd_xxxxxxxxxxxx` | `rnd_Q3kT7bN2mPxW` |
+
+**Best Practices:**
+- Always use `string` type for IDs (not `number` or custom types)
+- Include JSDoc comments documenting the expected format
+- IDs are URL-safe and can be used directly in routes
 
 ## Next Phase
 

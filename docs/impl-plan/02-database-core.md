@@ -11,17 +11,197 @@
 - Set up SQLx migrations
 - Create database query layer
 - Implement geographic calculations
+- **Implement prefixed nanoid public IDs** (`usr_`, `gam_`, `ses_`, etc.)
+- **Integrate chacharng for secure session generation**
+
+## Key Dependencies
+
+```toml
+# crates/core/Cargo.toml additions
+nanoid = "0.4"
+rand_chacha = "0.3"
+rand_core = "0.6"
+
+# crates/api/Cargo.toml additions (for Phase 4)
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
+```
 
 ## Deliverables
 
-### 2.1 Database Schema
+### 2.1 Public ID System
+
+All entities use **prefixed nanoid** for public-facing IDs:
+
+| Entity | Prefix | Example |
+|--------|--------|---------|
+| User | `usr_` | `usr_V1StGXR8_Z5j` |
+| Game | `gam_` | `gam_FybH2oF9Xaw8` |
+| Session | `ses_` | `ses_Uakgb_J5m9g-` |
+| Round | `rnd_` | `rnd_Q3kT7bN2mPxW` |
+| Guess | `gss_` | `gss_L9vR4cD8sHjK` |
+| OAuth | `oau_` | `oau_M2nP6fG1tYqZ` |
+
+**crates/core/src/id.rs:**
+```rust
+use nanoid::nanoid;
+
+/// Alphabet for nanoid generation (URL-safe)
+const ALPHABET: [char; 64] = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+    'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+    'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd',
+    'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
+    'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x',
+    'y', 'z', '_', '-',
+];
+
+/// Default ID length (12 chars = ~71 bits of entropy)
+const ID_LEN: usize = 12;
+
+/// Generate a prefixed public ID
+fn generate_id(prefix: &str) -> String {
+    format!("{}_{}", prefix, nanoid!(ID_LEN, &ALPHABET))
+}
+
+/// User ID
+pub fn user_id() -> String {
+    generate_id("usr")
+}
+
+/// Game ID
+pub fn game_id() -> String {
+    generate_id("gam")
+}
+
+/// Round ID
+pub fn round_id() -> String {
+    generate_id("rnd")
+}
+
+/// Guess ID
+pub fn guess_id() -> String {
+    generate_id("gss")
+}
+
+/// OAuth account ID
+pub fn oauth_id() -> String {
+    generate_id("oau")
+}
+
+/// Validate a prefixed ID format
+pub fn validate_id(id: &str, expected_prefix: &str) -> bool {
+    id.starts_with(&format!("{}_", expected_prefix))
+        && id.len() == expected_prefix.len() + 1 + ID_LEN
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_user_id_format() {
+        let id = user_id();
+        assert!(id.starts_with("usr_"));
+        assert_eq!(id.len(), 16); // "usr_" + 12 chars
+    }
+
+    #[test]
+    fn test_game_id_format() {
+        let id = game_id();
+        assert!(id.starts_with("gam_"));
+        assert_eq!(id.len(), 16);
+    }
+
+    #[test]
+    fn test_validate_id() {
+        let id = user_id();
+        assert!(validate_id(&id, "usr"));
+        assert!(!validate_id(&id, "gam"));
+        assert!(!validate_id("invalid", "usr"));
+    }
+}
+```
+
+### 2.2 Session Token Generation (ChaCha20)
+
+**crates/core/src/session.rs:**
+```rust
+use rand_chacha::ChaCha20Rng;
+use rand_core::{RngCore, SeedableRng};
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
+
+/// Session token length (32 bytes = 256 bits)
+const SESSION_TOKEN_LEN: usize = 32;
+
+/// Thread-safe ChaCha20 RNG instance
+static RNG: Lazy<Mutex<ChaCha20Rng>> = Lazy::new(|| {
+    Mutex::new(ChaCha20Rng::from_entropy())
+});
+
+/// Generate a secure session token with prefix
+/// Returns: `ses_` + 43 chars of base64url (256 bits)
+pub fn generate_session_token() -> String {
+    let mut bytes = [0u8; SESSION_TOKEN_LEN];
+    
+    {
+        let mut rng = RNG.lock().expect("RNG lock poisoned");
+        rng.fill_bytes(&mut bytes);
+    }
+    
+    // Use base64url encoding (no padding) for URL safety
+    let encoded = base64_url::encode(&bytes);
+    format!("ses_{}", encoded)
+}
+
+/// Validate session token format
+pub fn validate_session_token(token: &str) -> bool {
+    if !token.starts_with("ses_") {
+        return false;
+    }
+    
+    let encoded = &token[4..];
+    // 32 bytes -> 43 chars in base64url (no padding)
+    encoded.len() == 43 && base64_url::decode(encoded).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_session_token_format() {
+        let token = generate_session_token();
+        assert!(token.starts_with("ses_"));
+        assert_eq!(token.len(), 47); // "ses_" + 43 chars
+    }
+
+    #[test]
+    fn test_session_token_uniqueness() {
+        let tokens: HashSet<String> = (0..1000)
+            .map(|_| generate_session_token())
+            .collect();
+        assert_eq!(tokens.len(), 1000);
+    }
+
+    #[test]
+    fn test_validate_session_token() {
+        let token = generate_session_token();
+        assert!(validate_session_token(&token));
+        assert!(!validate_session_token("invalid"));
+        assert!(!validate_session_token("ses_tooshort"));
+    }
+}
+```
+
+### 2.3 Database Schema
 
 #### Migration: 001_initial_schema.sql
 
 ```sql
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 -- User types enum
 CREATE TYPE user_kind AS ENUM ('guest', 'authenticated');
 
@@ -33,7 +213,7 @@ CREATE TYPE game_status AS ENUM ('lobby', 'active', 'finished', 'abandoned');
 
 -- Users table (guests are real users)
 CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id VARCHAR(16) PRIMARY KEY,  -- usr_xxxxxxxxxxxx
     kind user_kind NOT NULL DEFAULT 'guest',
     email VARCHAR(255),
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -48,26 +228,28 @@ CREATE TABLE users (
     total_score BIGINT NOT NULL DEFAULT 0,
     best_score INTEGER NOT NULL DEFAULT 0,
     
-    CONSTRAINT users_email_unique UNIQUE (email)
+    CONSTRAINT users_email_unique UNIQUE (email),
+    CONSTRAINT users_id_format CHECK (id ~ '^usr_[A-Za-z0-9_-]{12}$')
 );
 
 -- OAuth accounts (link external providers)
 CREATE TABLE oauth_accounts (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id VARCHAR(16) PRIMARY KEY,  -- oau_xxxxxxxxxxxx
+    user_id VARCHAR(16) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider VARCHAR(50) NOT NULL,  -- 'google', 'microsoft'
     provider_subject VARCHAR(255) NOT NULL,  -- OIDC 'sub' claim
     provider_email VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
-    -- Each provider identity can only link to one user
+    CONSTRAINT oauth_id_format CHECK (id ~ '^oau_[A-Za-z0-9_-]{12}$'),
     CONSTRAINT oauth_provider_subject_unique UNIQUE (provider, provider_subject)
 );
 
 -- Sessions (server-side session storage)
+-- Token format: ses_ + 43 chars base64url (256 bits from ChaCha20)
 CREATE TABLE sessions (
-    id VARCHAR(128) PRIMARY KEY,  -- Secure random token
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id VARCHAR(47) PRIMARY KEY,  -- ses_xxxxxxxxxxx...
+    user_id VARCHAR(16) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
     last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -76,16 +258,18 @@ CREATE TABLE sessions (
     revoked_at TIMESTAMPTZ,
     
     -- For session rotation auditing
-    rotated_from VARCHAR(128)
+    rotated_from VARCHAR(47),
+    
+    CONSTRAINT sessions_id_format CHECK (id ~ '^ses_[A-Za-z0-9_-]{43}$')
 );
 
 -- Games (both solo and multiplayer)
 CREATE TABLE games (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id VARCHAR(16) PRIMARY KEY,  -- gam_xxxxxxxxxxxx
     mode game_mode NOT NULL,
     status game_status NOT NULL DEFAULT 'lobby',
     join_code VARCHAR(8),  -- For multiplayer joining
-    created_by UUID NOT NULL REFERENCES users(id),
+    created_by VARCHAR(16) NOT NULL REFERENCES users(id),
     
     -- Timing
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -106,13 +290,14 @@ CREATE TABLE games (
     -- Final results
     total_score INTEGER,
     
+    CONSTRAINT games_id_format CHECK (id ~ '^gam_[A-Za-z0-9_-]{12}$'),
     CONSTRAINT games_join_code_unique UNIQUE (join_code)
 );
 
 -- Game players (for multiplayer games)
 CREATE TABLE game_players (
-    game_id UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    game_id VARCHAR(16) NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    user_id VARCHAR(16) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     left_at TIMESTAMPTZ,
     is_host BOOLEAN NOT NULL DEFAULT FALSE,
@@ -124,8 +309,8 @@ CREATE TABLE game_players (
 
 -- Rounds within a game
 CREATE TABLE rounds (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    game_id UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    id VARCHAR(16) PRIMARY KEY,  -- rnd_xxxxxxxxxxxx
+    game_id VARCHAR(16) NOT NULL REFERENCES games(id) ON DELETE CASCADE,
     round_number SMALLINT NOT NULL,
     
     -- Location data
@@ -139,14 +324,15 @@ CREATE TABLE rounds (
     ended_at TIMESTAMPTZ,
     time_limit_ms INTEGER,
     
+    CONSTRAINT rounds_id_format CHECK (id ~ '^rnd_[A-Za-z0-9_-]{12}$'),
     CONSTRAINT rounds_game_number_unique UNIQUE (game_id, round_number)
 );
 
 -- Player guesses
 CREATE TABLE guesses (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    round_id UUID NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id VARCHAR(16) PRIMARY KEY,  -- gss_xxxxxxxxxxxx
+    round_id VARCHAR(16) NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+    user_id VARCHAR(16) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     
     -- Guess location
     guess_lat DOUBLE PRECISION NOT NULL,
@@ -160,7 +346,7 @@ CREATE TABLE guesses (
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     time_taken_ms INTEGER,  -- Client-reported time
     
-    -- One guess per player per round
+    CONSTRAINT guesses_id_format CHECK (id ~ '^gss_[A-Za-z0-9_-]{12}$'),
     CONSTRAINT guesses_round_user_unique UNIQUE (round_id, user_id)
 );
 
@@ -193,15 +379,19 @@ CREATE TRIGGER users_updated_at
     EXECUTE FUNCTION update_updated_at();
 ```
 
-### 2.2 Core Crate - Game Logic
+### 2.4 Core Crate - Game Logic
 
 **crates/core/src/lib.rs:**
 ```rust
 pub mod error;
 pub mod game;
 pub mod geo;
+pub mod id;
+pub mod session;
 
 pub use error::CoreError;
+pub use id::{user_id, game_id, round_id, guess_id, oauth_id};
+pub use session::generate_session_token;
 ```
 
 **crates/core/src/geo/distance.rs:**
@@ -407,7 +597,7 @@ pub fn can_submit_guess(
 }
 ```
 
-### 2.3 Database Crate - Query Layer
+### 2.5 Database Crate - Query Layer
 
 **crates/db/src/lib.rs:**
 ```rust
@@ -441,12 +631,11 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
 **crates/db/src/users.rs:**
 ```rust
 use sqlx::FromRow;
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, FromRow)]
 pub struct User {
-    pub id: Uuid,
+    pub id: String,  // usr_xxxxxxxxxxxx
     pub kind: String, // 'guest' | 'authenticated'
     pub email: Option<String>,
     pub email_verified: bool,
@@ -464,13 +653,16 @@ use super::DbPool;
 
 /// Create a new guest user
 pub async fn create_guest(pool: &DbPool, display_name: &str) -> Result<User, sqlx::Error> {
+    let id = dguesser_core::user_id();
+    
     sqlx::query_as!(
         User,
         r#"
-        INSERT INTO users (kind, display_name)
-        VALUES ('guest', $1)
+        INSERT INTO users (id, kind, display_name)
+        VALUES ($1, 'guest', $2)
         RETURNING *
         "#,
+        id,
         display_name
     )
     .fetch_one(pool)
@@ -478,7 +670,7 @@ pub async fn create_guest(pool: &DbPool, display_name: &str) -> Result<User, sql
 }
 
 /// Get user by ID
-pub async fn get_by_id(pool: &DbPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
+pub async fn get_by_id(pool: &DbPool, id: &str) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as!(
         User,
         "SELECT * FROM users WHERE id = $1",
@@ -502,7 +694,7 @@ pub async fn get_by_email(pool: &DbPool, email: &str) -> Result<Option<User>, sq
 /// Upgrade guest to authenticated user
 pub async fn upgrade_to_authenticated(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     email: &str,
     display_name: Option<&str>,
     avatar_url: Option<&str>,
@@ -531,7 +723,7 @@ pub async fn upgrade_to_authenticated(
 /// Update user stats after a game
 pub async fn update_stats(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     score: i32,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
@@ -552,7 +744,7 @@ pub async fn update_stats(
 }
 
 /// Update last seen timestamp
-pub async fn touch_last_seen(pool: &DbPool, user_id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn touch_last_seen(pool: &DbPool, user_id: &str) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "UPDATE users SET last_seen_at = NOW() WHERE id = $1",
         user_id
@@ -567,14 +759,13 @@ pub async fn touch_last_seen(pool: &DbPool, user_id: Uuid) -> Result<(), sqlx::E
 ```rust
 use chrono::{DateTime, Duration, Utc};
 use sqlx::FromRow;
-use uuid::Uuid;
 
 use super::DbPool;
 
 #[derive(Debug, Clone, FromRow)]
 pub struct Session {
-    pub id: String,
-    pub user_id: Uuid,
+    pub id: String,  // ses_xxxxxxxxxxx... (47 chars)
+    pub user_id: String,  // usr_xxxxxxxxxxxx
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub last_accessed_at: DateTime<Utc>,
@@ -584,15 +775,15 @@ pub struct Session {
     pub rotated_from: Option<String>,
 }
 
-/// Create a new session
+/// Create a new session using ChaCha20-generated token
 pub async fn create(
     pool: &DbPool,
-    session_id: &str,
-    user_id: Uuid,
+    user_id: &str,
     ttl_hours: i64,
     ip: Option<&str>,
     user_agent: Option<&str>,
 ) -> Result<Session, sqlx::Error> {
+    let session_id = dguesser_core::generate_session_token();
     let expires_at = Utc::now() + Duration::hours(ttl_hours);
     
     sqlx::query_as!(
@@ -656,7 +847,7 @@ pub async fn revoke(pool: &DbPool, session_id: &str) -> Result<(), sqlx::Error> 
 /// Revoke all sessions for a user (except current)
 pub async fn revoke_all_except(
     pool: &DbPool,
-    user_id: Uuid,
+    user_id: &str,
     keep_session_id: &str,
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query!(
@@ -687,7 +878,6 @@ pub async fn cleanup_expired(pool: &DbPool) -> Result<u64, sqlx::Error> {
 pub async fn rotate(
     pool: &DbPool,
     old_session_id: &str,
-    new_session_id: &str,
     ttl_hours: i64,
 ) -> Result<Session, sqlx::Error> {
     // Get old session info
@@ -698,8 +888,10 @@ pub async fn rotate(
     // Revoke old
     revoke(pool, old_session_id).await?;
 
-    // Create new with reference to old
+    // Create new with reference to old (using ChaCha20)
+    let new_session_id = dguesser_core::generate_session_token();
     let expires_at = Utc::now() + Duration::hours(ttl_hours);
+    
     sqlx::query_as!(
         Session,
         r#"
@@ -720,18 +912,20 @@ pub async fn rotate(
 }
 ```
 
-### 2.4 Protocol Crate - Shared Types
+### 2.6 Protocol Crate - Shared Types with utoipa
 
 **crates/protocol/src/api/user.rs:**
 ```rust
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use utoipa::ToSchema;
 
 /// Public user profile (safe to expose)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserProfile {
-    pub id: Uuid,
+    /// User ID (e.g., usr_V1StGXR8_Z5j)
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub id: String,
     pub display_name: String,
     pub avatar_url: Option<String>,
     pub games_played: i32,
@@ -741,9 +935,10 @@ pub struct UserProfile {
 }
 
 /// Current user info (includes private data)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CurrentUser {
-    pub id: Uuid,
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub id: String,
     pub display_name: String,
     pub email: Option<String>,
     pub avatar_url: Option<String>,
@@ -752,8 +947,9 @@ pub struct CurrentUser {
 }
 
 /// Update profile request
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateProfileRequest {
+    #[schema(example = "CoolPlayer42")]
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
 }
@@ -786,16 +982,17 @@ pub mod client {
 **crates/protocol/src/socket/payloads.rs:**
 ```rust
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use utoipa::ToSchema;
 
 /// Client request to join a game
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct JoinGamePayload {
-    pub game_id: Uuid,
+    #[schema(example = "gam_FybH2oF9Xaw8")]
+    pub game_id: String,
 }
 
 /// Client submitting a guess
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SubmitGuessPayload {
     pub lat: f64,
     pub lng: f64,
@@ -803,7 +1000,7 @@ pub struct SubmitGuessPayload {
 }
 
 /// Server broadcast: round started
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RoundStartPayload {
     pub round_number: u8,
     pub total_rounds: u8,
@@ -813,7 +1010,7 @@ pub struct RoundStartPayload {
 }
 
 /// Location data for a round
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RoundLocation {
     pub lat: f64,
     pub lng: f64,
@@ -821,23 +1018,25 @@ pub struct RoundLocation {
 }
 
 /// Server broadcast: player guessed (without revealing location)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PlayerGuessedPayload {
-    pub user_id: Uuid,
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub user_id: String,
     pub display_name: String,
 }
 
 /// Server broadcast: round ended with results
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RoundEndPayload {
     pub round_number: u8,
     pub correct_location: RoundLocation,
     pub results: Vec<RoundResult>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RoundResult {
-    pub user_id: Uuid,
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub user_id: String,
     pub display_name: String,
     pub guess_lat: f64,
     pub guess_lng: f64,
@@ -847,22 +1046,24 @@ pub struct RoundResult {
 }
 
 /// Server broadcast: game ended
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GameEndPayload {
-    pub game_id: Uuid,
+    #[schema(example = "gam_FybH2oF9Xaw8")]
+    pub game_id: String,
     pub final_standings: Vec<FinalStanding>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct FinalStanding {
     pub rank: u8,
-    pub user_id: Uuid,
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub user_id: String,
     pub display_name: String,
     pub total_score: u32,
 }
 
 /// Error payload
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ErrorPayload {
     pub code: String,
     pub message: String,
@@ -875,9 +1076,12 @@ pub struct ErrorPayload {
 - [ ] SQLx compile-time checked queries pass
 - [ ] Core scoring tests pass
 - [ ] Distance calculation tests pass
+- [ ] nanoid generation produces valid prefixed IDs
+- [ ] ChaCha20 session tokens are cryptographically secure
 - [ ] Can create guest user via db crate
 - [ ] Can create and retrieve sessions
 - [ ] Protocol types serialize/deserialize correctly
+- [ ] utoipa schemas generate valid OpenAPI
 
 ## Technical Notes
 
@@ -903,6 +1107,17 @@ fn generate_guest_name() -> String {
     )
 }
 ```
+
+### ID Format Summary
+
+| ID Type | Length | Format | Entropy |
+|---------|--------|--------|---------|
+| User | 16 | `usr_xxxxxxxxxxxx` | ~71 bits |
+| Game | 16 | `gam_xxxxxxxxxxxx` | ~71 bits |
+| Round | 16 | `rnd_xxxxxxxxxxxx` | ~71 bits |
+| Guess | 16 | `gss_xxxxxxxxxxxx` | ~71 bits |
+| OAuth | 16 | `oau_xxxxxxxxxxxx` | ~71 bits |
+| Session | 47 | `ses_xxxxxxxxx...` | 256 bits |
 
 ## Next Phase
 

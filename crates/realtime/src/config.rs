@@ -5,6 +5,7 @@ use std::env;
 use anyhow::{Context, Result};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Config {
     pub port: u16,
     pub database_url: String,
@@ -19,7 +20,8 @@ impl Config {
                 .parse()
                 .context("Invalid REALTIME_PORT")?,
             database_url: env::var("DATABASE_URL").context("DATABASE_URL not set")?,
-            redis_url: env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+            redis_url: env::var("REDIS_URL")
+                .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
         })
     }
 }

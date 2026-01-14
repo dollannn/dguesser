@@ -1,20 +1,22 @@
 //! Socket.IO event names
 
-/// Client-to-server events
-pub mod client {
-    pub const JOIN_GAME: &str = "join_game";
-    pub const LEAVE_GAME: &str = "leave_game";
-    pub const SUBMIT_GUESS: &str = "submit_guess";
-    pub const START_GAME: &str = "start_game";
+/// Socket.IO event names (server -> client)
+pub mod server {
+    pub const GAME_STATE: &str = "game:state";
+    pub const ROUND_START: &str = "round:start";
+    pub const ROUND_END: &str = "round:end";
+    pub const PLAYER_JOINED: &str = "player:joined";
+    pub const PLAYER_LEFT: &str = "player:left";
+    pub const PLAYER_GUESSED: &str = "player:guessed";
+    pub const GAME_END: &str = "game:end";
+    pub const ERROR: &str = "error";
 }
 
-/// Server-to-client events
-pub mod server {
-    pub const GAME_STATE: &str = "game_state";
-    pub const PLAYER_JOINED: &str = "player_joined";
-    pub const PLAYER_LEFT: &str = "player_left";
-    pub const ROUND_START: &str = "round_start";
-    pub const ROUND_END: &str = "round_end";
-    pub const GAME_END: &str = "game_end";
-    pub const ERROR: &str = "error";
+/// Socket.IO event names (client -> server)
+pub mod client {
+    pub const JOIN_GAME: &str = "game:join";
+    pub const LEAVE_GAME: &str = "game:leave";
+    pub const START_GAME: &str = "game:start";
+    pub const SUBMIT_GUESS: &str = "guess:submit";
+    pub const READY: &str = "player:ready";
 }

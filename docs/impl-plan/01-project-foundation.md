@@ -63,9 +63,19 @@ oauth2 = "4"
 jsonwebtoken = "9"
 argon2 = "0.5"
 rand = "0.8"
+rand_chacha = "0.3"          # ChaCha20 RNG for secure session tokens
+rand_core = "0.6"
+
+# ID Generation
+nanoid = "0.4"               # Prefixed public IDs (usr_xxx, gam_xxx)
+
+# API Documentation
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
 
 # Utilities
-uuid = { version = "1", features = ["v4", "v7", "serde"] }
+base64-url = "3"             # URL-safe base64 for session tokens
+once_cell = "1"              # Lazy static for thread-safe RNG
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 anyhow = "1"
@@ -93,6 +103,8 @@ crates/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
+│       ├── id.rs           # Prefixed nanoid generation (usr_, gam_, etc.)
+│       ├── session.rs      # ChaCha20-based session token generation
 │       ├── game/           # Game rules, scoring
 │       │   ├── mod.rs
 │       │   ├── scoring.rs
@@ -358,6 +370,27 @@ cargo sqlx prepare --workspace
 ```
 
 This creates `.sqlx/` directory with cached query plans.
+
+### ID Strategy: Prefixed Nanoids
+
+All entities use **prefixed nanoid** identifiers instead of UUIDs:
+
+| Entity | Prefix | Example | Length |
+|--------|--------|---------|--------|
+| User | `usr_` | `usr_V1StGXR8_Z5j` | 16 |
+| Game | `gam_` | `gam_FybH2oF9Xaw8` | 16 |
+| Session | `ses_` | `ses_Uakgb_J5m9g-...` | 47 |
+| Round | `rnd_` | `rnd_Q3kT7bN2mPxW` | 16 |
+| Guess | `gss_` | `gss_L9vR4cD8sHjK` | 16 |
+| OAuth | `oau_` | `oau_M2nP6fG1tYqZ` | 16 |
+
+**Benefits:**
+- Human-readable prefixes identify entity type at a glance
+- URL-safe characters (no encoding needed)
+- ~71 bits entropy for entities, 256 bits for sessions
+- Smaller storage footprint than UUIDs
+
+**Session tokens** use ChaCha20 RNG via `rand_chacha` for cryptographic security.
 
 ## Next Phase
 

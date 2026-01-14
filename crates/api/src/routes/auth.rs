@@ -1,13 +1,12 @@
 //! Authentication routes
 
-use axum::routing::get;
 use axum::Router;
+use axum::routing::get;
 
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/me", get(get_me))
+    Router::new().route("/me", get(get_me))
     // TODO: Add OAuth routes in Phase 3
 }
 

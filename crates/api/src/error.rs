@@ -1,12 +1,13 @@
 //! API error handling
 
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde_json::json;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum ApiError {
     #[error("Not found: {0}")]
     NotFound(String),
@@ -33,10 +34,7 @@ impl IntoResponse for ApiError {
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             ApiError::Internal(err) => {
                 tracing::error!("Internal error: {:?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error".to_string(),
-                )
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
             }
         };
 

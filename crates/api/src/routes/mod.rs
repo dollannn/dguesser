@@ -1,7 +1,7 @@
 //! API routes
 
-use axum::routing::get;
 use axum::Router;
+use axum::routing::get;
 
 use crate::state::AppState;
 

@@ -16,6 +16,7 @@ dguesser-auth = { path = "../auth" }
 dguesser-protocol = { path = "../protocol" }
 
 axum.workspace = true
+sqlx.workspace = true
 tokio.workspace = true
 tower.workspace = true
 tower-http.workspace = true

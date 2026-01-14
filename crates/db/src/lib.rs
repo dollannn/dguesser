@@ -8,4 +8,8 @@ pub mod pool;
 pub mod sessions;
 pub mod users;
 
-pub use pool::{create_pool, DbPool};
+pub use games::{Game, GameMode, GamePlayer, GameStatus, Guess, Round};
+pub use oauth::OAuthAccount;
+pub use pool::{DbPool, create_pool};
+pub use sessions::Session;
+pub use users::{User, UserKind};

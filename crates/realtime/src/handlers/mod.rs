@@ -1,7 +1,7 @@
 //! Socket.IO event handlers
 
-use socketioxide::extract::SocketRef;
 use socketioxide::SocketIo;
+use socketioxide::extract::SocketRef;
 
 pub mod game;
 pub mod room;

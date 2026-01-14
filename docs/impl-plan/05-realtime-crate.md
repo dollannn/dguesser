@@ -12,6 +12,7 @@
 - Create actor-per-game model for state management
 - Handle disconnects/reconnects
 - Integrate with Redis for pub/sub
+- **Use prefixed nanoid IDs throughout** (`usr_`, `gam_`, etc.)
 
 ## Deliverables
 
@@ -88,7 +89,6 @@ async fn main() -> anyhow::Result<()> {
 ```rust
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc, RwLock};
-use uuid::Uuid;
 
 use crate::actors::GameActor;
 use crate::config::Config;
@@ -102,18 +102,18 @@ struct AppStateInner {
     pub db: db::DbPool,
     pub redis: redis::Client,
     pub config: Config,
-    // Active game actors
-    pub games: RwLock<HashMap<Uuid, GameHandle>>,
-    // Socket ID to User ID mapping
-    pub socket_users: RwLock<HashMap<String, Uuid>>,
+    // Active game actors (keyed by game_id: gam_xxxxxxxxxxxx)
+    pub games: RwLock<HashMap<String, GameHandle>>,
+    // Socket ID to User ID mapping (user_id: usr_xxxxxxxxxxxx)
+    pub socket_users: RwLock<HashMap<String, String>>,
     // User ID to Socket ID mapping (for reconnects)
-    pub user_sockets: RwLock<HashMap<Uuid, String>>,
+    pub user_sockets: RwLock<HashMap<String, String>>,
 }
 
 /// Handle to communicate with a game actor
 #[derive(Clone)]
 pub struct GameHandle {
-    pub game_id: Uuid,
+    pub game_id: String,  // gam_xxxxxxxxxxxx
     pub tx: mpsc::Sender<GameCommand>,
 }
 
@@ -121,26 +121,26 @@ pub struct GameHandle {
 #[derive(Debug)]
 pub enum GameCommand {
     Join {
-        user_id: Uuid,
+        user_id: String,     // usr_xxxxxxxxxxxx
         socket_id: String,
         respond: oneshot::Sender<Result<(), String>>,
     },
     Leave {
-        user_id: Uuid,
+        user_id: String,
     },
     Start {
-        user_id: Uuid,
+        user_id: String,
         respond: oneshot::Sender<Result<(), String>>,
     },
     Guess {
-        user_id: Uuid,
+        user_id: String,
         lat: f64,
         lng: f64,
         time_ms: Option<u32>,
         respond: oneshot::Sender<Result<GuessResult, String>>,
     },
     Reconnect {
-        user_id: Uuid,
+        user_id: String,
         socket_id: String,
     },
     Tick,
@@ -178,58 +178,59 @@ impl AppState {
     }
 
     /// Register a socket connection for a user
-    pub async fn register_socket(&self, socket_id: &str, user_id: Uuid) {
+    pub async fn register_socket(&self, socket_id: &str, user_id: &str) {
         let mut socket_users = self.inner.socket_users.write().await;
         let mut user_sockets = self.inner.user_sockets.write().await;
         
-        socket_users.insert(socket_id.to_string(), user_id);
-        user_sockets.insert(user_id, socket_id.to_string());
+        socket_users.insert(socket_id.to_string(), user_id.to_string());
+        user_sockets.insert(user_id.to_string(), socket_id.to_string());
     }
 
     /// Unregister a socket connection
-    pub async fn unregister_socket(&self, socket_id: &str) -> Option<Uuid> {
+    pub async fn unregister_socket(&self, socket_id: &str) -> Option<String> {
         let mut socket_users = self.inner.socket_users.write().await;
         let mut user_sockets = self.inner.user_sockets.write().await;
         
         if let Some(user_id) = socket_users.remove(socket_id) {
             user_sockets.remove(&user_id);
-            Some(user_id)
+            Some(user_id)  // Returns usr_xxxxxxxxxxxx
         } else {
             None
         }
     }
 
     /// Get user ID for a socket
-    pub async fn get_user_for_socket(&self, socket_id: &str) -> Option<Uuid> {
-        self.inner.socket_users.read().await.get(socket_id).copied()
+    pub async fn get_user_for_socket(&self, socket_id: &str) -> Option<String> {
+        self.inner.socket_users.read().await.get(socket_id).cloned()
     }
 
     /// Get or create a game actor
-    pub async fn get_or_create_game(&self, game_id: Uuid) -> GameHandle {
+    pub async fn get_or_create_game(&self, game_id: &str) -> GameHandle {
         let mut games = self.inner.games.write().await;
         
-        if let Some(handle) = games.get(&game_id) {
+        if let Some(handle) = games.get(game_id) {
             return handle.clone();
         }
 
         // Create new game actor
         let (tx, rx) = mpsc::channel(100);
-        let handle = GameHandle { game_id, tx };
+        let handle = GameHandle { game_id: game_id.to_string(), tx };
         
         // Spawn actor
         let db = self.inner.db.clone();
+        let gid = game_id.to_string();
         tokio::spawn(async move {
-            let mut actor = GameActor::new(game_id, db, rx);
+            let mut actor = GameActor::new(&gid, db, rx);
             actor.run().await;
         });
 
-        games.insert(game_id, handle.clone());
+        games.insert(game_id.to_string(), handle.clone());
         handle
     }
 
     /// Remove a game actor (when game ends)
-    pub async fn remove_game(&self, game_id: Uuid) {
-        self.inner.games.write().await.remove(&game_id);
+    pub async fn remove_game(&self, game_id: &str) {
+        self.inner.games.write().await.remove(game_id);
     }
 }
 ```
@@ -301,7 +302,8 @@ pub struct AuthPayload {
 #[derive(Debug, Serialize)]
 pub struct AuthResponse {
     pub success: bool,
-    pub user_id: Option<uuid::Uuid>,
+    /// User ID (prefixed nanoid: usr_xxxxxxxxxxxx)
+    pub user_id: Option<String>,
     pub error: Option<String>,
 }
 
@@ -364,7 +366,8 @@ use protocol::socket::payloads::*;
 
 #[derive(Debug, Deserialize)]
 pub struct JoinPayload {
-    pub game_id: Uuid,
+    /// Game ID (prefixed nanoid: gam_xxxxxxxxxxxx)
+    pub game_id: String,
 }
 
 /// Handle player joining a game
@@ -375,7 +378,7 @@ pub async fn handle_join(
 ) {
     let socket_id = socket.id.to_string();
     
-    // Get authenticated user
+    // Get authenticated user (returns String: usr_xxxxxxxxxxxx)
     let user_id = match state.get_user_for_socket(&socket_id).await {
         Some(id) => id,
         None => {
@@ -385,7 +388,7 @@ pub async fn handle_join(
     };
 
     // Verify game exists and player can join
-    let game = match db::games::get_by_id(state.db(), payload.game_id).await {
+    let game = match db::games::get_by_id(state.db(), &payload.game_id).await {
         Ok(Some(g)) => g,
         Ok(None) => {
             emit_error(&socket, "GAME_NOT_FOUND", "Game not found");
@@ -402,13 +405,13 @@ pub async fn handle_join(
         return;
     }
 
-    // Get or create game actor
-    let handle = state.get_or_create_game(payload.game_id).await;
+    // Get or create game actor (game_id is String: gam_xxxxxxxxxxxx)
+    let handle = state.get_or_create_game(&payload.game_id).await;
 
     // Send join command to actor
     let (tx, rx) = oneshot::channel();
     if handle.tx.send(GameCommand::Join {
-        user_id,
+        user_id: user_id.clone(),
         socket_id: socket_id.clone(),
         respond: tx,
     }).await.is_err() {
@@ -419,7 +422,7 @@ pub async fn handle_join(
     match rx.await {
         Ok(Ok(())) => {
             // Join socket.io room
-            socket.join(payload.game_id.to_string()).ok();
+            socket.join(payload.game_id.clone()).ok();
             
             // Emit success
             socket.emit("game:joined", &serde_json::json!({
@@ -501,7 +504,8 @@ pub async fn handle_start(
 
 #[derive(Debug, Deserialize)]
 pub struct GuessPayload {
-    pub game_id: Uuid,
+    /// Game ID (prefixed nanoid: gam_xxxxxxxxxxxx)
+    pub game_id: String,
     pub lat: f64,
     pub lng: f64,
     pub time_taken_ms: Option<u32>,
@@ -603,10 +607,10 @@ use core::geo::distance::haversine_distance;
 
 /// In-memory game state
 struct GameState {
-    game_id: Uuid,
+    game_id: String,  // gam_xxxxxxxxxxxx
     status: GameStatus,
     settings: core::game::rules::GameSettings,
-    players: HashMap<Uuid, PlayerState>,
+    players: HashMap<String, PlayerState>,  // Keyed by usr_xxxxxxxxxxxx
     current_round: Option<RoundState>,
     round_number: u8,
     total_rounds: u8,
@@ -622,7 +626,7 @@ enum GameStatus {
 }
 
 struct PlayerState {
-    user_id: Uuid,
+    user_id: String,  // usr_xxxxxxxxxxxx
     socket_id: Option<String>,
     display_name: String,
     is_host: bool,
@@ -632,13 +636,13 @@ struct PlayerState {
 }
 
 struct RoundState {
-    round_id: Uuid,
+    round_id: String,  // rnd_xxxxxxxxxxxx
     round_number: u8,
     location_lat: f64,
     location_lng: f64,
     started_at: std::time::Instant,
     time_limit_ms: Option<u32>,
-    guesses: HashMap<Uuid, RoundGuess>,
+    guesses: HashMap<String, RoundGuess>,  // Keyed by usr_xxxxxxxxxxxx
 }
 
 struct RoundGuess {
@@ -649,7 +653,7 @@ struct RoundGuess {
 }
 
 pub struct GameActor {
-    game_id: Uuid,
+    game_id: String,  // gam_xxxxxxxxxxxx
     db: db::DbPool,
     rx: mpsc::Receiver<GameCommand>,
     state: Option<GameState>,
@@ -658,12 +662,12 @@ pub struct GameActor {
 
 impl GameActor {
     pub fn new(
-        game_id: Uuid,
+        game_id: &str,  // gam_xxxxxxxxxxxx
         db: db::DbPool,
         rx: mpsc::Receiver<GameCommand>,
     ) -> Self {
         Self {
-            game_id,
+            game_id: game_id.to_string(),
             db,
             rx,
             state: None,
@@ -758,10 +762,10 @@ impl GameActor {
         Ok(())
     }
 
-    async fn handle_join(&mut self, user_id: Uuid, socket_id: String) -> Result<(), String> {
+    async fn handle_join(&mut self, user_id: String, socket_id: String) -> Result<(), String> {
         let state = self.state.as_mut().ok_or("Game not initialized")?;
 
-        // Check if player exists or can join
+        // Check if player exists or can join (user_id is usr_xxxxxxxxxxxx)
         if let Some(player) = state.players.get_mut(&user_id) {
             // Existing player reconnecting
             player.socket_id = Some(socket_id);
@@ -799,7 +803,7 @@ impl GameActor {
         }
     }
 
-    async fn handle_leave(&mut self, user_id: Uuid) {
+    async fn handle_leave(&mut self, user_id: String) {
         let state = match self.state.as_mut() {
             Some(s) => s,
             None => return,
@@ -815,7 +819,7 @@ impl GameActor {
         }
     }
 
-    async fn handle_start(&mut self, user_id: Uuid) -> Result<(), String> {
+    async fn handle_start(&mut self, user_id: String) -> Result<(), String> {
         let state = self.state.as_mut().ok_or("Game not initialized")?;
 
         // Verify host
@@ -845,7 +849,7 @@ impl GameActor {
 
     async fn handle_guess(
         &mut self,
-        user_id: Uuid,
+        user_id: String,  // usr_xxxxxxxxxxxx
         lat: f64,
         lng: f64,
         time_ms: Option<u32>,
@@ -926,7 +930,7 @@ impl GameActor {
         Ok(GuessResult { distance, score })
     }
 
-    async fn handle_reconnect(&mut self, user_id: Uuid, socket_id: String) {
+    async fn handle_reconnect(&mut self, user_id: String, socket_id: String) {
         if let Some(state) = self.state.as_mut() {
             if let Some(player) = state.players.get_mut(&user_id) {
                 player.socket_id = Some(socket_id);
@@ -1076,12 +1080,13 @@ impl GameActor {
     }
 
     // Broadcast helpers (would use socketioxide's io.to(room).emit())
-    async fn broadcast_player_joined(&self, _user_id: Uuid) {
+    async fn broadcast_player_joined(&self, _user_id: &str) {
         // self.io.to(room).emit("player:joined", payload)
+        // user_id is usr_xxxxxxxxxxxx
     }
 
-    async fn broadcast_player_left(&self, _user_id: Uuid) {}
-    async fn broadcast_player_guessed(&self, _user_id: Uuid) {}
+    async fn broadcast_player_left(&self, _user_id: &str) {}
+    async fn broadcast_player_guessed(&self, _user_id: &str) {}
     async fn broadcast_round_start(&self) {}
     async fn broadcast_round_end(&self) {}
     async fn broadcast_game_end(&self) {}
@@ -1134,6 +1139,20 @@ fn generate_random_location() -> (f64, f64) {
 - [ ] Disconnects handled gracefully
 - [ ] Round timing works correctly
 - [ ] Final scores calculated correctly
+- [ ] **All IDs use prefixed nanoid format** (usr_, gam_, rnd_, etc.)
+
+## Technical Notes
+
+### ID Format Reference
+
+All entity IDs in socket events use prefixed nanoid format:
+
+| Entity | Format | Example |
+|--------|--------|---------|
+| User ID | `usr_xxxxxxxxxxxx` | `usr_V1StGXR8_Z5j` |
+| Game ID | `gam_xxxxxxxxxxxx` | `gam_FybH2oF9Xaw8` |
+| Round ID | `rnd_xxxxxxxxxxxx` | `rnd_Q3kT7bN2mPxW` |
+| Session | `ses_xxx...(43)` | `ses_Uakgb_J5m9g-...` |
 
 ## Next Phase
 

@@ -17,27 +17,26 @@
 
 ### 3.1 Session Management
 
+Session tokens use **ChaCha20 RNG** for cryptographic security, with the `ses_` prefix for identification.
+
+**Session Token Format:**
+- Prefix: `ses_`
+- Payload: 43 chars base64url (256 bits from ChaCha20)
+- Total length: 47 characters
+- Example: `ses_Uakgb_J5m9g-0fTLYtoS0nP...`
+
+**Note:** Session token generation is implemented in `crates/core/src/session.rs` (see Phase 2). The auth crate uses this via:
+
+```rust
+use dguesser_core::generate_session_token;
+
+// Generate a new session token
+let session_id = generate_session_token();
+// Returns: "ses_Uakgb_J5m9g-0fTLYtoS0nP..."
+```
+
 **crates/auth/src/session.rs:**
 ```rust
-use rand::Rng;
-use sha2::{Sha256, Digest};
-
-const SESSION_ID_LENGTH: usize = 64;
-
-/// Generate a cryptographically secure session ID
-pub fn generate_session_id() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..SESSION_ID_LENGTH).map(|_| rng.gen()).collect();
-    hex::encode(bytes)
-}
-
-/// Hash a session ID for comparison (if storing hashed)
-pub fn hash_session_id(session_id: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(session_id.as_bytes());
-    hex::encode(hasher.finalize())
-}
-
 /// Session configuration
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
@@ -437,15 +436,14 @@ use axum::{
     extract::{FromRequestParts, State},
     http::{header::COOKIE, request::Parts, StatusCode},
 };
-use uuid::Uuid;
 
 use crate::session::SessionConfig;
 
 /// Authenticated user extracted from session
 #[derive(Debug, Clone)]
 pub struct AuthUser {
-    pub user_id: Uuid,
-    pub session_id: String,
+    pub user_id: String,     // usr_xxxxxxxxxxxx (prefixed nanoid)
+    pub session_id: String,  // ses_xxxxxxxxxxx... (ChaCha20-based token)
     pub is_guest: bool,
 }
 
@@ -542,17 +540,17 @@ where
 
 **crates/auth/src/service.rs:**
 ```rust
-use uuid::Uuid;
 use crate::oauth::{OAuthIdentity, OAuthProvider, OAuthState};
-use crate::session::{generate_session_id, SessionConfig};
+use crate::session::SessionConfig;
+use dguesser_core::generate_session_token;  // ChaCha20-based token generation
 
 /// Result of authentication flow
 #[derive(Debug)]
 pub struct AuthResult {
-    pub user_id: Uuid,
-    pub session_id: String,
+    pub user_id: String,      // usr_xxxxxxxxxxxx
+    pub session_id: String,   // ses_xxxxxxxxxxx... (47 chars)
     pub is_new_user: bool,
-    pub merged_from_guest: Option<Uuid>,
+    pub merged_from_guest: Option<String>,
 }
 
 /// Handle OAuth callback and create/link user
@@ -572,7 +570,9 @@ pub async fn handle_oauth_callback(
     )
     .await?;
 
-    let (user_id, is_new_user, merged_from) = if let Some(oauth_account) = existing_oauth {
+    // user_id is now String (usr_xxxxxxxxxxxx)
+    let (user_id, is_new_user, merged_from): (String, bool, Option<String>) = 
+        if let Some(oauth_account) = existing_oauth {
         // Existing user with this OAuth - just log them in
         (oauth_account.user_id, false, None)
     } else {
@@ -657,12 +657,11 @@ pub async fn handle_oauth_callback(
         let _ = db::sessions::revoke(pool, old_sid).await;
     }
 
-    // Create new session
-    let session_id = generate_session_id();
+    // Create new session using ChaCha20-based token generation
+    let session_id = generate_session_token();  // ses_xxxxxxxxxxx...
     db::sessions::create(
         pool,
-        &session_id,
-        user_id,
+        &user_id,  // Now String (usr_xxx)
         session_config.ttl_hours,
         ip,
         user_agent,
@@ -687,15 +686,14 @@ pub async fn create_guest_session(
     // Generate a friendly guest name
     let display_name = generate_guest_name();
     
-    // Create guest user
+    // Create guest user (ID generated in db layer using dguesser_core::user_id())
     let user = db::users::create_guest(pool, &display_name).await?;
 
-    // Create session
-    let session_id = generate_session_id();
-    db::sessions::create(
+    // Create session using ChaCha20-based token generation
+    // Session is created in db layer which calls generate_session_token()
+    let session = db::sessions::create(
         pool,
-        &session_id,
-        user.id,
+        &user.id,  // usr_xxxxxxxxxxxx
         session_config.ttl_hours,
         ip,
         user_agent,
@@ -703,8 +701,8 @@ pub async fn create_guest_session(
     .await?;
 
     Ok(AuthResult {
-        user_id: user.id,
-        session_id,
+        user_id: user.id,        // usr_xxxxxxxxxxxx
+        session_id: session.id,  // ses_xxxxxxxxxxx...
         is_new_user: true,
         merged_from_guest: None,
     })
@@ -747,13 +745,12 @@ pub enum AuthError {
 ```rust
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 const SESSION_PREFIX: &str = "session:";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedisSession {
-    pub user_id: Uuid,
+    pub user_id: String,  // usr_xxxxxxxxxxxx
     pub is_guest: bool,
     pub created_at: i64,
 }
@@ -867,6 +864,27 @@ impl RedisSessionStore {
 - [ ] OAuth redirect URIs strictly validated
 - [ ] Cookies have appropriate SameSite setting
 - [ ] No tokens logged or exposed in errors
+- [ ] Session tokens generated with ChaCha20 (256-bit entropy)
+
+## Technical Notes
+
+### ID Format Reference
+
+| Entity | Format | Example |
+|--------|--------|---------|
+| User ID | `usr_xxxxxxxxxxxx` | `usr_V1StGXR8_Z5j` |
+| Session Token | `ses_xxx...(43)` | `ses_Uakgb_J5m9g-0fTL...` |
+| OAuth Account | `oau_xxxxxxxxxxxx` | `oau_M2nP6fG1tYqZ` |
+
+### Session Token Security
+
+Session tokens are generated using **ChaCha20 RNG** from the `rand_chacha` crate:
+- 256 bits of cryptographic randomness
+- Thread-safe via `Mutex<ChaCha20Rng>`
+- Seeded from system entropy (`from_entropy()`)
+- Base64url encoded for URL safety
+
+The implementation lives in `crates/core/src/session.rs` and is shared across all crates.
 
 ## Next Phase
 

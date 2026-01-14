@@ -10,19 +10,17 @@ use crate::config::Config;
 
 /// Application state for the realtime server
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct AppState {
     pub db: DbPool,
-    #[allow(dead_code)]
     pub config: Config,
 }
 
+#[allow(dead_code)]
 impl AppState {
     pub async fn new(config: &Config) -> Result<Self> {
         let db = dguesser_db::create_pool(&config.database_url).await?;
 
-        Ok(Self {
-            db,
-            config: config.clone(),
-        })
+        Ok(Self { db, config: config.clone() })
     }
 }

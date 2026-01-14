@@ -40,12 +40,7 @@ async fn main() -> anyhow::Result<()> {
     // Build router
     let app = Router::new()
         .layer(socket_layer)
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .layer(TraceLayer::new_for_http());
 
     // Start server

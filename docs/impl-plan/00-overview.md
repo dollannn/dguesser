@@ -15,6 +15,15 @@ A GeoGuessr clone featuring real-time multiplayer gameplay, guest support, and O
 | Cache/Pub-Sub | Redis |
 | Hosting | Railway (containers) |
 
+### Key Libraries
+
+| Purpose | Library | Notes |
+|---------|---------|-------|
+| ID Generation | `nanoid` | Prefixed public IDs (`usr_`, `gam_`, etc.) |
+| Session Tokens | `rand_chacha` | ChaCha20 CSPRNG for 256-bit tokens |
+| API Documentation | `utoipa` | OpenAPI/Swagger at `/docs` |
+| Base64 Encoding | `base64-url` | URL-safe encoding for session tokens |
+
 ## Architecture Overview
 
 ```
@@ -115,7 +124,47 @@ dguesser/
 - Cheat-resistant architecture
 - API handles everything else (auth, history, profiles)
 
-### 4. Redis for Hot State, Postgres for Truth
+### 4. Prefixed Nanoid IDs (Not UUIDs)
+
+**Decision:** Use nanoid with prefixes for all entity IDs (`usr_`, `gam_`, `ses_`, etc.)
+
+**Rationale:**
+- Human-readable prefixes identify entity type at a glance
+- URL-safe characters (no encoding needed in routes)
+- Smaller storage footprint than UUIDs (16 chars vs 36)
+- ~71 bits entropy for entities, 256 bits for sessions
+- Consistent ID format across entire stack
+
+| Entity | Format | Example |
+|--------|--------|---------|
+| User | `usr_xxxxxxxxxxxx` | `usr_V1StGXR8_Z5j` |
+| Game | `gam_xxxxxxxxxxxx` | `gam_FybH2oF9Xaw8` |
+| Session | `ses_xxx...(43)` | `ses_Uakgb_J5m9g-...` |
+| Round | `rnd_xxxxxxxxxxxx` | `rnd_Q3kT7bN2mPxW` |
+| Guess | `gss_xxxxxxxxxxxx` | `gss_L9vR4cD8sHjK` |
+| OAuth | `oau_xxxxxxxxxxxx` | `oau_M2nP6fG1tYqZ` |
+
+### 5. ChaCha20 for Session Tokens
+
+**Decision:** Use `rand_chacha` (ChaCha20 RNG) for cryptographically secure session tokens.
+
+**Rationale:**
+- 256 bits of entropy (extremely secure)
+- ChaCha20 is a well-audited CSPRNG
+- Thread-safe implementation via `Mutex<ChaCha20Rng>`
+- Prefixed with `ses_` for consistency
+
+### 6. OpenAPI Documentation with utoipa
+
+**Decision:** Generate OpenAPI docs at compile-time using `utoipa`.
+
+**Rationale:**
+- Type-safe documentation derived from code
+- Swagger UI available at `/docs`
+- No runtime overhead
+- Self-documenting API endpoints
+
+### 7. Redis for Hot State, Postgres for Truth
 
 **Decision:** 
 - Redis: Active game state, sessions, pub/sub, presence
@@ -126,7 +175,7 @@ dguesser/
 - Horizontal scaling via Redis coordination
 - Clear separation of concerns
 
-### 5. Railway for Hosting
+### 8. Railway for Hosting
 
 **Decision:** Deploy all services as containers on Railway.
 
