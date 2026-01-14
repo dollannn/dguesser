@@ -21,9 +21,11 @@ use tracing_subscriber::{
 mod actors;
 mod config;
 mod handlers;
+mod redis_state;
 mod state;
 
 use config::Config;
+use redis_state::RedisStateManager;
 use state::AppState;
 
 #[tokio::main]
@@ -46,14 +48,20 @@ async fn main() -> anyhow::Result<()> {
     let redis = redis::Client::open(config.redis_url.as_str())?;
     tracing::info!("Connected to Redis");
 
+    // Create Redis state manager
+    let redis_state = RedisStateManager::new(redis.clone());
+
     // Create app state
-    let state = AppState::new(db, redis.clone(), config.clone());
+    let state = AppState::new(db, redis.clone(), redis_state, config.clone());
 
     // Create Socket.IO layer with state
     let (socket_layer, io) = SocketIo::builder().with_state(state.clone()).build_layer();
 
     // Store IO instance in state for broadcasting
     state.set_io(io.clone()).await;
+
+    // Recover active games from Redis on startup
+    recover_active_games(&state).await;
 
     // Register socket handlers
     io.ns("/", handlers::on_connect);
@@ -110,6 +118,34 @@ fn init_logging(json_output: bool) {
 fn is_production() -> bool {
     std::env::var("RUST_ENV").map(|v| v == "production").unwrap_or(false)
         || std::env::var("RAILWAY_ENVIRONMENT").is_ok()
+}
+
+/// Recover active games from Redis on startup
+async fn recover_active_games(state: &AppState) {
+    let redis_state = state.redis_state();
+
+    match redis_state.get_active_game_ids().await {
+        Ok(game_ids) => {
+            if game_ids.is_empty() {
+                tracing::info!("No active games to recover from Redis");
+                return;
+            }
+
+            tracing::info!(count = game_ids.len(), "Recovering active games from Redis");
+
+            for game_id in game_ids {
+                // Pre-warm the game actor by getting or creating it
+                // The actor will load state from Redis if available
+                let _ = state.get_or_create_game(&game_id).await;
+                tracing::debug!(game_id = %game_id, "Recovered game actor");
+            }
+
+            tracing::info!("Game recovery complete");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to recover games from Redis");
+        }
+    }
 }
 
 /// Wait for shutdown signal

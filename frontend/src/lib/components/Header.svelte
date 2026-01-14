@@ -1,6 +1,7 @@
 <script lang="ts">
   import { user, isGuest, authStore } from '$lib/stores/auth';
   import { authApi } from '$lib/api/auth';
+  import ConnectionStatus from './ConnectionStatus.svelte';
 
   async function handleLogout() {
     await authStore.logout();
@@ -16,6 +17,8 @@
 
       <nav class="flex items-center gap-4">
         {#if $user}
+          <ConnectionStatus />
+          
           <a href="/play" class="text-gray-600 hover:text-gray-900">
             Play
           </a>

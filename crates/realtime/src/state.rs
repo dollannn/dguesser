@@ -10,6 +10,7 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 
 use crate::actors::GameActor;
 use crate::config::Config;
+use crate::redis_state::RedisStateManager;
 use dguesser_db::DbPool;
 
 /// Application state shared across all socket connections
@@ -21,6 +22,7 @@ pub struct AppState {
 struct AppStateInner {
     pub db: DbPool,
     pub redis: redis::Client,
+    pub redis_state: RedisStateManager,
     #[allow(dead_code)]
     pub config: Config,
     /// Socket.IO instance for broadcasting
@@ -40,6 +42,12 @@ pub struct GameHandle {
     pub game_id: String, // gam_xxxxxxxxxxxx
     pub tx: mpsc::Sender<GameCommand>,
 }
+
+/// Grace period for reconnection in seconds
+pub const RECONNECTION_GRACE_PERIOD_SECS: u64 = 30;
+
+/// Tick interval for game actors in seconds
+const TICK_INTERVAL_SECS: u64 = 1;
 
 /// Commands sent to game actors
 #[derive(Debug)]
@@ -80,11 +88,17 @@ pub struct GuessResult {
 }
 
 impl AppState {
-    pub fn new(db: DbPool, redis: redis::Client, config: Config) -> Self {
+    pub fn new(
+        db: DbPool,
+        redis: redis::Client,
+        redis_state: RedisStateManager,
+        config: Config,
+    ) -> Self {
         Self {
             inner: Arc::new(AppStateInner {
                 db,
                 redis,
+                redis_state,
                 config,
                 io: RwLock::new(None),
                 games: RwLock::new(HashMap::new()),
@@ -117,6 +131,11 @@ impl AppState {
     #[allow(dead_code)]
     pub fn redis(&self) -> &redis::Client {
         &self.inner.redis
+    }
+
+    /// Get the Redis state manager
+    pub fn redis_state(&self) -> &RedisStateManager {
+        &self.inner.redis_state
     }
 
     /// Register a socket connection for a user
@@ -173,13 +192,28 @@ impl AppState {
         let (tx, rx) = mpsc::channel(100);
         let handle = GameHandle { game_id: game_id.to_string(), tx };
 
-        // Spawn actor
+        // Spawn actor with Redis state manager
         let db = self.inner.db.clone();
         let gid = game_id.to_string();
         let io = self.inner.io.read().await.clone();
+        let redis_state = std::sync::Arc::new(RedisStateManager::new(self.inner.redis.clone()));
         tokio::spawn(async move {
-            let mut actor = GameActor::new(&gid, db, rx, io);
+            let mut actor = GameActor::new(&gid, db, rx, io).with_redis(redis_state);
             actor.run().await;
+        });
+
+        // Spawn tick timer for the game actor
+        let tick_tx = handle.tx.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(TICK_INTERVAL_SECS));
+            loop {
+                interval.tick().await;
+                // If send fails, the game actor has shut down
+                if tick_tx.send(GameCommand::Tick).await.is_err() {
+                    break;
+                }
+            }
         });
 
         games.insert(game_id.to_string(), handle.clone());

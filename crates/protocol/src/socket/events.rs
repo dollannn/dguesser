@@ -10,6 +10,12 @@ pub mod server {
     pub const PLAYER_GUESSED: &str = "player:guessed";
     pub const GAME_END: &str = "game:end";
     pub const ERROR: &str = "error";
+    /// Player disconnected (grace period started)
+    pub const PLAYER_DISCONNECTED: &str = "player:disconnected";
+    /// Player reconnected within grace period
+    pub const PLAYER_RECONNECTED: &str = "player:reconnected";
+    /// Player timed out (grace period expired)
+    pub const PLAYER_TIMEOUT: &str = "player:timeout";
 }
 
 /// Socket.IO event names (client -> server)

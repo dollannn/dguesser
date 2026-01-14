@@ -150,6 +150,16 @@ pub struct PlayerInfo {
     pub score: u32,
     /// Whether the player has submitted a guess this round
     pub has_guessed: bool,
+    /// Whether the player is currently connected
+    #[serde(default = "default_connected")]
+    pub connected: bool,
+    /// Unix timestamp (ms) when player disconnected (if disconnected)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disconnected_at: Option<i64>,
+}
+
+fn default_connected() -> bool {
+    true
 }
 
 /// Full game state (sent when player joins)
@@ -184,6 +194,38 @@ pub struct PlayerJoinedPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PlayerLeftPayload {
     /// User ID of the player who left (e.g., usr_V1StGXR8_Z5j)
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub user_id: String,
+    /// Display name
+    pub display_name: String,
+}
+
+/// Player disconnected payload (grace period started)
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PlayerDisconnectedPayload {
+    /// User ID of the player who disconnected (e.g., usr_V1StGXR8_Z5j)
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub user_id: String,
+    /// Display name
+    pub display_name: String,
+    /// Grace period in milliseconds
+    pub grace_period_ms: u32,
+}
+
+/// Player reconnected payload (within grace period)
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PlayerReconnectedPayload {
+    /// User ID of the player who reconnected (e.g., usr_V1StGXR8_Z5j)
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub user_id: String,
+    /// Display name
+    pub display_name: String,
+}
+
+/// Player timeout payload (grace period expired)
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PlayerTimeoutPayload {
+    /// User ID of the player who timed out (e.g., usr_V1StGXR8_Z5j)
     #[schema(example = "usr_V1StGXR8_Z5j")]
     pub user_id: String,
     /// Display name

@@ -8,14 +8,18 @@ use dguesser_core::geo::distance::haversine_distance;
 use dguesser_db::DbPool;
 use dguesser_protocol::socket::events;
 use dguesser_protocol::socket::payloads::{
-    FinalStanding, GameEndPayload, GameStatePayload, PlayerGuessedPayload, PlayerInfo,
-    PlayerJoinedPayload, PlayerLeftPayload, RoundEndPayload, RoundLocation, RoundResult,
+    FinalStanding, GameEndPayload, GameStatePayload, PlayerDisconnectedPayload,
+    PlayerGuessedPayload, PlayerInfo, PlayerJoinedPayload, PlayerLeftPayload,
+    PlayerReconnectedPayload, PlayerTimeoutPayload, RoundEndPayload, RoundLocation, RoundResult,
     RoundStartPayload,
 };
 use socketioxide::SocketIo;
 use tokio::sync::mpsc;
 
-use crate::state::{GameCommand, GuessResult};
+use crate::redis_state::{
+    CachedGameState, CachedGuess, CachedPlayerState, CachedRoundState, RedisStateManager,
+};
+use crate::state::{GameCommand, GuessResult, RECONNECTION_GRACE_PERIOD_SECS};
 
 /// Game status
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -79,7 +83,13 @@ pub struct GameActor {
     rx: mpsc::Receiver<GameCommand>,
     state: Option<GameState>,
     io: Option<SocketIo>,
+    redis_state: Option<std::sync::Arc<RedisStateManager>>,
+    /// Track when we last saved to Redis (for debouncing)
+    last_redis_save: Option<std::time::Instant>,
 }
+
+/// Minimum interval between Redis saves (debouncing)
+const REDIS_SAVE_DEBOUNCE_SECS: u64 = 2;
 
 impl GameActor {
     pub fn new(
@@ -88,7 +98,20 @@ impl GameActor {
         rx: mpsc::Receiver<GameCommand>,
         io: Option<SocketIo>,
     ) -> Self {
-        Self { game_id: game_id.to_string(), db, rx, state: None, io }
+        Self {
+            game_id: game_id.to_string(),
+            db,
+            rx,
+            state: None,
+            io,
+            redis_state: None,
+            last_redis_save: None,
+        }
+    }
+
+    pub fn with_redis(mut self, redis_state: std::sync::Arc<RedisStateManager>) -> Self {
+        self.redis_state = Some(redis_state);
+        self
     }
 
     /// Main run loop - processes commands from the channel
@@ -134,8 +157,23 @@ impl GameActor {
         tracing::info!("Game actor {} shutting down", self.game_id);
     }
 
-    /// Load game state from database
+    /// Load game state from Redis (if available) or database
     async fn load_state(&mut self) -> Result<(), String> {
+        // Try to load from Redis first
+        if let Some(redis) = &self.redis_state
+            && let Ok(Some(cached)) = redis.load_game_state(&self.game_id).await
+        {
+            tracing::info!(game_id = %self.game_id, "Loaded game state from Redis cache");
+            self.state = Some(Self::from_cached_state(cached));
+            return Ok(());
+        }
+
+        // Fall back to loading from database
+        self.load_state_from_db().await
+    }
+
+    /// Load game state from database
+    async fn load_state_from_db(&mut self) -> Result<(), String> {
         let game = dguesser_db::games::get_game_by_id(&self.db, &self.game_id)
             .await
             .map_err(|e| e.to_string())?
@@ -194,6 +232,207 @@ impl GameActor {
         Ok(())
     }
 
+    /// Convert cached state to GameState
+    fn from_cached_state(cached: CachedGameState) -> GameState {
+        let status = match cached.status.as_str() {
+            "lobby" => GameStatus::Lobby,
+            "active" => GameStatus::Active,
+            "round_in_progress" => GameStatus::RoundInProgress,
+            "round_ending" => GameStatus::RoundEnding,
+            "finished" => GameStatus::Finished,
+            _ => GameStatus::Lobby,
+        };
+
+        let settings: GameSettings =
+            serde_json::from_str(&cached.settings_json).unwrap_or_default();
+
+        let players: HashMap<String, PlayerState> = cached
+            .players
+            .into_iter()
+            .map(|(user_id, p)| {
+                let disconnect_time = p.disconnect_time_ms.map(|ts| {
+                    // Convert unix timestamp to Instant (approximate)
+                    let now = chrono::Utc::now().timestamp_millis();
+                    let elapsed_ms = (now - ts).max(0) as u64;
+                    std::time::Instant::now() - std::time::Duration::from_millis(elapsed_ms)
+                });
+
+                (
+                    user_id,
+                    PlayerState {
+                        user_id: p.user_id,
+                        socket_id: None, // Sockets need to reconnect
+                        display_name: p.display_name,
+                        avatar_url: p.avatar_url,
+                        is_host: p.is_host,
+                        total_score: p.total_score,
+                        connected: false, // All players disconnected on restart
+                        disconnect_time,
+                    },
+                )
+            })
+            .collect();
+
+        let current_round = cached.current_round.map(|r| {
+            let guesses: HashMap<String, RoundGuess> = r
+                .guesses
+                .into_iter()
+                .map(|(uid, g)| {
+                    (
+                        uid,
+                        RoundGuess { lat: g.lat, lng: g.lng, distance: g.distance, score: g.score },
+                    )
+                })
+                .collect();
+
+            // Calculate started_at Instant from timestamp
+            let now = chrono::Utc::now().timestamp_millis();
+            let elapsed_ms = (now - r.started_at_ms).max(0) as u64;
+            let started_at =
+                std::time::Instant::now() - std::time::Duration::from_millis(elapsed_ms);
+
+            RoundState {
+                round_id: r.round_id,
+                round_number: r.round_number,
+                location_lat: r.location_lat,
+                location_lng: r.location_lng,
+                panorama_id: r.panorama_id,
+                started_at,
+                started_at_ts: r.started_at_ms,
+                time_limit_ms: r.time_limit_ms,
+                guesses,
+            }
+        });
+
+        GameState {
+            game_id: cached.game_id,
+            status,
+            settings,
+            players,
+            current_round,
+            round_number: cached.round_number,
+            total_rounds: cached.total_rounds,
+        }
+    }
+
+    /// Convert GameState to cached state for Redis
+    fn to_cached_state(&self) -> Option<CachedGameState> {
+        let state = self.state.as_ref()?;
+
+        let status = match state.status {
+            GameStatus::Lobby => "lobby",
+            GameStatus::Active => "active",
+            GameStatus::RoundInProgress => "round_in_progress",
+            GameStatus::RoundEnding => "round_ending",
+            GameStatus::Finished => "finished",
+        };
+
+        let players: HashMap<String, CachedPlayerState> = state
+            .players
+            .iter()
+            .map(|(uid, p)| {
+                let disconnect_time_ms = p.disconnect_time.map(|t| {
+                    let elapsed = t.elapsed();
+                    chrono::Utc::now().timestamp_millis() - elapsed.as_millis() as i64
+                });
+
+                (
+                    uid.clone(),
+                    CachedPlayerState {
+                        user_id: p.user_id.clone(),
+                        display_name: p.display_name.clone(),
+                        avatar_url: p.avatar_url.clone(),
+                        is_host: p.is_host,
+                        total_score: p.total_score,
+                        connected: p.connected,
+                        disconnect_time_ms,
+                    },
+                )
+            })
+            .collect();
+
+        let current_round = state.current_round.as_ref().map(|r| {
+            let guesses: HashMap<String, CachedGuess> = r
+                .guesses
+                .iter()
+                .map(|(uid, g)| {
+                    (
+                        uid.clone(),
+                        CachedGuess {
+                            lat: g.lat,
+                            lng: g.lng,
+                            distance: g.distance,
+                            score: g.score,
+                        },
+                    )
+                })
+                .collect();
+
+            CachedRoundState {
+                round_id: r.round_id.clone(),
+                round_number: r.round_number,
+                location_lat: r.location_lat,
+                location_lng: r.location_lng,
+                panorama_id: r.panorama_id.clone(),
+                started_at_ms: r.started_at_ts,
+                time_limit_ms: r.time_limit_ms,
+                guesses,
+            }
+        });
+
+        Some(CachedGameState {
+            game_id: state.game_id.clone(),
+            status: status.to_string(),
+            round_number: state.round_number,
+            total_rounds: state.total_rounds,
+            players,
+            current_round,
+            settings_json: serde_json::to_string(&state.settings).unwrap_or_default(),
+        })
+    }
+
+    /// Save state to Redis (debounced)
+    async fn save_state_to_redis(&mut self) {
+        let Some(redis) = &self.redis_state else { return };
+
+        // Debounce saves
+        if let Some(last_save) = self.last_redis_save
+            && last_save.elapsed().as_secs() < REDIS_SAVE_DEBOUNCE_SECS
+        {
+            return;
+        }
+
+        if let Some(cached) = self.to_cached_state() {
+            if let Err(e) = redis.save_game_state(&cached).await {
+                tracing::warn!(error = %e, game_id = %self.game_id, "Failed to save game state to Redis");
+            } else {
+                self.last_redis_save = Some(std::time::Instant::now());
+            }
+        }
+    }
+
+    /// Force save state to Redis (bypasses debounce)
+    async fn force_save_state_to_redis(&mut self) {
+        let Some(redis) = &self.redis_state else { return };
+
+        if let Some(cached) = self.to_cached_state() {
+            if let Err(e) = redis.save_game_state(&cached).await {
+                tracing::warn!(error = %e, game_id = %self.game_id, "Failed to save game state to Redis");
+            } else {
+                self.last_redis_save = Some(std::time::Instant::now());
+            }
+        }
+    }
+
+    /// Delete state from Redis (on game end)
+    async fn delete_state_from_redis(&self) {
+        let Some(redis) = &self.redis_state else { return };
+
+        if let Err(e) = redis.delete_game_state(&self.game_id).await {
+            tracing::warn!(error = %e, game_id = %self.game_id, "Failed to delete game state from Redis");
+        }
+    }
+
     /// Handle player joining
     async fn handle_join(&mut self, user_id: &str, socket_id: &str) -> Result<(), String> {
         let state = self.state.as_mut().ok_or("Game not initialized")?;
@@ -201,12 +440,22 @@ impl GameActor {
         // Check if player exists or can join
         if let Some(player) = state.players.get_mut(user_id) {
             // Existing player reconnecting
+            let was_disconnected = !player.connected;
+            let display_name = player.display_name.clone();
             player.socket_id = Some(socket_id.to_string());
             player.connected = true;
             player.disconnect_time = None;
 
             // Send current game state to reconnecting player
             self.send_game_state_to_socket(socket_id).await;
+
+            // Broadcast reconnection if player was disconnected
+            if was_disconnected {
+                self.broadcast_player_reconnected(user_id, &display_name).await;
+            }
+
+            // Save to Redis
+            self.save_state_to_redis().await;
 
             Ok(())
         } else if state.status == GameStatus::Lobby {
@@ -238,13 +487,16 @@ impl GameActor {
             self.broadcast_player_joined(user_id, &user.display_name, user.avatar_url.as_deref())
                 .await;
 
+            // Save to Redis
+            self.save_state_to_redis().await;
+
             Ok(())
         } else {
             Err("Cannot join game in progress".to_string())
         }
     }
 
-    /// Handle player leaving
+    /// Handle player leaving (disconnect)
     async fn handle_leave(&mut self, user_id: &str) {
         let state = match self.state.as_mut() {
             Some(s) => s,
@@ -257,8 +509,11 @@ impl GameActor {
             player.disconnect_time = Some(std::time::Instant::now());
             player.socket_id = None;
 
-            // Broadcast player left
-            self.broadcast_player_left(user_id, &display_name).await;
+            // Broadcast player disconnected (with grace period)
+            self.broadcast_player_disconnected(user_id, &display_name).await;
+
+            // Save to Redis
+            self.save_state_to_redis().await;
         }
     }
 
@@ -369,6 +624,9 @@ impl GameActor {
         // Broadcast that player guessed (without revealing location)
         self.broadcast_player_guessed(user_id, &display_name).await;
 
+        // Save to Redis
+        self.save_state_to_redis().await;
+
         if all_guessed {
             tracing::info!("All players guessed in game {}, ending round", self.game_id);
             self.end_current_round().await.ok();
@@ -379,22 +637,34 @@ impl GameActor {
 
     /// Handle player reconnecting
     async fn handle_reconnect(&mut self, user_id: &str, socket_id: &str) {
-        if let Some(state) = self.state.as_mut()
-            && let Some(player) = state.players.get_mut(user_id)
-        {
-            player.socket_id = Some(socket_id.to_string());
-            player.connected = true;
-            player.disconnect_time = None;
-        }
+        let display_name = if let Some(state) = self.state.as_mut() {
+            if let Some(player) = state.players.get_mut(user_id) {
+                let was_disconnected = !player.connected;
+                player.socket_id = Some(socket_id.to_string());
+                player.connected = true;
+                player.disconnect_time = None;
 
-        // Send current game state
+                if was_disconnected { Some(player.display_name.clone()) } else { None }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Send current game state to reconnecting player
         self.send_game_state_to_socket(socket_id).await;
+
+        // Broadcast reconnection to other players
+        if let Some(name) = display_name {
+            self.broadcast_player_reconnected(user_id, &name).await;
+        }
     }
 
-    /// Handle tick - check for timeouts
+    /// Handle tick - check for timeouts and grace period expiration
     async fn handle_tick(&mut self) {
         // Check for round timeout
-        let should_end = if let Some(state) = &self.state {
+        let should_end_round = if let Some(state) = &self.state {
             if state.status == GameStatus::RoundInProgress {
                 if let Some(round) = &state.current_round {
                     if let Some(limit) = round.time_limit_ms {
@@ -412,12 +682,51 @@ impl GameActor {
             false
         };
 
-        if should_end {
+        if should_end_round {
             self.end_current_round().await.ok();
         }
 
-        // TODO: Check for disconnected player cleanup
-        // Remove players disconnected for > 60 seconds in lobby
+        // Check for disconnected players whose grace period has expired
+        let grace_period = std::time::Duration::from_secs(RECONNECTION_GRACE_PERIOD_SECS);
+        let mut timed_out_players: Vec<(String, String)> = Vec::new();
+
+        if let Some(state) = &self.state {
+            for player in state.players.values() {
+                if !player.connected
+                    && let Some(disconnect_time) = player.disconnect_time
+                    && disconnect_time.elapsed() > grace_period
+                {
+                    timed_out_players.push((player.user_id.clone(), player.display_name.clone()));
+                }
+            }
+        }
+
+        // Handle timed out players
+        for (user_id, display_name) in timed_out_players {
+            self.handle_player_timeout(&user_id, &display_name).await;
+        }
+    }
+
+    /// Handle player timeout (grace period expired)
+    async fn handle_player_timeout(&mut self, user_id: &str, display_name: &str) {
+        let state = match self.state.as_mut() {
+            Some(s) => s,
+            None => return,
+        };
+
+        // In lobby: remove player entirely
+        // In game: keep player for scoring but mark as timed out
+        if state.status == GameStatus::Lobby {
+            // Remove from database
+            dguesser_db::games::remove_player(&self.db, &self.game_id, user_id).await.ok();
+            // Remove from state
+            state.players.remove(user_id);
+            // Broadcast player left (permanent removal)
+            self.broadcast_player_left(user_id, display_name).await;
+        } else {
+            // Keep player in game but broadcast timeout
+            self.broadcast_player_timeout(user_id, display_name).await;
+        }
     }
 
     /// Start the next round
@@ -474,6 +783,9 @@ impl GameActor {
 
         // Broadcast round start
         self.broadcast_round_start().await;
+
+        // Save to Redis
+        self.force_save_state_to_redis().await;
 
         Ok(())
     }
@@ -538,6 +850,9 @@ impl GameActor {
         // Broadcast game end
         self.broadcast_game_end().await;
 
+        // Delete from Redis (game is over)
+        self.delete_state_from_redis().await;
+
         Ok(())
     }
 
@@ -563,6 +878,12 @@ impl GameActor {
                     .as_ref()
                     .map(|r| r.guesses.contains_key(&p.user_id))
                     .unwrap_or(false),
+                connected: p.connected,
+                disconnected_at: p.disconnect_time.map(|t| {
+                    // Convert Instant to unix timestamp
+                    let elapsed = t.elapsed();
+                    chrono::Utc::now().timestamp_millis() - elapsed.as_millis() as i64
+                }),
             })
             .collect();
 
@@ -617,13 +938,15 @@ impl GameActor {
                 avatar_url: avatar_url.map(|s| s.to_string()),
                 score: 0,
                 has_guessed: false,
+                connected: true,
+                disconnected_at: None,
             },
         };
 
         io.to(self.game_id.clone()).emit(events::server::PLAYER_JOINED, &payload).ok();
     }
 
-    /// Broadcast player left
+    /// Broadcast player left (permanent removal)
     async fn broadcast_player_left(&self, user_id: &str, display_name: &str) {
         let Some(io) = &self.io else { return };
 
@@ -633,6 +956,43 @@ impl GameActor {
         };
 
         io.to(self.game_id.clone()).emit(events::server::PLAYER_LEFT, &payload).ok();
+    }
+
+    /// Broadcast player disconnected (grace period started)
+    async fn broadcast_player_disconnected(&self, user_id: &str, display_name: &str) {
+        let Some(io) = &self.io else { return };
+
+        let payload = PlayerDisconnectedPayload {
+            user_id: user_id.to_string(),
+            display_name: display_name.to_string(),
+            grace_period_ms: (RECONNECTION_GRACE_PERIOD_SECS * 1000) as u32,
+        };
+
+        io.to(self.game_id.clone()).emit(events::server::PLAYER_DISCONNECTED, &payload).ok();
+    }
+
+    /// Broadcast player reconnected (within grace period)
+    async fn broadcast_player_reconnected(&self, user_id: &str, display_name: &str) {
+        let Some(io) = &self.io else { return };
+
+        let payload = PlayerReconnectedPayload {
+            user_id: user_id.to_string(),
+            display_name: display_name.to_string(),
+        };
+
+        io.to(self.game_id.clone()).emit(events::server::PLAYER_RECONNECTED, &payload).ok();
+    }
+
+    /// Broadcast player timeout (grace period expired)
+    async fn broadcast_player_timeout(&self, user_id: &str, display_name: &str) {
+        let Some(io) = &self.io else { return };
+
+        let payload = PlayerTimeoutPayload {
+            user_id: user_id.to_string(),
+            display_name: display_name.to_string(),
+        };
+
+        io.to(self.game_id.clone()).emit(events::server::PLAYER_TIMEOUT, &payload).ok();
     }
 
     /// Broadcast player guessed (without revealing location)

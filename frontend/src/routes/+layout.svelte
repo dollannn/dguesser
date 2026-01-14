@@ -3,13 +3,19 @@
   import { onMount } from 'svelte';
   import { authStore, isLoading } from '$lib/stores/auth';
   import { socketClient } from '$lib/socket/client';
+  import { initGameSocketListeners } from '$lib/socket/game';
   import Header from '$lib/components/Header.svelte';
+  import ReconnectingOverlay from '$lib/components/ReconnectingOverlay.svelte';
+  import ToastContainer from '$lib/components/ToastContainer.svelte';
 
   let { children } = $props();
 
   onMount(() => {
     // Initialize auth on mount
     authStore.initialize();
+
+    // Initialize game socket listeners
+    const cleanupListeners = initGameSocketListeners();
     
     // Connect to realtime if authenticated
     const unsubscribe = authStore.subscribe(($auth) => {
@@ -19,6 +25,7 @@
     });
 
     return () => {
+      cleanupListeners();
       unsubscribe();
       socketClient.disconnect();
     };
@@ -46,3 +53,7 @@
     <p>dguesser - A geography guessing game</p>
   </footer>
 </div>
+
+<!-- Global overlays and notifications -->
+<ReconnectingOverlay />
+<ToastContainer />
