@@ -2,9 +2,7 @@
 
 use std::net::SocketAddr;
 
-use axum::Router;
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::trace::TraceLayer;
+use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod config;
@@ -17,6 +15,9 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load environment
+    dotenvy::dotenv().ok();
+
     // Initialize tracing
     tracing_subscriber::registry()
         .with(
@@ -27,25 +28,43 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Load configuration
-    dotenvy::dotenv().ok();
     let config = Config::from_env()?;
+    tracing::info!("Configuration loaded");
 
     // Create application state
     let state = AppState::new(&config).await?;
 
+    // Build CORS layer
+    let cors = build_cors_layer(&config);
+
     // Build router
-    let app = Router::new()
-        .nest("/api", routes::router())
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+    let app = routes::create_router(state, cors);
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     tracing::info!("API server listening on {}", addr);
+    tracing::info!("Swagger UI available at http://localhost:{}/docs", config.port);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Build CORS layer based on configuration
+fn build_cors_layer(config: &Config) -> CorsLayer {
+    use http::{HeaderValue, Method, header};
+
+    let origin = config.frontend_url.parse::<HeaderValue>().expect("Invalid frontend URL for CORS");
+
+    CorsLayer::new()
+        .allow_origin(origin)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::COOKIE,
+        ])
+        .allow_credentials(true)
 }
