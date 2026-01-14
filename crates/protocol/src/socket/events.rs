@@ -16,6 +16,8 @@ pub mod server {
     pub const PLAYER_RECONNECTED: &str = "player:reconnected";
     /// Player timed out (grace period expired)
     pub const PLAYER_TIMEOUT: &str = "player:timeout";
+    /// Live scoreboard update (during gameplay)
+    pub const SCORES_UPDATE: &str = "scores:update";
 }
 
 /// Socket.IO event names (client -> server)

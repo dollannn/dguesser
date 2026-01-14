@@ -11,6 +11,7 @@ use crate::state::AppState;
 pub mod auth;
 pub mod games;
 pub mod health;
+pub mod leaderboard;
 pub mod users;
 
 /// OpenAPI documentation
@@ -32,6 +33,7 @@ pub mod users;
         games::get_game_history,
         users::get_profile,
         users::update_profile,
+        leaderboard::get_leaderboard,
     ),
     components(schemas(
         dguesser_protocol::api::auth::MeResponse,
@@ -43,6 +45,10 @@ pub mod users;
         dguesser_protocol::api::game::GameInfo,
         dguesser_protocol::api::game::GameSettingsResponse,
         dguesser_protocol::api::game::GuessResult,
+        dguesser_protocol::api::leaderboard::LeaderboardType,
+        dguesser_protocol::api::leaderboard::TimePeriod,
+        dguesser_protocol::api::leaderboard::LeaderboardEntry,
+        leaderboard::LeaderboardResponse,
         games::CreateGameResponse,
         games::GameDetails,
         games::PlayerInfo,
@@ -60,6 +66,7 @@ pub mod users;
         (name = "auth", description = "Authentication endpoints"),
         (name = "games", description = "Game management endpoints"),
         (name = "users", description = "User profile endpoints"),
+        (name = "leaderboard", description = "Global leaderboard endpoints"),
     ),
     info(
         title = "DGuesser API",
@@ -75,6 +82,7 @@ pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
         .nest("/auth", auth::router())
         .nest("/users", users::router())
         .nest("/games", games::router())
+        .nest("/leaderboard", leaderboard::router())
         // Apply rate limiting to API routes
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit));
 

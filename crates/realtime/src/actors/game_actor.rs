@@ -10,8 +10,8 @@ use dguesser_protocol::socket::events;
 use dguesser_protocol::socket::payloads::{
     FinalStanding, GameEndPayload, GameStatePayload, PlayerDisconnectedPayload,
     PlayerGuessedPayload, PlayerInfo, PlayerJoinedPayload, PlayerLeftPayload,
-    PlayerReconnectedPayload, PlayerTimeoutPayload, RoundEndPayload, RoundLocation, RoundResult,
-    RoundStartPayload,
+    PlayerReconnectedPayload, PlayerScoreInfo, PlayerTimeoutPayload, RoundEndPayload,
+    RoundLocation, RoundResult, RoundStartPayload, ScoresUpdatePayload,
 };
 use socketioxide::SocketIo;
 use tokio::sync::mpsc;
@@ -624,6 +624,9 @@ impl GameActor {
         // Broadcast that player guessed (without revealing location)
         self.broadcast_player_guessed(user_id, &display_name).await;
 
+        // Broadcast live scores update
+        self.broadcast_scores_update().await;
+
         // Save to Redis
         self.save_state_to_redis().await;
 
@@ -783,6 +786,9 @@ impl GameActor {
 
         // Broadcast round start
         self.broadcast_round_start().await;
+
+        // Broadcast initial scores for the round
+        self.broadcast_scores_update().await;
 
         // Save to Redis
         self.force_save_state_to_redis().await;
@@ -1086,6 +1092,55 @@ impl GameActor {
         let payload = GameEndPayload { game_id: self.game_id.clone(), final_standings };
 
         io.to(self.game_id.clone()).emit(events::server::GAME_END, &payload).ok();
+    }
+
+    /// Broadcast live scores update to all players
+    async fn broadcast_scores_update(&self) {
+        let Some(io) = &self.io else { return };
+        let Some(state) = &self.state else { return };
+
+        // Only broadcast during active gameplay
+        if state.status != GameStatus::RoundInProgress && state.status != GameStatus::Active {
+            return;
+        }
+
+        // Sort players by total score
+        let mut players: Vec<_> = state.players.values().collect();
+        players.sort_by(|a, b| b.total_score.cmp(&a.total_score));
+
+        let scores: Vec<PlayerScoreInfo> = players
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let (has_guessed, round_score) = state
+                    .current_round
+                    .as_ref()
+                    .map(|r| {
+                        let guess = r.guesses.get(&p.user_id);
+                        (guess.is_some(), guess.map(|g| g.score).unwrap_or(0))
+                    })
+                    .unwrap_or((false, 0));
+
+                PlayerScoreInfo {
+                    user_id: p.user_id.clone(),
+                    display_name: p.display_name.clone(),
+                    avatar_url: p.avatar_url.clone(),
+                    total_score: p.total_score,
+                    round_score,
+                    has_guessed,
+                    rank: (i + 1) as u8,
+                    connected: p.connected,
+                }
+            })
+            .collect();
+
+        let payload = ScoresUpdatePayload {
+            round_number: state.round_number,
+            total_rounds: state.total_rounds,
+            scores,
+        };
+
+        io.to(self.game_id.clone()).emit(events::server::SCORES_UPDATE, &payload).ok();
     }
 }
 

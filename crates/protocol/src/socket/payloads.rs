@@ -231,3 +231,44 @@ pub struct PlayerTimeoutPayload {
     /// Display name
     pub display_name: String,
 }
+
+/// Live scoreboard update payload
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ScoresUpdatePayload {
+    /// Current round number
+    #[schema(example = 3)]
+    pub round_number: u8,
+    /// Total rounds
+    #[schema(example = 5)]
+    pub total_rounds: u8,
+    /// All player scores, sorted by total_score descending
+    pub scores: Vec<PlayerScoreInfo>,
+}
+
+/// Player score info for live scoreboard
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PlayerScoreInfo {
+    /// User ID (e.g., usr_V1StGXR8_Z5j)
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub user_id: String,
+    /// Display name
+    #[schema(example = "CoolPlayer42")]
+    pub display_name: String,
+    /// Avatar URL
+    pub avatar_url: Option<String>,
+    /// Total score so far
+    #[schema(example = 12500)]
+    pub total_score: u32,
+    /// Score from the current round (0 if not yet guessed)
+    #[schema(example = 4500)]
+    pub round_score: u32,
+    /// Whether the player has guessed this round
+    #[schema(example = true)]
+    pub has_guessed: bool,
+    /// Current rank (1 = first place)
+    #[schema(example = 1)]
+    pub rank: u8,
+    /// Whether the player is connected
+    #[schema(example = true)]
+    pub connected: bool,
+}

@@ -3,11 +3,13 @@
   import type { GameDetails } from '$lib/api/games';
   import { gameStore } from '$lib/socket/game';
   import { gamesApi } from '$lib/api/games';
+  import { user } from '$lib/stores/auth';
 
   import StreetView from './StreetView.svelte';
   import GuessMap from './GuessMap.svelte';
   import GameTimer from './GameTimer.svelte';
   import RoundInfo from './RoundInfo.svelte';
+  import GameScoreboard from './GameScoreboard.svelte';
 
   interface Props {
     game: GameDetails;
@@ -131,6 +133,13 @@
         movementAllowed={game.settings.movement_allowed}
         zoomAllowed={game.settings.zoom_allowed}
       />
+    {/if}
+
+    <!-- Live scoreboard (multiplayer only) -->
+    {#if game.mode === 'multiplayer' && gameState.liveScores.length > 0}
+      <div class="absolute top-4 left-4 z-10">
+        <GameScoreboard scores={gameState.liveScores} currentUserId={$user?.id ?? null} />
+      </div>
     {/if}
 
     <!-- Mini map / Guess map -->

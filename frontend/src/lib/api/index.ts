@@ -13,3 +13,11 @@ export {
   type GuessResult,
   type GameSummary,
 } from './games';
+export {
+  leaderboardApi,
+  type LeaderboardType,
+  type TimePeriod,
+  type LeaderboardEntry,
+  type LeaderboardResponse,
+  type LeaderboardQuery,
+} from './leaderboard';

@@ -94,6 +94,25 @@ export interface PlayerTimedOutPayload {
   display_name: string;
 }
 
+/** Live scores update payload */
+export interface ScoresUpdatePayload {
+  round_number: number;
+  total_rounds: number;
+  scores: PlayerScoreInfo[];
+}
+
+/** Player score info for live scoreboard */
+export interface PlayerScoreInfo {
+  user_id: string;
+  display_name: string;
+  avatar_url: string | null;
+  total_score: number;
+  round_score: number;
+  has_guessed: boolean;
+  rank: number;
+  connected: boolean;
+}
+
 /** Extended player state in store */
 export interface PlayerState {
   displayName: string;
@@ -119,6 +138,8 @@ export interface GameState {
   finalStandings: FinalStanding[];
   /** Map keyed by user_id (usr_xxxxxxxxxxxx) */
   players: Map<string, PlayerState>;
+  /** Live scoreboard data */
+  liveScores: PlayerScoreInfo[];
 }
 
 function createGameStore() {
@@ -135,6 +156,7 @@ function createGameStore() {
     results: [],
     finalStandings: [],
     players: new Map(),
+    liveScores: [],
   };
 
   const { subscribe, set, update } = writable<GameState>(initialState);
@@ -371,6 +393,16 @@ function createGameStore() {
       toastStore.add('warning', `${payload.display_name} timed out`);
     },
 
+    /** Handle live scores update */
+    handleScoresUpdate(payload: ScoresUpdatePayload): void {
+      update((s) => ({
+        ...s,
+        liveScores: payload.scores,
+        currentRound: payload.round_number,
+        totalRounds: payload.total_rounds,
+      }));
+    },
+
     reset(): void {
       socketClient.setActiveGame(null);
       set(initialState);
@@ -424,6 +456,10 @@ export function initGameSocketListeners(): () => void {
     }),
     socketClient.on<PlayerTimedOutPayload>('player:timeout', (data) => {
       gameStore.handlePlayerTimedOut(data);
+    }),
+    // Live scores update
+    socketClient.on<ScoresUpdatePayload>('scores:update', (data) => {
+      gameStore.handleScoresUpdate(data);
     }),
   ];
 
