@@ -20,9 +20,10 @@
         Sign in with Google
       </a>
       
-      <a 
-        href={authApi.getMicrosoftAuthUrl()}
-        class="w-full px-6 py-3 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition flex items-center justify-center gap-2"
+      <button 
+        disabled
+        class="w-full px-6 py-3 bg-gray-100 border border-gray-200 rounded-lg cursor-not-allowed flex items-center justify-center gap-2 opacity-50"
+        title="Coming soon"
       >
         <svg class="w-5 h-5" viewBox="0 0 23 23">
           <rect fill="#f35325" x="1" y="1" width="10" height="10"/>
@@ -31,7 +32,8 @@
           <rect fill="#ffba08" x="12" y="12" width="10" height="10"/>
         </svg>
         Sign in with Microsoft
-      </a>
+        <span class="text-xs text-gray-400">(Coming soon)</span>
+      </button>
     </div>
     
     <div class="mt-6 text-center">

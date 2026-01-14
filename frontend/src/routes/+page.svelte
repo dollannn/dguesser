@@ -163,9 +163,13 @@
         <a href={authApi.getGoogleAuthUrl()} class="btn-primary">
           Sign in with Google
         </a>
-        <a href={authApi.getMicrosoftAuthUrl()} class="btn-secondary">
+        <button 
+          disabled 
+          class="btn-secondary opacity-50 cursor-not-allowed"
+          title="Coming soon"
+        >
           Sign in with Microsoft
-        </a>
+        </button>
       </div>
     </div>
   {/if}
