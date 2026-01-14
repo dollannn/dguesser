@@ -1,20 +1,55 @@
 //! Socket.IO event handlers
 
-use socketioxide::SocketIo;
-use socketioxide::extract::SocketRef;
-
+pub mod auth;
 pub mod game;
-pub mod room;
 
-/// Register all socket event handlers
-pub fn register(io: &SocketIo) {
-    io.ns("/", |socket: SocketRef| async move {
-        tracing::info!("Socket connected: {}", socket.id);
+use socketioxide::extract::{SocketRef, State};
+use socketioxide::socket::DisconnectReason;
+use tracing::info;
 
-        socket.on_disconnect(|socket: SocketRef| async move {
-            tracing::info!("Socket disconnected: {}", socket.id);
-        });
+use crate::state::{AppState, GameCommand};
 
-        // TODO: Register game and room handlers in Phase 5
-    });
+/// Main connection handler - called when a socket connects
+pub async fn on_connect(socket: SocketRef, State(_state): State<AppState>) {
+    let socket_id = socket.id.to_string();
+    info!("Socket connected: {}", socket_id);
+
+    // Register event handlers
+    socket.on("auth", auth::handle_auth);
+    socket.on("game:join", game::handle_join);
+    socket.on("game:leave", game::handle_leave);
+    socket.on("game:start", game::handle_start);
+    socket.on("guess:submit", game::handle_guess);
+    socket.on("player:ready", game::handle_ready);
+
+    // Handle disconnect
+    socket.on_disconnect(handle_disconnect);
+}
+
+/// Handle socket disconnect
+async fn handle_disconnect(
+    socket: SocketRef,
+    State(state): State<AppState>,
+    reason: DisconnectReason,
+) {
+    let socket_id = socket.id.to_string();
+    info!("Socket disconnected: {} - {:?}", socket_id, reason);
+
+    // Get user for this socket
+    if let Some(user_id) = state.unregister_socket(&socket_id).await {
+        // Notify any active games about the disconnect
+        // Get all rooms this socket was in
+        #[allow(irrefutable_let_patterns)]
+        if let Ok(rooms) = socket.rooms() {
+            for room in rooms.into_iter() {
+                // Room names are game IDs (gam_xxxxxxxxxxxx)
+                if room.starts_with("gam_")
+                    && let Some(handle) = state.get_game(&room).await
+                {
+                    // Send leave command - the game actor will handle grace period
+                    let _ = handle.tx.send(GameCommand::Leave { user_id: user_id.clone() }).await;
+                }
+            }
+        }
+    }
 }

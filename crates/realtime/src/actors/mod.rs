@@ -1,5 +1,5 @@
 //! Game session actors
 
-pub mod game_session;
+mod game_actor;
 
-// TODO: Implement game session actor in Phase 5
+pub use game_actor::GameActor;

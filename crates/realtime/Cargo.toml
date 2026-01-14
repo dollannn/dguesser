@@ -31,3 +31,4 @@ tracing-subscriber.workspace = true
 dotenvy.workspace = true
 config.workspace = true
 redis.workspace = true
+rand.workspace = true
