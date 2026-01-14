@@ -57,6 +57,32 @@ pub async fn create_guest(pool: &DbPool, display_name: &str) -> Result<User, sql
     .await
 }
 
+/// Create a new authenticated user
+pub async fn create_authenticated(
+    pool: &DbPool,
+    display_name: &str,
+    email: Option<&str>,
+    avatar_url: Option<&str>,
+) -> Result<User, sqlx::Error> {
+    let id = dguesser_core::generate_user_id();
+
+    sqlx::query_as!(
+        User,
+        r#"
+        INSERT INTO users (id, kind, display_name, email, email_verified, avatar_url)
+        VALUES ($1, 'authenticated', $2, $3, TRUE, $4)
+        RETURNING id, kind as "kind: UserKind", email, email_verified, display_name, avatar_url,
+                  created_at, updated_at, last_seen_at, games_played, total_score, best_score
+        "#,
+        id,
+        display_name,
+        email,
+        avatar_url
+    )
+    .fetch_one(pool)
+    .await
+}
+
 /// Get user by ID
 pub async fn get_by_id(pool: &DbPool, id: &str) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as!(

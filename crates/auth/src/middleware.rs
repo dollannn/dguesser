@@ -1,3 +1,177 @@
-//! Authentication middleware
+//! Authentication middleware and extractors.
+//!
+//! This module provides Axum extractors for authentication:
+//! - `AuthUser`: Requires a valid session (guest or authenticated)
+//! - `MaybeAuthUser`: Optional authentication (returns None if no session)
+//! - `RequireAuth`: Requires an authenticated (non-guest) user
 
-// TODO: Implement auth extraction middleware in Phase 3
+use axum::{
+    extract::FromRequestParts,
+    http::{StatusCode, header::COOKIE, request::Parts},
+};
+
+use crate::session::SessionConfig;
+use dguesser_db::UserKind;
+
+/// Authenticated user extracted from session cookie.
+///
+/// This struct represents a user with a valid session. The user may be
+/// either a guest or an authenticated user.
+#[derive(Debug, Clone)]
+pub struct AuthUser {
+    /// User ID (prefixed nanoid: `usr_xxxxxxxxxxxx`)
+    pub user_id: String,
+    /// Session ID (prefixed token: `ses_xxx...`)
+    pub session_id: String,
+    /// Whether this is a guest user
+    pub is_guest: bool,
+}
+
+/// Optional authentication extractor.
+///
+/// Unlike `AuthUser`, this extractor never fails. It returns `Some(AuthUser)`
+/// if a valid session exists, or `None` if not.
+#[derive(Debug, Clone)]
+pub struct MaybeAuthUser(pub Option<AuthUser>);
+
+/// Require authenticated (non-guest) user.
+///
+/// This extractor wraps `AuthUser` and additionally verifies that the user
+/// is not a guest. Use this for endpoints that require full authentication.
+#[derive(Debug, Clone)]
+pub struct RequireAuth(pub AuthUser);
+
+/// Trait for application state that supports auth extraction.
+///
+/// Your Axum application state must implement this trait to use the auth extractors.
+pub trait AuthState: Clone + Send + Sync + 'static {
+    /// Get the database connection pool.
+    fn db_pool(&self) -> &sqlx::PgPool;
+    /// Get the session configuration.
+    fn session_config(&self) -> &SessionConfig;
+}
+
+/// Extract session ID from the Cookie header.
+fn extract_session_id(parts: &Parts, cookie_name: &str) -> Option<String> {
+    let cookie_header = parts.headers.get(COOKIE)?.to_str().ok()?;
+
+    for cookie in cookie_header.split(';') {
+        let cookie = cookie.trim();
+        if let Some(value) = cookie.strip_prefix(&format!("{}=", cookie_name)) {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+impl<S> FromRequestParts<S> for AuthUser
+where
+    S: AuthState,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let session_config = state.session_config();
+        let pool = state.db_pool();
+
+        // Extract session ID from cookie
+        let session_id = extract_session_id(parts, &session_config.cookie_name)
+            .ok_or((StatusCode::UNAUTHORIZED, "No session cookie"))?;
+
+        // Validate session in database
+        let session = dguesser_db::sessions::get_valid(pool, &session_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Database error validating session: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+            })?
+            .ok_or((StatusCode::UNAUTHORIZED, "Invalid session"))?;
+
+        // Get user to check if guest
+        let user = dguesser_db::users::get_by_id(pool, &session.user_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Database error fetching user: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+            })?
+            .ok_or((StatusCode::UNAUTHORIZED, "User not found"))?;
+
+        // Touch session to update last_accessed_at
+        // Fire and forget - don't block the request
+        let pool_clone = pool.clone();
+        let sid_clone = session_id.clone();
+        tokio::spawn(async move {
+            let _ = dguesser_db::sessions::touch(&pool_clone, &sid_clone).await;
+        });
+
+        Ok(AuthUser {
+            user_id: session.user_id,
+            session_id,
+            is_guest: user.kind == UserKind::Guest,
+        })
+    }
+}
+
+impl<S> FromRequestParts<S> for MaybeAuthUser
+where
+    S: AuthState,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Ok(MaybeAuthUser(AuthUser::from_request_parts(parts, state).await.ok()))
+    }
+}
+
+impl<S> FromRequestParts<S> for RequireAuth
+where
+    S: AuthState,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let auth = AuthUser::from_request_parts(parts, state).await?;
+
+        if auth.is_guest {
+            return Err((StatusCode::FORBIDDEN, "Authentication required"));
+        }
+
+        Ok(RequireAuth(auth))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request;
+
+    #[test]
+    fn test_extract_session_id() {
+        let req = Request::builder()
+            .header(COOKIE, "dguesser_sid=ses_test123; other=value")
+            .body(())
+            .unwrap();
+
+        let (parts, _body) = req.into_parts();
+        let session_id = extract_session_id(&parts, "dguesser_sid");
+        assert_eq!(session_id, Some("ses_test123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_session_id_not_found() {
+        let req = Request::builder().header(COOKIE, "other=value; another=test").body(()).unwrap();
+
+        let (parts, _body) = req.into_parts();
+        let session_id = extract_session_id(&parts, "dguesser_sid");
+        assert_eq!(session_id, None);
+    }
+
+    #[test]
+    fn test_extract_session_id_no_cookie_header() {
+        let req = Request::builder().body(()).unwrap();
+
+        let (parts, _body) = req.into_parts();
+        let session_id = extract_session_id(&parts, "dguesser_sid");
+        assert_eq!(session_id, None);
+    }
+}

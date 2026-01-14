@@ -6,17 +6,25 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+dguesser-core = { path = "../core" }
 dguesser-db = { path = "../db" }
 
 axum.workspace = true
 tokio.workspace = true
-oauth2.workspace = true
-jsonwebtoken.workspace = true
-argon2.workspace = true
+sqlx.workspace = true
 rand.workspace = true
 serde.workspace = true
-uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 redis.workspace = true
+serde_json.workspace = true
+
+# HTTP client for OAuth flows
+reqwest = { version = "0.12", features = ["json"] }
+
+# URL encoding for OAuth parameters
+urlencoding = "2"
+
+# Hex encoding for nonces
+hex = "0.4"
