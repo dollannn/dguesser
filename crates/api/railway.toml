@@ -1,0 +1,12 @@
+# Railway deployment configuration for the API service
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.api"
+buildContext = "../.."
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

@@ -1,0 +1,12 @@
+# Railway deployment configuration for the realtime service
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.realtime"
+buildContext = "../.."
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

@@ -1,27 +1,46 @@
-# Build stage
-FROM rust:1.83-bookworm AS builder
+# Build stage (cargo-chef, Debian)
+FROM rust:1.83-bookworm AS chef
 
 WORKDIR /app
 
-# Copy manifests first for dependency caching
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    binutils \
+    ca-certificates \
+    libssl-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install cargo-chef --locked
+
+FROM chef AS planner
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates/*/Cargo.toml crates/*/Cargo.toml
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-# Build release binary
-RUN cargo build --release -p dguesser-realtime
+RUN cargo build --release -p dguesser-realtime \
+    && strip /app/target/release/realtime
 
-# Runtime stage
-FROM debian:bookworm-slim
+FROM busybox:1.36 AS busybox
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+# Runtime stage (distroless)
+FROM gcr.io/distroless/cc-debian12
 
 WORKDIR /app
 
 # Copy the binary
 COPY --from=builder /app/target/release/realtime ./realtime
+
+# Minimal wget for health check
+COPY --from=busybox /bin/busybox /bin/busybox
 
 # Railway sets PORT env var automatically
 ENV PORT=3002
@@ -31,6 +50,6 @@ EXPOSE 3002
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3002/health || exit 1
+    CMD ["/bin/busybox", "wget", "-q", "-O", "-", "http://localhost:3002/health"]
 
 CMD ["./realtime"]

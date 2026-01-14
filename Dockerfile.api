@@ -1,25 +1,38 @@
-# Build stage
-FROM rust:1.83-bookworm AS builder
+# Build stage (cargo-chef, Debian)
+FROM rust:1.83-bookworm AS chef
 
 WORKDIR /app
 
-# Install sqlx-cli for migrations (optional, migrations run at startup)
-# RUN cargo install sqlx-cli --no-default-features --features postgres
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    binutils \
+    ca-certificates \
+    libssl-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install cargo-chef --locked
 
-# Copy manifests first for dependency caching
+FROM chef AS planner
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates/*/Cargo.toml crates/*/Cargo.toml
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-# Build release binary
-RUN cargo build --release -p dguesser-api
+RUN cargo build --release -p dguesser-api \
+    && strip /app/target/release/api
 
-# Runtime stage
-FROM debian:bookworm-slim
+FROM busybox:1.36 AS busybox
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+# Runtime stage (distroless)
+FROM gcr.io/distroless/cc-debian12
 
 WORKDIR /app
 
@@ -29,6 +42,9 @@ COPY --from=builder /app/target/release/api ./api
 # Copy migrations for runtime migration
 COPY migrations ./migrations
 
+# Minimal wget for health check
+COPY --from=busybox /bin/busybox /bin/busybox
+
 # Railway sets PORT env var automatically
 ENV PORT=3001
 ENV RUST_LOG=info,dguesser=debug
@@ -37,6 +53,6 @@ EXPOSE 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3001/health || exit 1
+    CMD ["/bin/busybox", "wget", "-q", "-O", "-", "http://localhost:3001/health"]
 
 CMD ["./api"]
