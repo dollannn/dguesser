@@ -50,7 +50,12 @@
   </main>
 
   <footer class="bg-gray-100 py-4 text-center text-sm text-gray-600">
-    <p>dguesser - A geography guessing game</p>
+    <p class="mb-2">dguesser - A geography guessing game</p>
+    <div class="flex justify-center gap-4">
+      <a href="/terms" class="hover:text-gray-900 hover:underline">Terms</a>
+      <span class="text-gray-400">·</span>
+      <a href="/privacy" class="hover:text-gray-900 hover:underline">Privacy</a>
+    </div>
   </footer>
 </div>
 
