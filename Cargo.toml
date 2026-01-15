@@ -8,6 +8,7 @@ members = [
     "crates/api",
     "crates/realtime",
     "crates/seeder",
+    "crates/locations",
 ]
 
 [workspace.package]

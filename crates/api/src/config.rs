@@ -4,6 +4,68 @@ use std::env;
 
 use anyhow::{Context, Result};
 
+/// Location provider type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocationProviderType {
+    /// Use PostgreSQL database for locations (existing system)
+    Postgres,
+    /// Use R2 packs for locations (new system)
+    R2,
+}
+
+impl LocationProviderType {
+    /// Parse from string (postgres, r2).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "postgres" | "postgresql" | "db" => Some(Self::Postgres),
+            "r2" | "cloudflare" | "packs" => Some(Self::R2),
+            _ => None,
+        }
+    }
+}
+
+/// R2/pack-based location provider configuration.
+#[derive(Debug, Clone)]
+pub struct R2LocationConfig {
+    /// Base URL for R2 bucket (e.g., "https://bucket.r2.cloudflarestorage.com")
+    /// For local development, use file:// URL
+    pub base_url: String,
+    /// Dataset version (e.g., "v2026-01")
+    pub version: String,
+    /// Maximum disabled hashes to cache in memory
+    pub max_disabled_cache: usize,
+}
+
+impl R2LocationConfig {
+    /// Create from environment variables.
+    pub fn from_env() -> Option<Self> {
+        let base_url = env::var("LOCATION_R2_URL").ok()?;
+        let version = env::var("LOCATION_R2_VERSION").unwrap_or_else(|_| "v2026-01".to_string());
+        let max_disabled_cache = env::var("LOCATION_MAX_DISABLED_CACHE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(200_000);
+
+        Some(Self { base_url, version, max_disabled_cache })
+    }
+
+    /// Check if this is a local file path.
+    pub fn is_local(&self) -> bool {
+        self.base_url.starts_with("file://") || self.base_url.starts_with("/")
+    }
+
+    /// Get the local path (if local).
+    pub fn local_path(&self) -> Option<&str> {
+        if self.base_url.starts_with("file://") {
+            Some(&self.base_url[7..])
+        } else if self.base_url.starts_with("/") {
+            Some(&self.base_url)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     /// Server port
@@ -28,6 +90,10 @@ pub struct Config {
     pub microsoft_redirect_uri: String,
     /// Whether running in production mode
     pub is_production: bool,
+    /// Location provider type
+    pub location_provider_type: LocationProviderType,
+    /// R2 location config (if using R2 provider)
+    pub r2_location_config: Option<R2LocationConfig>,
 }
 
 impl Config {
@@ -42,6 +108,19 @@ impl Config {
 
         let api_base_url =
             env::var("API_BASE_URL").unwrap_or_else(|_| format!("http://localhost:{}", port));
+
+        // Parse location provider type (default to postgres)
+        let location_provider_type = env::var("LOCATION_PROVIDER")
+            .ok()
+            .and_then(|s| LocationProviderType::from_str(&s))
+            .unwrap_or(LocationProviderType::Postgres);
+
+        // Parse R2 config if using R2 provider
+        let r2_location_config = if location_provider_type == LocationProviderType::R2 {
+            R2LocationConfig::from_env()
+        } else {
+            None
+        };
 
         Ok(Self {
             port,
@@ -58,6 +137,8 @@ impl Config {
             microsoft_redirect_uri: env::var("MICROSOFT_REDIRECT_URI")
                 .unwrap_or_else(|_| format!("{}/api/v1/auth/microsoft/callback", api_base_url)),
             is_production: env::var("RUST_ENV").map(|v| v == "production").unwrap_or(false),
+            location_provider_type,
+            r2_location_config,
         })
     }
 

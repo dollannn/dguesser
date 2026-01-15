@@ -1,0 +1,55 @@
+[package]
+name = "dguesser-locations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "R2-based location pack storage and selection for DGuesser"
+
+[dependencies]
+# Workspace dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true }
+
+# HTTP client for R2 Range requests
+reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
+
+# Hashing for pano_id
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# LRU cache for disabled locations
+lru = "0.12"
+
+# Bytes for efficient buffer handling
+bytes = "1"
+
+# Async trait support
+async-trait = "0.1"
+
+# Core types (LocationProvider trait, GameLocation, etc.)
+dguesser-core = { path = "../core" }
+
+# CLI dependencies (only for pack-builder binary)
+clap = { version = "4", features = ["derive"], optional = true }
+indicatif = { version = "0.17", optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+dotenvy = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = "3"
+
+[features]
+default = []
+cli = ["clap", "indicatif", "tracing-subscriber", "dotenvy"]
+
+[[bin]]
+name = "pack-builder"
+path = "src/bin/pack_builder.rs"
+required-features = ["cli"]

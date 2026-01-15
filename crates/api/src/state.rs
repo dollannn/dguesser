@@ -5,8 +5,10 @@ use std::sync::Arc;
 use dguesser_auth::{GoogleOAuth, MicrosoftOAuth, SessionConfig};
 use dguesser_core::location::LocationProvider;
 use dguesser_db::{DbPool, LocationRepository};
+use dguesser_locations::reader::{FileReader, HttpReader};
+use dguesser_locations::{PackProvider, PackProviderConfig};
 
-use crate::config::Config;
+use crate::config::{Config, LocationProviderType};
 
 /// Shared application state
 #[derive(Clone)]
@@ -70,9 +72,34 @@ impl AppState {
             None
         };
 
-        // Create location provider
-        let location_provider: Arc<dyn LocationProvider> =
-            Arc::new(LocationRepository::new(db.clone()));
+        // Create location provider based on config
+        let location_provider: Arc<dyn LocationProvider> = match config.location_provider_type {
+            LocationProviderType::Postgres => {
+                tracing::info!("Using PostgreSQL location provider");
+                Arc::new(LocationRepository::new(db.clone()))
+            }
+            LocationProviderType::R2 => {
+                let r2_config = config
+                    .r2_location_config
+                    .as_ref()
+                    .expect("R2 config required when LOCATION_PROVIDER=r2");
+
+                let pack_config = PackProviderConfig {
+                    cache_indexes: true,
+                    max_disabled_cache: r2_config.max_disabled_cache,
+                };
+
+                if let Some(local_path) = r2_config.local_path() {
+                    tracing::info!(path = %local_path, version = %r2_config.version, "Using local file location provider");
+                    let reader = FileReader::new(local_path, &r2_config.version);
+                    Arc::new(PackProvider::new(reader, pack_config))
+                } else {
+                    tracing::info!(url = %r2_config.base_url, version = %r2_config.version, "Using R2 HTTP location provider");
+                    let reader = HttpReader::new(&r2_config.base_url, &r2_config.version);
+                    Arc::new(PackProvider::new(reader, pack_config))
+                }
+            }
+        };
 
         Ok(Self {
             inner: Arc::new(AppStateInner {

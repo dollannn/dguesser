@@ -14,6 +14,7 @@ dguesser-core = { path = "../core" }
 dguesser-db = { path = "../db" }
 dguesser-auth = { path = "../auth" }
 dguesser-protocol = { path = "../protocol" }
+dguesser-locations = { path = "../locations" }
 
 axum.workspace = true
 sqlx.workspace = true
