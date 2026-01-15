@@ -7,7 +7,7 @@ use std::sync::Arc;
 use chrono::{DateTime, NaiveDate, Utc};
 use dguesser_core::location::{
     GameLocation, Location, LocationError, LocationProvider, LocationSource,
-    LocationValidationStatus, Map, MapRules, ReviewStatus,
+    LocationValidationStatus, Map, MapRules, MapVisibility, ReviewStatus,
 };
 use sqlx::FromRow;
 
@@ -110,6 +110,9 @@ struct MapRow {
     rules: serde_json::Value,
     is_default: bool,
     active: bool,
+    creator_id: Option<String>,
+    visibility: String,
+    location_count: i32,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -121,6 +124,11 @@ impl TryFrom<MapRow> for Map {
         let rules: MapRules = serde_json::from_value(row.rules)
             .map_err(|e| LocationError::Database(format!("Invalid map rules: {e}")))?;
 
+        let visibility = row
+            .visibility
+            .parse::<MapVisibility>()
+            .map_err(|e| LocationError::Database(format!("Invalid map visibility: {e}")))?;
+
         Ok(Map {
             id: row.id,
             slug: row.slug,
@@ -129,6 +137,9 @@ impl TryFrom<MapRow> for Map {
             rules,
             is_default: row.is_default,
             active: row.active,
+            creator_id: row.creator_id,
+            visibility,
+            location_count: row.location_count,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -323,15 +334,21 @@ async fn select_random_location(
     Ok(location.into())
 }
 
+/// All columns to select for a Map row.
+const MAP_COLUMNS: &str = r#"
+    id, slug, name, description, rules, is_default, active,
+    creator_id, visibility, location_count, created_at, updated_at
+"#;
+
 /// Get a map by ID or slug.
 async fn get_map_by_id_or_slug(pool: &DbPool, map_id_or_slug: &str) -> Result<Map, LocationError> {
-    let row = sqlx::query_as::<_, MapRow>(
+    let row = sqlx::query_as::<_, MapRow>(&format!(
         r#"
-        SELECT id, slug, name, description, rules, is_default, active, created_at, updated_at
+        SELECT {MAP_COLUMNS}
         FROM maps
         WHERE (id = $1 OR slug = $1) AND active = TRUE
-        "#,
-    )
+        "#
+    ))
     .bind(map_id_or_slug)
     .fetch_optional(pool)
     .await
@@ -343,14 +360,14 @@ async fn get_map_by_id_or_slug(pool: &DbPool, map_id_or_slug: &str) -> Result<Ma
 
 /// Get the default map.
 async fn get_default_map(pool: &DbPool) -> Result<Map, LocationError> {
-    let row = sqlx::query_as::<_, MapRow>(
+    let row = sqlx::query_as::<_, MapRow>(&format!(
         r#"
-        SELECT id, slug, name, description, rules, is_default, active, created_at, updated_at
+        SELECT {MAP_COLUMNS}
         FROM maps
         WHERE is_default = TRUE AND active = TRUE
         LIMIT 1
-        "#,
-    )
+        "#
+    ))
     .fetch_optional(pool)
     .await
     .map_err(|e| LocationError::Database(e.to_string()))?
@@ -1058,7 +1075,7 @@ pub async fn auto_flag_location(pool: &DbPool, location_id: &str) -> Result<bool
 // Map CRUD Operations
 // =============================================================================
 
-/// Create a new map.
+/// Create a new system map (no creator).
 pub async fn create_map(
     pool: &DbPool,
     slug: &str,
@@ -1071,13 +1088,13 @@ pub async fn create_map(
     let rules_json =
         serde_json::to_value(rules).map_err(|e| LocationError::Database(e.to_string()))?;
 
-    let row = sqlx::query_as::<_, MapRow>(
+    let row = sqlx::query_as::<_, MapRow>(&format!(
         r#"
-        INSERT INTO maps (id, slug, name, description, rules, is_default)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, slug, name, description, rules, is_default, active, created_at, updated_at
-        "#,
-    )
+        INSERT INTO maps (id, slug, name, description, rules, is_default, visibility)
+        VALUES ($1, $2, $3, $4, $5, $6, 'public')
+        RETURNING {MAP_COLUMNS}
+        "#
+    ))
     .bind(&id)
     .bind(slug)
     .bind(name)
@@ -1091,19 +1108,480 @@ pub async fn create_map(
     row.try_into()
 }
 
-/// List all active maps.
+/// List all active system maps (public maps with no creator).
 pub async fn list_maps(pool: &DbPool) -> Result<Vec<Map>, LocationError> {
-    let rows = sqlx::query_as::<_, MapRow>(
+    let rows = sqlx::query_as::<_, MapRow>(&format!(
         r#"
-        SELECT id, slug, name, description, rules, is_default, active, created_at, updated_at
+        SELECT {MAP_COLUMNS}
         FROM maps
-        WHERE active = TRUE
+        WHERE active = TRUE AND creator_id IS NULL
         ORDER BY is_default DESC, name ASC
-        "#,
-    )
+        "#
+    ))
     .fetch_all(pool)
     .await
     .map_err(|e| LocationError::Database(e.to_string()))?;
 
     rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+// =============================================================================
+// User-Created Maps
+// =============================================================================
+
+/// Parameters for creating a user map.
+#[derive(Debug, Clone)]
+pub struct CreateUserMapParams {
+    pub slug: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub visibility: MapVisibility,
+}
+
+/// Create a new user-owned map.
+pub async fn create_user_map(
+    pool: &DbPool,
+    creator_id: &str,
+    params: &CreateUserMapParams,
+) -> Result<Map, LocationError> {
+    let id = dguesser_core::generate_map_id();
+    let rules_json = serde_json::to_value(MapRules::default())
+        .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    let row = sqlx::query_as::<_, MapRow>(&format!(
+        r#"
+        INSERT INTO maps (id, slug, name, description, rules, creator_id, visibility)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING {MAP_COLUMNS}
+        "#
+    ))
+    .bind(&id)
+    .bind(&params.slug)
+    .bind(&params.name)
+    .bind(&params.description)
+    .bind(&rules_json)
+    .bind(creator_id)
+    .bind(params.visibility.to_string())
+    .fetch_one(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    row.try_into()
+}
+
+/// List maps visible to a user (public maps + their own maps).
+pub async fn list_visible_maps(
+    pool: &DbPool,
+    user_id: Option<&str>,
+) -> Result<Vec<Map>, LocationError> {
+    let rows = match user_id {
+        Some(uid) => {
+            sqlx::query_as::<_, MapRow>(&format!(
+                r#"
+                SELECT {MAP_COLUMNS}
+                FROM maps
+                WHERE active = TRUE
+                  AND (visibility = 'public' OR creator_id = $1)
+                ORDER BY is_default DESC, created_at DESC
+                "#
+            ))
+            .bind(uid)
+            .fetch_all(pool)
+            .await
+        }
+        None => {
+            sqlx::query_as::<_, MapRow>(&format!(
+                r#"
+                SELECT {MAP_COLUMNS}
+                FROM maps
+                WHERE active = TRUE AND visibility = 'public'
+                ORDER BY is_default DESC, created_at DESC
+                "#
+            ))
+            .fetch_all(pool)
+            .await
+        }
+    }
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+/// List maps created by a specific user.
+pub async fn list_user_maps(pool: &DbPool, user_id: &str) -> Result<Vec<Map>, LocationError> {
+    let rows = sqlx::query_as::<_, MapRow>(&format!(
+        r#"
+        SELECT {MAP_COLUMNS}
+        FROM maps
+        WHERE active = TRUE AND creator_id = $1
+        ORDER BY created_at DESC
+        "#
+    ))
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+/// Get a map by ID if visible to the user.
+pub async fn get_map_if_visible(
+    pool: &DbPool,
+    map_id: &str,
+    user_id: Option<&str>,
+) -> Result<Option<Map>, LocationError> {
+    let row = sqlx::query_as::<_, MapRow>(&format!(
+        r#"
+        SELECT {MAP_COLUMNS}
+        FROM maps
+        WHERE id = $1 AND active = TRUE
+        "#
+    ))
+    .bind(map_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    match row {
+        Some(r) => {
+            let map: Map = r.try_into()?;
+            if map.is_visible_to(user_id) { Ok(Some(map)) } else { Ok(None) }
+        }
+        None => Ok(None),
+    }
+}
+
+/// Parameters for updating a map.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateMapParams {
+    pub name: Option<String>,
+    pub description: Option<Option<String>>, // None = don't change, Some(None) = clear, Some(Some(x)) = set
+    pub visibility: Option<MapVisibility>,
+}
+
+/// Update a map's metadata (owner only).
+pub async fn update_map(
+    pool: &DbPool,
+    map_id: &str,
+    params: &UpdateMapParams,
+) -> Result<Map, LocationError> {
+    // Build dynamic SET clause
+    let mut updates = Vec::new();
+    let mut bind_idx = 2; // $1 is map_id
+
+    if params.name.is_some() {
+        updates.push(format!("name = ${bind_idx}"));
+        bind_idx += 1;
+    }
+    if params.description.is_some() {
+        updates.push(format!("description = ${bind_idx}"));
+        bind_idx += 1;
+    }
+    if params.visibility.is_some() {
+        updates.push(format!("visibility = ${bind_idx}"));
+    }
+
+    if updates.is_empty() {
+        // Nothing to update, just return the current map
+        return get_map_by_id_or_slug(pool, map_id).await;
+    }
+
+    let set_clause = updates.join(", ");
+    let query = format!(
+        r#"
+        UPDATE maps
+        SET {set_clause}, updated_at = NOW()
+        WHERE id = $1 AND active = TRUE
+        RETURNING {MAP_COLUMNS}
+        "#
+    );
+
+    let mut q = sqlx::query_as::<_, MapRow>(&query).bind(map_id);
+
+    if let Some(ref name) = params.name {
+        q = q.bind(name);
+    }
+    if let Some(ref desc) = params.description {
+        q = q.bind(desc.as_ref());
+    }
+    if let Some(ref vis) = params.visibility {
+        q = q.bind(vis.to_string());
+    }
+
+    let row = q
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| LocationError::Database(e.to_string()))?
+        .ok_or_else(|| LocationError::MapNotFound(map_id.to_string()))?;
+
+    row.try_into()
+}
+
+/// Soft-delete a map (set active = false).
+pub async fn delete_map(pool: &DbPool, map_id: &str) -> Result<bool, LocationError> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE maps
+        SET active = FALSE, updated_at = NOW()
+        WHERE id = $1 AND active = TRUE
+        "#,
+        map_id
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Add multiple locations to a map (batch insert).
+pub async fn add_locations_to_map_batch(
+    pool: &DbPool,
+    map_id: &str,
+    location_ids: &[String],
+) -> Result<usize, LocationError> {
+    if location_ids.is_empty() {
+        return Ok(0);
+    }
+
+    // Use UNNEST for efficient batch insert
+    let result = sqlx::query(
+        r#"
+        INSERT INTO map_locations (map_id, location_id)
+        SELECT $1, unnest($2::varchar[])
+        ON CONFLICT (map_id, location_id) DO NOTHING
+        "#,
+    )
+    .bind(map_id)
+    .bind(location_ids)
+    .execute(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(result.rows_affected() as usize)
+}
+
+/// Remove a location from a map.
+pub async fn remove_location_from_map(
+    pool: &DbPool,
+    map_id: &str,
+    location_id: &str,
+) -> Result<bool, LocationError> {
+    let result = sqlx::query!(
+        r#"
+        DELETE FROM map_locations
+        WHERE map_id = $1 AND location_id = $2
+        "#,
+        map_id,
+        location_id
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Get paginated locations for a map.
+pub async fn get_map_locations(
+    pool: &DbPool,
+    map_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Location>, LocationError> {
+    let rows = sqlx::query_as::<_, LocationRow>(&format!(
+        r#"
+        SELECT {LOCATION_COLUMNS}
+        FROM locations l
+        JOIN map_locations ml ON l.id = ml.location_id
+        WHERE ml.map_id = $1 AND l.active = TRUE
+        ORDER BY ml.created_at DESC
+        LIMIT $2 OFFSET $3
+        "#
+    ))
+    .bind(map_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+/// Check if a map slug is available.
+pub async fn is_map_slug_available(pool: &DbPool, slug: &str) -> Result<bool, LocationError> {
+    let exists = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS(SELECT 1 FROM maps WHERE slug = $1 AND active = TRUE)
+        "#,
+        slug
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(!exists.unwrap_or(true))
+}
+
+/// Get the count of maps created by a user.
+pub async fn get_user_map_count(pool: &DbPool, user_id: &str) -> Result<i64, LocationError> {
+    let count = sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(*) FROM maps WHERE creator_id = $1 AND active = TRUE
+        "#,
+        user_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(count.unwrap_or(0))
+}
+
+// =============================================================================
+// Location Search for Map Builder
+// =============================================================================
+
+/// Filters for searching locations.
+#[derive(Debug, Clone, Default)]
+pub struct LocationSearchFilters {
+    /// Filter by country code (ISO 3166-1 alpha-2)
+    pub country_code: Option<String>,
+    /// Filter by subdivision code (ISO 3166-2)
+    pub subdivision_code: Option<String>,
+    /// Minimum capture year
+    pub min_year: Option<i32>,
+    /// Maximum capture year
+    pub max_year: Option<i32>,
+    /// Exclude scout/trekker locations
+    pub outdoor_only: bool,
+    /// Exclude locations already in this map
+    pub exclude_map_id: Option<String>,
+}
+
+/// Search locations with filters for the map builder.
+pub async fn search_locations(
+    pool: &DbPool,
+    filters: &LocationSearchFilters,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Location>, i64), LocationError> {
+    // Build WHERE conditions
+    let mut conditions = vec![
+        "l.active = TRUE".to_string(),
+        "(l.review_status IS NULL OR l.review_status = 'approved')".to_string(),
+    ];
+
+    if let Some(ref country) = filters.country_code {
+        conditions.push(format!("l.country_code = '{}'", country));
+    }
+
+    if let Some(ref subdivision) = filters.subdivision_code {
+        conditions.push(format!("l.subdivision_code = '{}'", subdivision));
+    }
+
+    if let Some(min_year) = filters.min_year {
+        conditions.push(format!(
+            "(l.capture_date IS NULL OR EXTRACT(YEAR FROM l.capture_date) >= {})",
+            min_year
+        ));
+    }
+
+    if let Some(max_year) = filters.max_year {
+        conditions.push(format!(
+            "(l.capture_date IS NULL OR EXTRACT(YEAR FROM l.capture_date) <= {})",
+            max_year
+        ));
+    }
+
+    if filters.outdoor_only {
+        conditions.push("(l.is_scout IS NULL OR l.is_scout = FALSE)".to_string());
+    }
+
+    if let Some(ref map_id) = filters.exclude_map_id {
+        conditions.push(format!(
+            "NOT EXISTS (SELECT 1 FROM map_locations ml WHERE ml.location_id = l.id AND ml.map_id = '{}')",
+            map_id
+        ));
+    }
+
+    let where_clause = conditions.join(" AND ");
+
+    // Get total count
+    let count_query = format!("SELECT COUNT(*)::bigint FROM locations l WHERE {where_clause}");
+    let total: i64 = sqlx::query_scalar::<_, i64>(&count_query)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    // Get paginated results
+    let query = format!(
+        r#"
+        SELECT {LOCATION_COLUMNS}
+        FROM locations l
+        WHERE {where_clause}
+        ORDER BY l.country_code ASC, l.created_at DESC
+        LIMIT $1 OFFSET $2
+        "#
+    );
+
+    let rows = sqlx::query_as::<_, LocationRow>(&query)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    let locations: Result<Vec<Location>, _> = rows.into_iter().map(|r| r.try_into()).collect();
+    Ok((locations?, total))
+}
+
+/// Get available countries for location filtering.
+pub async fn get_available_countries(pool: &DbPool) -> Result<Vec<(String, i64)>, LocationError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT country_code, COUNT(*) as count
+        FROM locations
+        WHERE active = TRUE 
+          AND country_code IS NOT NULL
+          AND (review_status IS NULL OR review_status = 'approved')
+        GROUP BY country_code
+        ORDER BY count DESC
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(rows.into_iter().filter_map(|r| r.country_code.map(|c| (c, r.count.unwrap_or(0)))).collect())
+}
+
+/// Get available subdivisions for a country.
+pub async fn get_available_subdivisions(
+    pool: &DbPool,
+    country_code: &str,
+) -> Result<Vec<(String, i64)>, LocationError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT subdivision_code, COUNT(*) as count
+        FROM locations
+        WHERE active = TRUE 
+          AND country_code = $1
+          AND subdivision_code IS NOT NULL
+          AND (review_status IS NULL OR review_status = 'approved')
+        GROUP BY subdivision_code
+        ORDER BY count DESC
+        "#,
+        country_code
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| r.subdivision_code.map(|s| (s, r.count.unwrap_or(0))))
+        .collect())
 }

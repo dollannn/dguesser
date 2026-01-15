@@ -18,6 +18,7 @@
   import PlayIcon from '@lucide/svelte/icons/play';
   import SettingsIcon from '@lucide/svelte/icons/settings';
   import MenuIcon from '@lucide/svelte/icons/menu';
+  import MapIcon from '@lucide/svelte/icons/map';
 
   // Game state detection for pill header
   let gameState = $derived($gameStore);
@@ -161,6 +162,16 @@
             <HistoryIcon class="size-4" />
             History
           </a>
+          <a 
+            href="/maps" 
+            class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors
+              {isActive('/maps') 
+                ? 'bg-accent text-accent-foreground' 
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}"
+          >
+            <MapIcon class="size-4" />
+            Maps
+          </a>
         </nav>
       {/if}
 
@@ -219,6 +230,10 @@
                 <DropdownMenu.Item onSelect={() => goto('/history')}>
                   <HistoryIcon />
                   History
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => goto('/maps')}>
+                  <MapIcon />
+                  Maps
                 </DropdownMenu.Item>
                 <DropdownMenu.Separator />
               </DropdownMenu.Group>

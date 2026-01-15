@@ -9,6 +9,7 @@ pub mod geo;
 pub mod id;
 pub mod location;
 pub mod session;
+pub mod streetview;
 
 pub use error::CoreError;
 pub use id::{

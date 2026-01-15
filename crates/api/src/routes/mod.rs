@@ -14,6 +14,7 @@ pub mod games;
 pub mod health;
 pub mod leaderboard;
 pub mod locations;
+pub mod maps;
 pub mod sessions;
 pub mod users;
 
@@ -45,6 +46,18 @@ pub mod users;
         sessions::revoke_other_sessions,
         leaderboard::get_leaderboard,
         locations::report_location,
+        locations::search_locations,
+        locations::get_countries,
+        locations::get_subdivisions,
+        maps::list_maps,
+        maps::create_map,
+        maps::get_map,
+        maps::update_map,
+        maps::delete_map,
+        maps::get_map_locations,
+        maps::add_locations,
+        maps::add_locations_from_urls,
+        maps::remove_location,
         admin::get_stats,
         admin::get_review_queue,
         admin::get_location_detail,
@@ -83,6 +96,26 @@ pub mod users;
         sessions::RevokeSessionResponse,
         locations::ReportLocationRequest,
         locations::ReportLocationResponse,
+        locations::SearchLocationsQuery,
+        locations::LocationSearchItem,
+        locations::SearchLocationsResponse,
+        locations::CountryInfo,
+        locations::CountriesResponse,
+        locations::SubdivisionInfo,
+        locations::SubdivisionsResponse,
+        maps::MapSummary,
+        maps::ListMapsResponse,
+        maps::CreateMapRequest,
+        maps::CreateMapResponse,
+        maps::MapDetails,
+        maps::UpdateMapRequest,
+        maps::MapLocationItem,
+        maps::MapLocationsResponse,
+        maps::AddLocationsRequest,
+        maps::AddLocationsResponse,
+        maps::AddLocationsFromUrlsRequest,
+        maps::UrlParseResult,
+        maps::AddLocationsFromUrlsResponse,
         health::HealthResponse,
         health::HealthChecks,
         health::CheckResult,
@@ -104,6 +137,7 @@ pub mod users;
         (name = "sessions", description = "Session management endpoints"),
         (name = "leaderboard", description = "Global leaderboard endpoints"),
         (name = "locations", description = "Location management endpoints"),
+        (name = "maps", description = "Map builder endpoints"),
         (name = "admin", description = "Admin dashboard endpoints"),
     ),
     info(
@@ -123,6 +157,7 @@ pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
         .nest("/games", games::router())
         .nest("/leaderboard", leaderboard::router())
         .nest("/locations", locations::router())
+        .nest("/maps", maps::router())
         .nest("/admin", admin::router())
         // Apply rate limiting to API routes
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit));

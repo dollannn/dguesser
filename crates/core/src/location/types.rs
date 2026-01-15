@@ -132,6 +132,42 @@ pub enum ReviewStatus {
     Flagged,
 }
 
+/// Visibility of a user-created map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MapVisibility {
+    /// Only the creator can see and play
+    #[default]
+    Private,
+    /// Accessible via direct link, not listed publicly
+    Unlisted,
+    /// Listed and playable by everyone
+    Public,
+}
+
+impl std::fmt::Display for MapVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MapVisibility::Private => write!(f, "private"),
+            MapVisibility::Unlisted => write!(f, "unlisted"),
+            MapVisibility::Public => write!(f, "public"),
+        }
+    }
+}
+
+impl std::str::FromStr for MapVisibility {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "private" => Ok(MapVisibility::Private),
+            "unlisted" => Ok(MapVisibility::Unlisted),
+            "public" => Ok(MapVisibility::Public),
+            _ => Err(format!("Unknown map visibility: {s}")),
+        }
+    }
+}
+
 impl std::fmt::Display for ReviewStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -278,10 +314,43 @@ pub struct Map {
     pub is_default: bool,
     /// Whether this map is active
     pub active: bool,
+    /// User who created this map (None for system maps)
+    pub creator_id: Option<String>,
+    /// Visibility setting for the map
+    pub visibility: MapVisibility,
+    /// Denormalized count of locations in this map
+    pub location_count: i32,
     /// When this map was created
     pub created_at: DateTime<Utc>,
     /// When this map was last updated
     pub updated_at: DateTime<Utc>,
+}
+
+impl Map {
+    /// Check if a user can view this map.
+    pub fn is_visible_to(&self, user_id: Option<&str>) -> bool {
+        match self.visibility {
+            MapVisibility::Public | MapVisibility::Unlisted => true,
+            MapVisibility::Private => {
+                // Private maps only visible to creator
+                match (&self.creator_id, user_id) {
+                    (Some(creator), Some(user)) => creator == user,
+                    (None, _) => true, // System maps are always visible
+                    _ => false,
+                }
+            }
+        }
+    }
+
+    /// Check if a user can edit this map.
+    pub fn is_owned_by(&self, user_id: &str) -> bool {
+        self.creator_id.as_deref() == Some(user_id)
+    }
+
+    /// Check if this is a system map (no creator).
+    pub fn is_system_map(&self) -> bool {
+        self.creator_id.is_none()
+    }
 }
 
 /// Trait for selecting random locations from the location pool.
