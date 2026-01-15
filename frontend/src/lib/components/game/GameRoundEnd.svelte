@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { GameDetails } from '$lib/api/games';
+  import { gamesApi } from '$lib/api/games';
   import { gameStore } from '$lib/socket/game';
   import { user } from '$lib/stores/auth';
   import { getRankDisplay, getRankClass, formatScore, formatDistance } from '$lib/utils.js';
@@ -23,6 +24,40 @@
   let state = $derived($gameStore);
   let results = $derived(state.results);
   let correctLocation = $derived(state.location);
+  
+  // For solo mode: auto-transition to finished after last round
+  let isLastRound = $derived(state.currentRound >= state.totalRounds);
+  
+  $effect(() => {
+    if (game.mode === 'solo' && isLastRound) {
+      const timer = setTimeout(async () => {
+        try {
+          // Fetch updated game data with final scores
+          const updatedGame = await gamesApi.get(game.id);
+          
+          // Build final standings from players (sorted by score descending)
+          const standings = updatedGame.players
+            .toSorted((a, b) => b.score - a.score)
+            .map((p, i) => ({
+              rank: i + 1,
+              user_id: p.user_id,
+              display_name: p.display_name || 'You',
+              total_score: p.score,
+            }));
+          
+          // Trigger game end transition
+          gameStore.handleGameEnd({
+            game_id: game.id,
+            final_standings: standings,
+          });
+        } catch (e) {
+          console.error('Failed to fetch final results:', e);
+        }
+      }, 3000);
+      
+      return () => clearTimeout(timer);
+    }
+  });
   
   // Sort results by score (highest first) and assign ranks
   let rankedResults = $derived(() => {
