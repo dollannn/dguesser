@@ -4,12 +4,15 @@
   import { gameStore } from '$lib/socket/game';
   import { gamesApi } from '$lib/api/games';
   import { user } from '$lib/stores/auth';
+  import { Send, CheckCircle, Loader2 } from '@lucide/svelte';
 
   import StreetView from './StreetView.svelte';
-  import GuessMap from './GuessMap.svelte';
-  import GameTimer from './GameTimer.svelte';
-  import RoundInfo from './RoundInfo.svelte';
+  import LeafletMap from './LeafletMap.svelte';
+  import CircularTimer from './CircularTimer.svelte';
+  import RoundBadge from './RoundBadge.svelte';
+  import GameHUD from './GameHUD.svelte';
   import GameScoreboard from './GameScoreboard.svelte';
+  import { Button } from '$lib/components/ui/button';
 
   interface Props {
     game: GameDetails;
@@ -19,7 +22,7 @@
 
   let guessLat: number | null = $state(null);
   let guessLng: number | null = $state(null);
-  let showMap = $state(false);
+  let mapExpanded = $state(false);
   let submitting = $state(false);
   let guessStartTime = $state(Date.now());
 
@@ -88,44 +91,11 @@
   });
 </script>
 
-<div class="h-screen flex flex-col">
-  <!-- Top bar with round info and timer -->
-  <div class="bg-white shadow-sm z-10 p-4">
-    <div class="max-w-7xl mx-auto flex justify-between items-center">
-      <RoundInfo currentRound={gameState.currentRound} totalRounds={gameState.totalRounds} />
-
-      {#if gameState.timeLimit}
-        <GameTimer
-          startedAt={gameState.roundStartedAt}
-          durationMs={gameState.timeLimit}
-          onTimeUp={handleTimeUp}
-        />
-      {/if}
-
-      <!-- Players who have guessed (multiplayer) -->
-      {#if game.mode === 'multiplayer'}
-        <div class="flex gap-2">
-          {#each [...gameState.players] as [id, player]}
-            <div
-              class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium"
-              class:bg-green-100={player.hasGuessed}
-              class:text-green-700={player.hasGuessed}
-              class:bg-gray-100={!player.hasGuessed}
-              class:text-gray-500={!player.hasGuessed}
-              title={player.displayName}
-            >
-              {player.displayName.charAt(0).toUpperCase()}
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Main game area -->
-  <div class="flex-1 relative">
-    <!-- Street View -->
-    {#if gameState.location}
+<!-- Full screen game container -->
+<div class="h-screen w-screen relative overflow-hidden bg-gray-900">
+  <!-- Street View (full screen background) -->
+  {#if gameState.location}
+    <div class="absolute inset-0 w-full h-full">
       <StreetView
         lat={gameState.location.lat}
         lng={gameState.location.lng}
@@ -133,61 +103,139 @@
         movementAllowed={game.settings.movement_allowed}
         zoomAllowed={game.settings.zoom_allowed}
       />
-    {/if}
-
-    <!-- Live scoreboard (multiplayer only) -->
-    {#if game.mode === 'multiplayer' && gameState.liveScores.length > 0}
-      <div class="absolute top-4 left-4 z-10">
-        <GameScoreboard scores={gameState.liveScores} currentUserId={$user?.id ?? null} />
+    </div>
+  {:else}
+    <!-- Loading state when no location -->
+    <div class="absolute inset-0 flex items-center justify-center">
+      <div class="text-center text-white">
+        <div class="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+        <p class="text-lg">Loading Street View...</p>
       </div>
-    {/if}
+    </div>
+  {/if}
 
-    <!-- Mini map / Guess map -->
-    <div
-      class="absolute bottom-4 right-4 transition-all duration-300"
-      class:w-64={!showMap}
-      class:h-48={!showMap}
-      class:w-[600px]={showMap}
-      class:h-[400px]={showMap}
-    >
-      <div
-        class="relative w-full h-full bg-white rounded-lg shadow-lg overflow-hidden"
-        role="button"
-        tabindex="0"
-        onmouseenter={() => (showMap = true)}
-        onmouseleave={() => !guessLat && (showMap = false)}
-        onkeydown={(e) => e.key === 'Enter' && (showMap = !showMap)}
-      >
-        <GuessMap
-          {guessLat}
-          {guessLng}
-          disabled={gameState.hasGuessed}
-          onclick={handleMapClick}
-        />
+  <!-- HUD Overlay -->
+  <GameHUD>
+    <!-- Top Left: Scoreboard (multiplayer only) -->
+    {#snippet topLeft()}
+      {#if game.mode === 'multiplayer' && gameState.liveScores.length > 0}
+        <GameScoreboard scores={gameState.liveScores} currentUserId={$user?.id ?? null} />
+      {/if}
+    {/snippet}
 
-        <!-- Submit button overlay -->
-        {#if showMap && canSubmit}
-          <div class="absolute bottom-4 left-1/2 -translate-x-1/2">
-            <button
-              onclick={submitGuess}
-              disabled={submitting}
-              class="btn-accent px-8 py-3 text-lg shadow-lg"
-            >
-              {submitting ? 'Submitting...' : 'Submit Guess'}
-            </button>
+    <!-- Top Right: Round badge + Timer -->
+    {#snippet topRight()}
+      <div class="flex items-center gap-3">
+        <RoundBadge currentRound={gameState.currentRound} totalRounds={gameState.totalRounds} />
+
+        {#if gameState.timeLimit}
+          <div class="bg-background/85 backdrop-blur-md rounded-full p-1.5 border border-border/50 shadow-lg">
+            <CircularTimer
+              startedAt={gameState.roundStartedAt}
+              durationMs={gameState.timeLimit}
+              onTimeUp={handleTimeUp}
+            />
+          </div>
+        {/if}
+
+        <!-- Players who have guessed (multiplayer) -->
+        {#if game.mode === 'multiplayer'}
+          <div class="flex -space-x-2">
+            {#each [...gameState.players].slice(0, 5) as [id, player]}
+              <div
+                class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border-2 border-background shadow-sm transition-all duration-300"
+                class:bg-green-500={player.hasGuessed}
+                class:text-white={player.hasGuessed}
+                class:bg-muted={!player.hasGuessed}
+                class:text-muted-foreground={!player.hasGuessed}
+                title="{player.displayName} {player.hasGuessed ? '(guessed)' : '(thinking...)'}"
+              >
+                {player.displayName.charAt(0).toUpperCase()}
+              </div>
+            {/each}
+            {#if gameState.players.size > 5}
+              <div
+                class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border-2 border-background shadow-sm bg-muted text-muted-foreground"
+              >
+                +{gameState.players.size - 5}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
-    </div>
+    {/snippet}
 
-    <!-- Already guessed indicator -->
-    {#if gameState.hasGuessed}
+    <!-- Bottom Right: Interactive Map -->
+    {#snippet bottomRight()}
       <div
-        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 text-white px-6 py-4 rounded-lg text-center"
+        class="transition-all duration-300 ease-out"
+        class:w-64={!mapExpanded}
+        class:h-48={!mapExpanded}
+        class:w-[500px]={mapExpanded}
+        class:h-[350px]={mapExpanded}
+        class:md:w-[600px]={mapExpanded}
+        class:md:h-[400px]={mapExpanded}
       >
-        <p class="text-lg font-semibold">Guess submitted!</p>
-        <p class="text-sm text-gray-300">Waiting for other players...</p>
+        <div
+          class="relative w-full h-full bg-background/90 backdrop-blur-sm rounded-xl border border-border/50 shadow-2xl overflow-hidden"
+          role="region"
+          aria-label="Guess map"
+          onmouseenter={() => (mapExpanded = true)}
+          onmouseleave={() => !guessLat && (mapExpanded = false)}
+        >
+          <LeafletMap
+            {guessLat}
+            {guessLng}
+            disabled={gameState.hasGuessed}
+            expanded={mapExpanded}
+            onclick={handleMapClick}
+          />
+
+          <!-- Submit button overlay -->
+          {#if mapExpanded && canSubmit}
+            <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
+              <Button
+                onclick={submitGuess}
+                disabled={submitting}
+                size="lg"
+                class="px-8 shadow-lg gap-2"
+              >
+                {#if submitting}
+                  <Loader2 class="w-5 h-5 animate-spin" />
+                  Submitting...
+                {:else}
+                  <Send class="w-5 h-5" />
+                  Submit Guess
+                {/if}
+              </Button>
+            </div>
+          {/if}
+
+          <!-- Expand hint (when collapsed and no guess) -->
+          {#if !mapExpanded && !guessLat}
+            <div class="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+              <span class="text-white text-sm font-medium drop-shadow-md">
+                Hover to expand
+              </span>
+            </div>
+          {/if}
+        </div>
       </div>
-    {/if}
-  </div>
+    {/snippet}
+
+    <!-- Center: Status messages -->
+    {#snippet center()}
+      {#if gameState.hasGuessed}
+        <div class="bg-background/90 backdrop-blur-md px-6 py-4 rounded-xl border border-border/50 shadow-xl text-center">
+          <div class="flex items-center justify-center gap-2 mb-1">
+            <CheckCircle class="w-5 h-5 text-green-500" />
+            <p class="text-lg font-semibold text-foreground">Guess submitted!</p>
+          </div>
+          <p class="text-sm text-muted-foreground">
+            {game.mode === 'multiplayer' ? 'Waiting for other players...' : 'Processing results...'}
+          </p>
+        </div>
+      {/if}
+    {/snippet}
+  </GameHUD>
 </div>

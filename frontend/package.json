@@ -20,6 +20,7 @@
 		"@tailwindcss/vite": "^4.1.18",
 		"@tanstack/table-core": "^8.21.3",
 		"@types/google.maps": "^3.58.1",
+		"@types/leaflet": "^1.9.21",
 		"@types/node": "^25.0.8",
 		"autoprefixer": "^10.4.23",
 		"bits-ui": "^2.14.4",
@@ -43,6 +44,7 @@
 	},
 	"dependencies": {
 		"@fontsource-variable/inter": "^5.2.8",
+		"leaflet": "^1.9.4",
 		"socket.io-client": "^4.8.3"
 	}
 }

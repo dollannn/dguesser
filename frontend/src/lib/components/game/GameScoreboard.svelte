@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { PlayerScoreInfo } from '$lib/socket/game';
   import { getRankDisplay, getRankClass, formatScore } from '$lib/utils.js';
+  import { ChevronLeft, Trophy, Users, Wifi, WifiOff } from '@lucide/svelte';
+  import * as Avatar from '$lib/components/ui/avatar';
 
   interface Props {
     scores: PlayerScoreInfo[];
@@ -10,7 +12,12 @@
 
   let { scores, currentUserId = null, collapsed = false }: Props = $props();
 
-  let isExpanded = $state(!collapsed);
+  let isExpanded = $state(true);
+
+  // Sync with collapsed prop
+  $effect(() => {
+    isExpanded = !collapsed;
+  });
 
   // Track previous scores for rank change animations
   let prevScores = $state<Map<string, { rank: number; score: number }>>(new Map());
@@ -21,7 +28,7 @@
     for (const player of scores) {
       const prev = prevScores.get(player.user_id);
       if (prev) {
-        const change = prev.rank - player.rank; // Positive = moved up
+        const change = prev.rank - player.rank;
         if (change !== 0) {
           changes.set(player.user_id, change);
         }
@@ -36,7 +43,6 @@
     for (const player of scores) {
       newMap.set(player.user_id, { rank: player.rank, score: player.total_score });
     }
-    // Delay update so we can show the change animation
     setTimeout(() => {
       prevScores = newMap;
     }, 2000);
@@ -44,109 +50,114 @@
 </script>
 
 <div
-  class="bg-white/95 backdrop-blur-sm rounded-lg shadow-lg overflow-hidden transition-all duration-300"
-  class:w-64={isExpanded}
+  class="bg-background/85 backdrop-blur-md rounded-xl border border-border/50 shadow-lg overflow-hidden transition-all duration-300"
+  class:w-72={isExpanded}
   class:w-12={!isExpanded}
 >
   <!-- Header / Toggle -->
   <button
     onclick={() => (isExpanded = !isExpanded)}
-    class="w-full flex items-center gap-2 px-3 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-150 transition-colors border-b border-gray-200"
+    class="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-accent/50 transition-colors"
   >
-    <svg
-      class="w-5 h-5 text-gray-600 shrink-0"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        stroke-width="2"
-        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-      />
-    </svg>
+    <Trophy class="w-5 h-5 text-primary shrink-0" />
     {#if isExpanded}
-      <span class="text-sm font-semibold text-gray-700">Scoreboard</span>
-      <svg
-        class="w-4 h-4 ml-auto text-gray-400"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-      </svg>
+      <span class="text-sm font-semibold text-foreground">Scoreboard</span>
+      <span class="ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+        {scores.length}
+      </span>
+      <ChevronLeft class="w-4 h-4 text-muted-foreground" />
     {/if}
   </button>
 
   <!-- Scores list -->
   {#if isExpanded && scores.length > 0}
-    <div class="max-h-72 overflow-y-auto">
-      <ul class="divide-y divide-gray-100">
+    <div class="max-h-80 overflow-y-auto border-t border-border/50">
+      <ul class="divide-y divide-border/30">
         {#each scores as player (player.user_id)}
           {@const isCurrentUser = currentUserId === player.user_id}
           {@const rankChange = rankChanges().get(player.user_id)}
           <li
-            class="px-3 py-2.5 flex items-center gap-2 transition-colors {isCurrentUser
-              ? 'bg-primary-50'
-              : 'hover:bg-gray-50'}"
+            class="px-3 py-2.5 flex items-center gap-2.5 transition-colors {isCurrentUser
+              ? 'bg-primary/10'
+              : 'hover:bg-accent/30'}"
           >
-            <!-- Rank -->
-            <div class="w-10 flex items-center justify-center">
-              <span class="text-sm font-semibold {getRankClass(player.rank)}">
+            <!-- Rank Badge -->
+            <div class="w-8 flex items-center justify-center shrink-0">
+              <span
+                class="text-sm font-bold {getRankClass(player.rank)} {player.rank <= 3
+                  ? 'text-base'
+                  : ''}"
+              >
                 {getRankDisplay(player.rank)}
               </span>
             </div>
 
-            <!-- Avatar / Status indicator -->
+            <!-- Avatar with status indicator -->
             <div class="relative shrink-0">
-              {#if player.avatar_url}
-                <img src={player.avatar_url} alt="" class="w-7 h-7 rounded-full ring-1 ring-gray-200" />
-              {:else}
-                <div
-                  class="w-7 h-7 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center text-xs font-medium text-gray-600"
+              <Avatar.Root class="w-8 h-8 ring-2 ring-background">
+                {#if player.avatar_url}
+                  <Avatar.Image src={player.avatar_url} alt={player.display_name} />
+                {/if}
+                <Avatar.Fallback
+                  class="bg-gradient-to-br from-primary/20 to-primary/40 text-xs font-semibold"
                 >
                   {player.display_name.charAt(0).toUpperCase()}
-                </div>
-              {/if}
+                </Avatar.Fallback>
+              </Avatar.Root>
 
               <!-- Guessed indicator -->
               {#if player.has_guessed}
                 <div
-                  class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white"
+                  class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-background flex items-center justify-center"
                   title="Has guessed"
-                ></div>
+                >
+                  <svg class="w-2 h-2 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                </div>
               {/if}
 
-              <!-- Disconnected indicator -->
+              <!-- Disconnected overlay -->
               {#if !player.connected}
-                <div class="absolute inset-0 bg-gray-900/40 rounded-full" title="Disconnected"></div>
+                <div
+                  class="absolute inset-0 bg-background/60 rounded-full flex items-center justify-center"
+                  title="Disconnected"
+                >
+                  <WifiOff class="w-3 h-3 text-muted-foreground" />
+                </div>
               {/if}
             </div>
 
             <!-- Name -->
             <span
               class="flex-1 text-sm truncate {isCurrentUser
-                ? 'font-semibold text-primary-700'
-                : 'text-gray-700'} {!player.connected ? 'opacity-50' : ''}"
+                ? 'font-semibold text-primary'
+                : 'text-foreground'} {!player.connected ? 'opacity-60' : ''}"
             >
               {player.display_name}
+              {#if isCurrentUser}
+                <span class="text-xs text-muted-foreground ml-1">(you)</span>
+              {/if}
             </span>
 
             <!-- Score -->
-            <div class="text-right min-w-[60px]">
+            <div class="text-right min-w-[60px] shrink-0">
               <div class="flex items-center justify-end gap-1">
                 {#if rankChange && rankChange > 0}
-                  <span class="text-green-500 text-xs animate-pulse">↑{rankChange}</span>
+                  <span class="text-green-500 text-xs font-medium animate-pulse">
+                    +{rankChange}
+                  </span>
                 {:else if rankChange && rankChange < 0}
-                  <span class="text-red-400 text-xs animate-pulse">↓{Math.abs(rankChange)}</span>
+                  <span class="text-red-400 text-xs font-medium animate-pulse">
+                    {rankChange}
+                  </span>
                 {/if}
-                <span class="text-sm font-bold text-gray-900">
+                <span class="text-sm font-bold text-foreground">
                   {formatScore(player.total_score)}
                 </span>
               </div>
               {#if player.round_score > 0}
-                <div class="text-xs text-green-600 font-medium">
+                <div class="text-xs text-green-600 dark:text-green-400 font-medium">
                   +{formatScore(player.round_score)}
                 </div>
               {/if}
@@ -156,11 +167,9 @@
       </ul>
     </div>
   {:else if isExpanded}
-    <div class="px-3 py-6 text-center text-sm text-gray-500">
-      <svg class="w-8 h-8 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m9 5.197v1" />
-      </svg>
-      No players yet
+    <div class="px-4 py-8 text-center border-t border-border/50">
+      <Users class="w-10 h-10 mx-auto mb-2 text-muted-foreground/50" />
+      <p class="text-sm text-muted-foreground">No players yet</p>
     </div>
   {/if}
 </div>
