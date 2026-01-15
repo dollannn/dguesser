@@ -1,22 +1,19 @@
 # Build stage
-FROM node:22-alpine AS builder
+FROM oven/bun:1 AS builder
 
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json ./
+COPY package.json bun.lock ./
 
 # Install dependencies
-RUN npm ci
+RUN bun install --frozen-lockfile
 
 # Copy source files
 COPY . .
 
 # Build the application
-RUN npm run build
-
-# Remove dev dependencies for production
-RUN npm prune --omit=dev
+RUN bun run build
 
 # Runtime stage
 FROM gcr.io/distroless/nodejs22-debian12

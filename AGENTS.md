@@ -35,9 +35,9 @@ make dev-realtime                     # Realtime with hot reload
 
 ### Frontend
 ```bash
-cd frontend && npm install            # Install dependencies
-cd frontend && npm run dev            # Development server
-cd frontend && npm run check          # TypeScript + Svelte type checking
+cd frontend && bun install            # Install dependencies
+cd frontend && bun run dev            # Development server
+cd frontend && bun run check          # TypeScript + Svelte type checking
 ```
 
 ### Infrastructure
