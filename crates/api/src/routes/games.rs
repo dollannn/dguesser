@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/", post(create_game))
         .route("/{id}", get(get_game))
         .route("/{id}/start", post(start_game))
+        .route("/{id}/rounds/current", get(get_current_round))
         .route("/{id}/rounds/next", post(next_round))
         .route("/{id}/rounds/{round}/guess", post(submit_guess))
         .route("/history", get(get_game_history))
@@ -111,6 +112,38 @@ pub struct RoundInfo {
     pub started_at: DateTime<Utc>,
     /// Time limit in milliseconds (None = unlimited)
     pub time_limit_ms: Option<u32>,
+}
+
+/// Current round info response (for resuming games)
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CurrentRoundInfo {
+    /// Round number (1-based)
+    pub round_number: u8,
+    /// Total rounds in the game
+    pub total_rounds: u8,
+    /// Location to guess
+    pub location: LocationInfo,
+    /// When the round started
+    pub started_at: DateTime<Utc>,
+    /// Time remaining in milliseconds (None = unlimited)
+    pub time_remaining_ms: Option<i64>,
+    /// Whether the user has already submitted a guess for this round
+    pub has_guessed: bool,
+    /// The user's guess details if they already guessed
+    pub user_guess: Option<UserGuessInfo>,
+}
+
+/// User's guess info (for resuming games where user already guessed)
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserGuessInfo {
+    /// Guessed latitude
+    pub guess_lat: f64,
+    /// Guessed longitude
+    pub guess_lng: f64,
+    /// Distance from correct location in meters
+    pub distance_meters: f64,
+    /// Score awarded
+    pub score: u32,
 }
 
 /// Location info
@@ -385,6 +418,90 @@ pub async fn start_game(
         },
         started_at: Utc::now(),
         time_limit_ms,
+    }))
+}
+
+/// Get the current active round for a game (for resuming)
+#[utoipa::path(
+    get,
+    path = "/api/v1/games/{id}/rounds/current",
+    params(
+        ("id" = String, Path, description = "Game ID")
+    ),
+    responses(
+        (status = 200, description = "Current round info", body = CurrentRoundInfo),
+        (status = 400, description = "Game not active"),
+        (status = 403, description = "Not a player in this game"),
+        (status = 404, description = "Game or round not found"),
+    ),
+    tag = "games"
+)]
+pub async fn get_current_round(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<CurrentRoundInfo>, ApiError> {
+    let game = dguesser_db::games::get_game_by_id(state.db(), &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Game"))?;
+
+    // Verify user is a player
+    let players = dguesser_db::games::get_players(state.db(), &id).await?;
+    let is_player = players.iter().any(|p| p.user_id == auth.user_id);
+
+    if !is_player {
+        return Err(ApiError::forbidden("Not a player in this game"));
+    }
+
+    // Game must be active
+    if game.status != GameStatus::Active {
+        return Err(ApiError::bad_request("INVALID_STATE", "Game is not active"));
+    }
+
+    // Get all rounds and find the current (last) one
+    let rounds = dguesser_db::games::get_rounds_for_game(state.db(), &id).await?;
+    let round = rounds.last().ok_or_else(|| ApiError::not_found("No rounds found"))?;
+
+    let total_rounds = game.settings.get("rounds").and_then(|v| v.as_u64()).unwrap_or(5) as u8;
+
+    // Calculate time remaining
+    let time_remaining_ms = match (round.started_at, round.time_limit_ms) {
+        (Some(started), Some(limit)) => {
+            let elapsed = (Utc::now() - started).num_milliseconds();
+            Some((limit as i64 - elapsed).max(0))
+        }
+        _ => None,
+    };
+
+    // Check if user has already guessed this round
+    let existing_guess =
+        dguesser_db::games::get_guess(state.db(), &round.id, &auth.user_id).await?;
+
+    let (has_guessed, user_guess) = match existing_guess {
+        Some(guess) => (
+            true,
+            Some(UserGuessInfo {
+                guess_lat: guess.guess_lat,
+                guess_lng: guess.guess_lng,
+                distance_meters: guess.distance_meters,
+                score: guess.score as u32,
+            }),
+        ),
+        None => (false, None),
+    };
+
+    Ok(Json(CurrentRoundInfo {
+        round_number: round.round_number as u8,
+        total_rounds,
+        location: LocationInfo {
+            lat: round.location_lat,
+            lng: round.location_lng,
+            panorama_id: round.panorama_id.clone(),
+        },
+        started_at: round.started_at.unwrap_or_else(Utc::now),
+        time_remaining_ms,
+        has_guessed,
+        user_guess,
     }))
 }
 

@@ -59,6 +59,23 @@ export interface RoundInfo {
   time_limit_ms: number | null;
 }
 
+export interface CurrentRoundInfo {
+  round_number: number;
+  total_rounds: number;
+  location: Location;
+  started_at: string;
+  time_remaining_ms: number | null;
+  has_guessed: boolean;
+  user_guess: UserGuessInfo | null;
+}
+
+export interface UserGuessInfo {
+  guess_lat: number;
+  guess_lng: number;
+  distance_meters: number;
+  score: number;
+}
+
 export interface GuessResult {
   distance_meters: number;
   score: number;
@@ -88,6 +105,11 @@ export const gamesApi = {
   /** Start a game (host only) */
   async start(gameId: string): Promise<RoundInfo> {
     return api.post<RoundInfo>(`/games/${gameId}/start`);
+  },
+
+  /** Get current round info (for resuming in-progress games) */
+  async getCurrentRound(gameId: string): Promise<CurrentRoundInfo> {
+    return api.get<CurrentRoundInfo>(`/games/${gameId}/rounds/current`);
   },
 
   /** Advance to the next round (solo games only) */

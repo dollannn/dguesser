@@ -403,6 +403,15 @@ function createGameStore() {
       }));
     },
 
+    /** Set round info (for restoring state) */
+    setRoundInfo(currentRound: number, totalRounds: number): void {
+      update((s) => ({
+        ...s,
+        currentRound,
+        totalRounds,
+      }));
+    },
+
     reset(): void {
       socketClient.setActiveGame(null);
       set(initialState);
