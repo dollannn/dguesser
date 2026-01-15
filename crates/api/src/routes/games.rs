@@ -664,6 +664,12 @@ pub async fn next_round(
     // Check if game should end
     if game_state.round_number >= game_state.settings.rounds {
         dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Finished).await?;
+
+        // Update user stats for leaderboard
+        let player_score =
+            game_state.players.get(&auth.user_id).map(|p| p.total_score).unwrap_or(0);
+        dguesser_db::users::update_stats(state.db(), &auth.user_id, player_score as i32).await?;
+
         return Err(ApiError::bad_request("GAME_COMPLETE", "All rounds completed"));
     }
 
@@ -680,6 +686,12 @@ pub async fn next_round(
     if result.has_error() {
         // Game is complete
         dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Finished).await?;
+
+        // Update user stats for leaderboard
+        let player_score =
+            game_state.players.get(&auth.user_id).map(|p| p.total_score).unwrap_or(0);
+        dguesser_db::users::update_stats(state.db(), &auth.user_id, player_score as i32).await?;
+
         return Err(ApiError::bad_request("GAME_COMPLETE", "All rounds completed"));
     }
 
