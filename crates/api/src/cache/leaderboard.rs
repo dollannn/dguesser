@@ -101,6 +101,7 @@ impl LeaderboardCache {
     }
 
     /// Invalidate all leaderboard caches (call after game completion)
+    #[allow(dead_code)]
     pub async fn invalidate_all(client: &redis::Client) {
         let mut conn = match client.get_multiplexed_async_connection().await {
             Ok(conn) => conn,

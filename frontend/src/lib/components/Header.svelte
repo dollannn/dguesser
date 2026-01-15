@@ -138,6 +138,11 @@
                 Sign in to save progress
               </DropdownMenu.Item>
             {:else}
+              <DropdownMenu.Item onSelect={() => goto('/account')}>
+                <SettingsIcon />
+                Account Settings
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
               <DropdownMenu.Item onSelect={handleLogout} variant="destructive">
                 <LogOutIcon />
                 Log out

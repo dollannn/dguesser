@@ -12,6 +12,7 @@ pub mod auth;
 pub mod games;
 pub mod health;
 pub mod leaderboard;
+pub mod sessions;
 pub mod users;
 
 /// OpenAPI documentation
@@ -33,6 +34,12 @@ pub mod users;
         games::get_game_history,
         users::get_profile,
         users::update_profile,
+        users::get_user_profile,
+        users::get_user_by_username,
+        users::delete_account,
+        sessions::list_sessions,
+        sessions::revoke_session,
+        sessions::revoke_other_sessions,
         leaderboard::get_leaderboard,
     ),
     components(schemas(
@@ -57,6 +64,12 @@ pub mod users;
         games::GuessResultResponse,
         games::GameSummary,
         games::SubmitGuessRequest,
+        users::UserProfileResponse,
+        users::UpdateProfileRequest,
+        users::DeleteAccountResponse,
+        sessions::SessionInfo,
+        sessions::SessionsListResponse,
+        sessions::RevokeSessionResponse,
         health::HealthResponse,
         health::HealthChecks,
         health::CheckResult,
@@ -66,6 +79,7 @@ pub mod users;
         (name = "auth", description = "Authentication endpoints"),
         (name = "games", description = "Game management endpoints"),
         (name = "users", description = "User profile endpoints"),
+        (name = "sessions", description = "Session management endpoints"),
         (name = "leaderboard", description = "Global leaderboard endpoints"),
     ),
     info(
@@ -81,6 +95,7 @@ pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
     let api_routes = Router::new()
         .nest("/auth", auth::router())
         .nest("/users", users::router())
+        .nest("/sessions", sessions::router())
         .nest("/games", games::router())
         .nest("/leaderboard", leaderboard::router())
         // Apply rate limiting to API routes

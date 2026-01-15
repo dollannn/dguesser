@@ -35,5 +35,7 @@ rand.workspace = true
 validator.workspace = true
 utoipa.workspace = true
 utoipa-swagger-ui.workspace = true
+once_cell.workspace = true
+regex.workspace = true
 
 http = "1"

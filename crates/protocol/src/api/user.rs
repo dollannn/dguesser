@@ -10,6 +10,9 @@ pub struct UserProfile {
     /// User ID (e.g., usr_V1StGXR8_Z5j)
     #[schema(example = "usr_V1StGXR8_Z5j")]
     pub id: String,
+    /// Unique username (e.g., coolplayer42)
+    #[schema(example = "coolplayer42")]
+    pub username: Option<String>,
     /// Display name
     #[schema(example = "CoolPlayer42")]
     pub display_name: String,
@@ -31,6 +34,9 @@ pub struct CurrentUser {
     /// User ID (e.g., usr_V1StGXR8_Z5j)
     #[schema(example = "usr_V1StGXR8_Z5j")]
     pub id: String,
+    /// Unique username (e.g., coolplayer42)
+    #[schema(example = "coolplayer42")]
+    pub username: Option<String>,
     /// Display name
     #[schema(example = "CoolPlayer42")]
     pub display_name: String,
@@ -48,6 +54,9 @@ pub struct CurrentUser {
 /// Update profile request
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateProfileRequest {
+    /// New username (3-30 characters, lowercase alphanumeric and underscores)
+    #[schema(example = "coolplayer42")]
+    pub username: Option<String>,
     /// New display name (3-50 characters)
     #[schema(example = "CoolPlayer42")]
     pub display_name: Option<String>,

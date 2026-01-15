@@ -7,6 +7,8 @@ import { api } from './client';
 export interface User {
   /** User ID (prefixed nanoid: usr_xxxxxxxxxxxx) */
   id: string;
+  /** Unique username (e.g., coolplayer42) */
+  username: string | null;
   display_name: string;
   email: string | null;
   avatar_url: string | null;

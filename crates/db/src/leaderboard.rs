@@ -583,6 +583,6 @@ pub fn period_start(period: &str) -> Option<DateTime<Utc>> {
         "daily" => Some(Utc::now() - Duration::days(1)),
         "weekly" => Some(Utc::now() - Duration::weeks(1)),
         "monthly" => Some(Utc::now() - Duration::days(30)),
-        "all_time" | _ => None,
+        _ => None, // "all_time" and any other value
     }
 }

@@ -35,10 +35,10 @@ fn extract_session_from_cookie(socket: &SocketRef) -> Option<String> {
     // Parse cookies (format: "name1=value1; name2=value2")
     for cookie in cookie_header.split(';') {
         let cookie = cookie.trim();
-        if let Some((name, value)) = cookie.split_once('=') {
-            if name.trim() == SESSION_COOKIE_NAME {
-                return Some(value.trim().to_string());
-            }
+        if let Some((name, value)) = cookie.split_once('=')
+            && name.trim() == SESSION_COOKIE_NAME
+        {
+            return Some(value.trim().to_string());
         }
     }
     None

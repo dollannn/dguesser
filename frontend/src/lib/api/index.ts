@@ -21,3 +21,13 @@ export {
   type LeaderboardResponse,
   type LeaderboardQuery,
 } from './leaderboard';
+export {
+  usersApi,
+  sessionsApi,
+  type UserProfile,
+  type UpdateProfileRequest,
+  type DeleteAccountResponse,
+  type SessionInfo,
+  type SessionsListResponse,
+  type RevokeSessionResponse,
+} from './users';
