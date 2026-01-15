@@ -41,6 +41,9 @@ pub struct CurrentUserResponse {
     pub avatar_url: Option<String>,
     /// Whether this is a guest user
     pub is_guest: bool,
+    /// User role (user or admin)
+    #[schema(example = "user")]
+    pub role: String,
     /// Number of games played
     pub games_played: i32,
     /// Total score across all games
@@ -57,6 +60,7 @@ impl CurrentUserResponse {
             email: user.email.clone(),
             avatar_url: user.avatar_url.clone(),
             is_guest: user.kind == dguesser_db::UserKind::Guest,
+            role: user.role.clone(),
             games_played: user.games_played,
             total_score: user.total_score,
             best_score: user.best_score,

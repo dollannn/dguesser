@@ -1,6 +1,11 @@
 import { api } from './client';
 
 /**
+ * User role for access control
+ */
+export type UserRole = 'user' | 'admin';
+
+/**
  * User entity from the API.
  * All IDs use prefixed nanoid format (e.g., usr_V1StGXR8_Z5j)
  */
@@ -13,6 +18,8 @@ export interface User {
   email: string | null;
   avatar_url: string | null;
   is_guest: boolean;
+  /** User role (user or admin) */
+  role?: UserRole;
   games_played: number;
   total_score: number;
   best_score: number;

@@ -8,6 +8,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::middleware::rate_limit;
 use crate::state::AppState;
 
+pub mod admin;
 pub mod auth;
 pub mod games;
 pub mod health;
@@ -44,6 +45,11 @@ pub mod users;
         sessions::revoke_other_sessions,
         leaderboard::get_leaderboard,
         locations::report_location,
+        admin::get_stats,
+        admin::get_review_queue,
+        admin::get_location_detail,
+        admin::update_review_status,
+        admin::get_reports,
     ),
     components(schemas(
         dguesser_protocol::api::auth::MeResponse,
@@ -80,6 +86,15 @@ pub mod users;
         health::HealthResponse,
         health::HealthChecks,
         health::CheckResult,
+        dguesser_protocol::api::admin::AdminStatsResponse,
+        dguesser_protocol::api::admin::ReviewQueueItem,
+        dguesser_protocol::api::admin::ReviewQueueResponse,
+        dguesser_protocol::api::admin::LocationDetailResponse,
+        dguesser_protocol::api::admin::LocationReportItem,
+        dguesser_protocol::api::admin::ReportsListResponse,
+        dguesser_protocol::api::admin::LocationReportWithLocation,
+        dguesser_protocol::api::admin::UpdateReviewStatusRequest,
+        dguesser_protocol::api::admin::UpdateReviewStatusResponse,
     )),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -89,6 +104,7 @@ pub mod users;
         (name = "sessions", description = "Session management endpoints"),
         (name = "leaderboard", description = "Global leaderboard endpoints"),
         (name = "locations", description = "Location management endpoints"),
+        (name = "admin", description = "Admin dashboard endpoints"),
     ),
     info(
         title = "DGuesser API",
@@ -107,6 +123,7 @@ pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
         .nest("/games", games::router())
         .nest("/leaderboard", leaderboard::router())
         .nest("/locations", locations::router())
+        .nest("/admin", admin::router())
         // Apply rate limiting to API routes
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit));
 

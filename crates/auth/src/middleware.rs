@@ -4,6 +4,7 @@
 //! - `AuthUser`: Requires a valid session (guest or authenticated)
 //! - `MaybeAuthUser`: Optional authentication (returns None if no session)
 //! - `RequireAuth`: Requires an authenticated (non-guest) user
+//! - `RequireAdmin`: Requires a user with admin role
 
 use axum::{
     extract::FromRequestParts,
@@ -11,7 +12,7 @@ use axum::{
 };
 
 use crate::session::SessionConfig;
-use dguesser_db::UserKind;
+use dguesser_db::{UserKind, UserRole};
 
 /// Authenticated user extracted from session cookie.
 ///
@@ -25,6 +26,8 @@ pub struct AuthUser {
     pub session_id: String,
     /// Whether this is a guest user
     pub is_guest: bool,
+    /// User's role (user or admin)
+    pub role: UserRole,
 }
 
 /// Optional authentication extractor.
@@ -40,6 +43,13 @@ pub struct MaybeAuthUser(pub Option<AuthUser>);
 /// is not a guest. Use this for endpoints that require full authentication.
 #[derive(Debug, Clone)]
 pub struct RequireAuth(pub AuthUser);
+
+/// Require admin user.
+///
+/// This extractor wraps `AuthUser` and verifies that the user has admin role.
+/// Use this for admin-only endpoints like the admin dashboard.
+#[derive(Debug, Clone)]
+pub struct RequireAdmin(pub AuthUser);
 
 /// Trait for application state that supports auth extraction.
 ///
@@ -108,6 +118,7 @@ where
             user_id: session.user_id,
             session_id,
             is_guest: user.kind == UserKind::Guest,
+            role: user.role(),
         })
     }
 }
@@ -137,6 +148,23 @@ where
         }
 
         Ok(RequireAuth(auth))
+    }
+}
+
+impl<S> FromRequestParts<S> for RequireAdmin
+where
+    S: AuthState,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let auth = AuthUser::from_request_parts(parts, state).await?;
+
+        if !auth.role.is_admin() {
+            return Err((StatusCode::FORBIDDEN, "Admin access required"));
+        }
+
+        Ok(RequireAdmin(auth))
     }
 }
 

@@ -12,7 +12,7 @@ pub mod service;
 pub mod session;
 
 // Re-export commonly used types
-pub use middleware::{AuthState, AuthUser, MaybeAuthUser, RequireAuth};
+pub use middleware::{AuthState, AuthUser, MaybeAuthUser, RequireAdmin, RequireAuth};
 pub use oauth::google::GoogleOAuth;
 pub use oauth::microsoft::MicrosoftOAuth;
 pub use oauth::{OAuthError, OAuthIdentity, OAuthProvider, OAuthState};

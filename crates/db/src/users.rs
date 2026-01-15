@@ -1,6 +1,7 @@
 //! User database queries
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::DbPool;
@@ -22,10 +23,48 @@ impl std::fmt::Display for UserKind {
     }
 }
 
+/// User role for access control
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UserRole {
+    #[default]
+    User,
+    Admin,
+}
+
+impl UserRole {
+    /// Check if this role has admin privileges
+    pub fn is_admin(&self) -> bool {
+        matches!(self, UserRole::Admin)
+    }
+}
+
+impl std::fmt::Display for UserRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UserRole::User => write!(f, "user"),
+            UserRole::Admin => write!(f, "admin"),
+        }
+    }
+}
+
+impl std::str::FromStr for UserRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "user" => Ok(UserRole::User),
+            "admin" => Ok(UserRole::Admin),
+            _ => Err(format!("Invalid role: {}", s)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct User {
     pub id: String, // usr_XXXXXXXXXXXX
     pub kind: UserKind,
+    pub role: String, // 'user' or 'admin' - parsed via UserRole::from_str
     pub username: Option<String>,
     pub email: Option<String>,
     pub email_verified: bool,
@@ -40,6 +79,18 @@ pub struct User {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
+impl User {
+    /// Get the parsed user role
+    pub fn role(&self) -> UserRole {
+        self.role.parse().unwrap_or_default()
+    }
+
+    /// Check if user has admin privileges
+    pub fn is_admin(&self) -> bool {
+        self.role().is_admin()
+    }
+}
+
 /// Create a new guest user
 pub async fn create_guest(pool: &DbPool, display_name: &str) -> Result<User, sqlx::Error> {
     let id = dguesser_core::generate_user_id();
@@ -49,9 +100,9 @@ pub async fn create_guest(pool: &DbPool, display_name: &str) -> Result<User, sql
         r#"
         INSERT INTO users (id, kind, display_name)
         VALUES ($1, 'guest', $2)
-        RETURNING id, kind as "kind: UserKind", username, email, email_verified, display_name,
-                  avatar_url, created_at, updated_at, last_seen_at, games_played, total_score,
-                  best_score, deleted_at
+        RETURNING id, kind as "kind: UserKind", role, username, email, email_verified,
+                  display_name, avatar_url, created_at, updated_at, last_seen_at,
+                  games_played, total_score, best_score, deleted_at
         "#,
         id,
         display_name
@@ -74,9 +125,9 @@ pub async fn create_authenticated(
         r#"
         INSERT INTO users (id, kind, display_name, email, email_verified, avatar_url)
         VALUES ($1, 'authenticated', $2, $3, TRUE, $4)
-        RETURNING id, kind as "kind: UserKind", username, email, email_verified, display_name,
-                  avatar_url, created_at, updated_at, last_seen_at, games_played, total_score,
-                  best_score, deleted_at
+        RETURNING id, kind as "kind: UserKind", role, username, email, email_verified,
+                  display_name, avatar_url, created_at, updated_at, last_seen_at,
+                  games_played, total_score, best_score, deleted_at
         "#,
         id,
         display_name,
@@ -92,9 +143,9 @@ pub async fn get_by_id(pool: &DbPool, id: &str) -> Result<Option<User>, sqlx::Er
     sqlx::query_as!(
         User,
         r#"
-        SELECT id, kind as "kind: UserKind", username, email, email_verified, display_name,
-               avatar_url, created_at, updated_at, last_seen_at, games_played, total_score,
-               best_score, deleted_at
+        SELECT id, kind as "kind: UserKind", role, username, email, email_verified,
+               display_name, avatar_url, created_at, updated_at, last_seen_at,
+               games_played, total_score, best_score, deleted_at
         FROM users WHERE id = $1 AND deleted_at IS NULL
         "#,
         id
@@ -108,9 +159,9 @@ pub async fn get_by_email(pool: &DbPool, email: &str) -> Result<Option<User>, sq
     sqlx::query_as!(
         User,
         r#"
-        SELECT id, kind as "kind: UserKind", username, email, email_verified, display_name,
-               avatar_url, created_at, updated_at, last_seen_at, games_played, total_score,
-               best_score, deleted_at
+        SELECT id, kind as "kind: UserKind", role, username, email, email_verified,
+               display_name, avatar_url, created_at, updated_at, last_seen_at,
+               games_played, total_score, best_score, deleted_at
         FROM users WHERE email = $1 AND deleted_at IS NULL
         "#,
         email
@@ -137,9 +188,9 @@ pub async fn upgrade_to_authenticated(
             display_name = COALESCE($3, display_name),
             avatar_url = COALESCE($4, avatar_url)
         WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, kind as "kind: UserKind", username, email, email_verified, display_name,
-                  avatar_url, created_at, updated_at, last_seen_at, games_played, total_score,
-                  best_score, deleted_at
+        RETURNING id, kind as "kind: UserKind", role, username, email, email_verified,
+                  display_name, avatar_url, created_at, updated_at, last_seen_at,
+                  games_played, total_score, best_score, deleted_at
         "#,
         user_id,
         email,
@@ -217,9 +268,9 @@ pub async fn get_by_username(pool: &DbPool, username: &str) -> Result<Option<Use
     sqlx::query_as!(
         User,
         r#"
-        SELECT id, kind as "kind: UserKind", username, email, email_verified, display_name,
-               avatar_url, created_at, updated_at, last_seen_at, games_played, total_score,
-               best_score, deleted_at
+        SELECT id, kind as "kind: UserKind", role, username, email, email_verified,
+               display_name, avatar_url, created_at, updated_at, last_seen_at,
+               games_played, total_score, best_score, deleted_at
         FROM users WHERE username = $1 AND deleted_at IS NULL
         "#,
         username

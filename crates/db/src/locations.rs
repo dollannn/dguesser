@@ -854,6 +854,207 @@ pub async fn get_location_stats(pool: &DbPool) -> Result<LocationStats, Location
 }
 
 // =============================================================================
+// Admin Operations
+// =============================================================================
+
+/// Location report row from database
+#[derive(Debug, Clone, FromRow)]
+pub struct LocationReportRow {
+    pub id: String,
+    pub location_id: String,
+    pub user_id: Option<String>,
+    pub reason: String,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Location report with location details
+#[derive(Debug, Clone, FromRow)]
+pub struct LocationReportWithLocationRow {
+    pub id: String,
+    pub location_id: String,
+    pub panorama_id: String,
+    pub lat: f64,
+    pub lng: f64,
+    pub country_code: Option<String>,
+    pub user_id: Option<String>,
+    pub reason: String,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub location_review_status: Option<String>,
+}
+
+/// Get reports for a specific location.
+pub async fn get_reports_for_location(
+    pool: &DbPool,
+    location_id: &str,
+) -> Result<Vec<LocationReportRow>, LocationError> {
+    let rows = sqlx::query_as!(
+        LocationReportRow,
+        r#"
+        SELECT id, location_id, user_id, reason, notes, created_at
+        FROM location_reports
+        WHERE location_id = $1
+        ORDER BY created_at DESC
+        "#,
+        location_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(rows)
+}
+
+/// Get paginated review queue.
+pub async fn get_review_queue_paginated(
+    pool: &DbPool,
+    page: i64,
+    per_page: i64,
+    status_filter: Option<&str>,
+) -> Result<(Vec<Location>, i64), LocationError> {
+    let offset = (page - 1) * per_page;
+
+    // Build the WHERE clause based on status filter
+    let status_clause = match status_filter {
+        Some("pending") => "review_status = 'pending'",
+        Some("flagged") => "review_status = 'flagged'",
+        _ => "(review_status IN ('pending', 'flagged') OR failure_count >= 2)",
+    };
+
+    // Get total count
+    let count_query = format!("SELECT COUNT(*)::bigint FROM locations WHERE {}", status_clause);
+    let total: i64 = sqlx::query_scalar::<_, i64>(&count_query)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    // Get paginated results
+    let rows = sqlx::query_as::<_, LocationRow>(&format!(
+        r#"
+        SELECT {LOCATION_COLUMNS}
+        FROM locations
+        WHERE {status_clause}
+        ORDER BY failure_count DESC, created_at ASC
+        LIMIT $1 OFFSET $2
+        "#,
+        LOCATION_COLUMNS = LOCATION_COLUMNS,
+        status_clause = status_clause
+    ))
+    .bind(per_page)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    let locations: Result<Vec<Location>, _> = rows.into_iter().map(|r| r.try_into()).collect();
+    Ok((locations?, total))
+}
+
+/// Get report count for a location.
+pub async fn get_report_count_for_location(
+    pool: &DbPool,
+    location_id: &str,
+) -> Result<i64, LocationError> {
+    let count: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM location_reports WHERE location_id = $1",
+        location_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?
+    .unwrap_or(0);
+
+    Ok(count)
+}
+
+/// Get paginated reports with location info.
+pub async fn get_reports_paginated(
+    pool: &DbPool,
+    page: i64,
+    per_page: i64,
+    reason_filter: Option<&str>,
+    location_status_filter: Option<&str>,
+) -> Result<(Vec<LocationReportWithLocationRow>, i64), LocationError> {
+    let offset = (page - 1) * per_page;
+
+    // Build WHERE clauses
+    let mut conditions = vec!["1=1".to_string()];
+    if let Some(reason) = reason_filter {
+        conditions.push(format!("r.reason = '{}'", reason));
+    }
+    if let Some(status) = location_status_filter {
+        conditions.push(format!("COALESCE(l.review_status, 'approved') = '{}'", status));
+    }
+    let where_clause = conditions.join(" AND ");
+
+    // Get total count
+    let count_query = format!(
+        r#"
+        SELECT COUNT(*)::bigint
+        FROM location_reports r
+        JOIN locations l ON r.location_id = l.id
+        WHERE {}
+        "#,
+        where_clause
+    );
+    let total: i64 = sqlx::query_scalar::<_, i64>(&count_query)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    // Get paginated results
+    let query = format!(
+        r#"
+        SELECT 
+            r.id,
+            r.location_id,
+            l.panorama_id,
+            l.lat,
+            l.lng,
+            l.country_code,
+            r.user_id,
+            r.reason,
+            r.notes,
+            r.created_at,
+            l.review_status as location_review_status
+        FROM location_reports r
+        JOIN locations l ON r.location_id = l.id
+        WHERE {}
+        ORDER BY r.created_at DESC
+        LIMIT $1 OFFSET $2
+        "#,
+        where_clause
+    );
+
+    let rows = sqlx::query_as::<_, LocationReportWithLocationRow>(&query)
+        .bind(per_page)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok((rows, total))
+}
+
+/// Set a location to flagged status based on failure count.
+pub async fn auto_flag_location(pool: &DbPool, location_id: &str) -> Result<bool, LocationError> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE locations
+        SET review_status = 'flagged'
+        WHERE id = $1 AND failure_count >= 3 AND review_status = 'approved'
+        "#,
+        location_id
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+// =============================================================================
 // Map CRUD Operations
 // =============================================================================
 

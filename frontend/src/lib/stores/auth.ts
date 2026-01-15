@@ -66,3 +66,4 @@ export const user = derived(authStore, ($auth) => $auth.user);
 export const isAuthenticated = derived(authStore, ($auth) => $auth.user !== null);
 export const isGuest = derived(authStore, ($auth) => $auth.user?.is_guest ?? true);
 export const isLoading = derived(authStore, ($auth) => $auth.loading);
+export const isAdmin = derived(authStore, ($auth) => $auth.user?.role === 'admin');

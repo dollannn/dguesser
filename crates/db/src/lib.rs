@@ -16,4 +16,4 @@ pub use locations::LocationRepository;
 pub use oauth::OAuthAccount;
 pub use pool::{DbPool, create_pool};
 pub use sessions::Session;
-pub use users::{User, UserKind};
+pub use users::{User, UserKind, UserRole};
