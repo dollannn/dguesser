@@ -1,10 +1,10 @@
 <script lang="ts">
-  // Simple loading state component
+  import { Spinner } from '$lib/components/ui/spinner';
 </script>
 
-<div class="min-h-screen flex items-center justify-center bg-gray-50">
+<div class="min-h-screen flex items-center justify-center bg-background">
   <div class="text-center">
-    <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-600 mx-auto mb-4"></div>
-    <p class="text-gray-600 text-lg">Loading game...</p>
+    <Spinner class="size-12 mx-auto mb-4 text-primary" />
+    <p class="text-muted-foreground text-lg">Loading game...</p>
   </div>
 </div>
