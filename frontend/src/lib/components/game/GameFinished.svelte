@@ -7,6 +7,7 @@
   import { Badge } from '$lib/components/ui/badge';
   import * as Card from '$lib/components/ui/card';
   import * as Table from '$lib/components/ui/table';
+  import { Confetti } from 'svelte-confetti';
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import CrownIcon from '@lucide/svelte/icons/crown';
   import HomeIcon from '@lucide/svelte/icons/home';
@@ -120,33 +121,7 @@
   });
 
   // Confetti effect - for multiplayer: always on win, for solo: only on personal best
-  let showConfetti = $state(false);
-
-  $effect(() => {
-    if (isSolo) {
-      showConfetti = isNewPersonalBest;
-    } else {
-      showConfetti = isWinner;
-    }
-
-    // Auto-hide after 4 seconds
-    if (showConfetti) {
-      const timer = setTimeout(() => {
-        showConfetti = false;
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  });
-
-  // Confetti colors that match our design system
-  const confettiColors = [
-    'hsl(45, 93%, 47%)', // Gold
-    'hsl(220, 90%, 56%)', // Blue
-    'hsl(160, 84%, 39%)', // Green
-    'hsl(340, 82%, 52%)', // Pink
-    'hsl(280, 68%, 60%)', // Purple
-    'hsl(25, 95%, 53%)', // Orange
-  ];
+  let showConfetti = $derived(isSolo ? isNewPersonalBest : isWinner);
 
   // Format relative date for recent games
   function formatRelativeDate(dateStr: string): string {
@@ -166,18 +141,35 @@
 <div
   class="min-h-screen bg-background p-4 md:p-6 pt-20 md:pt-24 relative overflow-hidden"
 >
-  <!-- Confetti animation -->
+  <!-- Confetti cannons from bottom corners -->
   {#if showConfetti}
-    <div class="absolute inset-0 pointer-events-none overflow-hidden z-0">
-      {#each Array(24) as _, i}
-        <div
-          class="confetti-piece absolute w-2.5 h-2.5 rounded-sm opacity-90"
-          style:left="{Math.random() * 100}%"
-          style:animation-duration="{2.5 + Math.random() * 2}s"
-          style:animation-delay="{Math.random() * 0.8}s"
-          style:background={confettiColors[i % confettiColors.length]}
-        ></div>
-      {/each}
+    <!-- Left cannon -->
+    <div class="fixed bottom-0 left-0 pointer-events-none z-50">
+      <Confetti
+        x={[0.25, 2]}
+        y={[0.75, 2]}
+        amount={150}
+        fallDistance="90vh"
+        duration={3500}
+        delay={[0, 500]}
+        size={8}
+        cone
+        colorArray={['#f5a623', '#3b82f6', '#22c55e', '#ec4899', '#a855f7', '#f97316']}
+      />
+    </div>
+    <!-- Right cannon -->
+    <div class="fixed bottom-0 right-0 pointer-events-none z-50">
+      <Confetti
+        x={[-2, -0.25]}
+        y={[0.75, 2]}
+        amount={150}
+        fallDistance="90vh"
+        duration={3500}
+        delay={[0, 500]}
+        size={8}
+        cone
+        colorArray={['#f5a623', '#3b82f6', '#22c55e', '#ec4899', '#a855f7', '#f97316']}
+      />
     </div>
   {/if}
 
@@ -540,21 +532,4 @@
   </div>
 </div>
 
-<style>
-  @keyframes -global-confetti-fall {
-    0% {
-      transform: translateY(-20px) rotate(0deg);
-      opacity: 1;
-    }
-    100% {
-      transform: translateY(100vh) rotate(720deg);
-      opacity: 0;
-    }
-  }
 
-  .confetti-piece {
-    animation-name: confetti-fall;
-    animation-timing-function: ease-out;
-    animation-fill-mode: forwards;
-  }
-</style>
