@@ -224,6 +224,7 @@ fn handle_start(
         first_location.lat,
         first_location.lng,
         first_location.panorama_id.clone(),
+        first_location.location_id.clone(),
         time_limit_ms,
         now,
     ));
@@ -398,6 +399,7 @@ fn handle_advance_round(
         next_location.lat,
         next_location.lng,
         next_location.panorama_id.clone(),
+        next_location.location_id.clone(),
         time_limit_ms,
         now,
     ));

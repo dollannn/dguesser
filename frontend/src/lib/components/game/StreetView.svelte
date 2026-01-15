@@ -2,22 +2,64 @@
   import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import { loadGoogleMaps } from '$lib/maps/loader';
+  import { api } from '$lib/api/client';
 
   interface Props {
     lat: number;
     lng: number;
     panoramaId?: string | null;
+    locationId?: string | null;
     movementAllowed?: boolean;
     zoomAllowed?: boolean;
+    showReportButton?: boolean;
   }
 
-  let { lat, lng, panoramaId = null, movementAllowed = true, zoomAllowed = true }: Props =
-    $props();
+  let {
+    lat,
+    lng,
+    panoramaId = null,
+    locationId = null,
+    movementAllowed = true,
+    zoomAllowed = true,
+    showReportButton = true,
+  }: Props = $props();
 
   let container: HTMLDivElement;
   let panorama: google.maps.StreetViewPanorama | null = null;
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let showReportMenu = $state(false);
+  let reportSubmitting = $state(false);
+  let reportSuccess = $state(false);
+
+  type ReportReason = 'corrupted' | 'low_quality' | 'indoor' | 'restricted' | 'other';
+
+  const reportReasons: { value: ReportReason; label: string; description: string }[] = [
+    { value: 'corrupted', label: 'Corrupted imagery', description: 'Pink/blue/purple screen' },
+    { value: 'low_quality', label: 'Low quality', description: 'Old camera, blurry, bad quality' },
+    { value: 'indoor', label: 'Indoor location', description: 'Inside a building' },
+    { value: 'restricted', label: 'Restricted/blurred', description: 'Blurred or restricted area' },
+    { value: 'other', label: 'Other issue', description: 'Other problem with this location' },
+  ];
+
+  async function reportLocation(reason: ReportReason) {
+    if (!locationId || reportSubmitting) return;
+
+    reportSubmitting = true;
+    try {
+      await api.post(`/locations/${locationId}/report`, { reason });
+      reportSuccess = true;
+      showReportMenu = false;
+      // Reset success message after 3 seconds
+      setTimeout(() => {
+        reportSuccess = false;
+      }, 3000);
+    } catch (e) {
+      console.error('Failed to report location:', e);
+    } finally {
+      reportSubmitting = false;
+    }
+  }
 
   onMount(async () => {
     if (!browser) return;
@@ -138,11 +180,59 @@
     </div>
   </div>
 {:else}
-  <div 
-    bind:this={container} 
-    class="w-full h-full min-h-screen bg-gray-900 street-view-container"
-    class:opacity-0={loading}
-    class:opacity-100={!loading}
-    style="transition: opacity 0.3s ease-in-out;"
-  ></div>
+  <div class="relative w-full h-full min-h-screen">
+    <div 
+      bind:this={container} 
+      class="w-full h-full min-h-screen bg-gray-900 street-view-container"
+      class:opacity-0={loading}
+      class:opacity-100={!loading}
+      style="transition: opacity 0.3s ease-in-out;"
+    ></div>
+
+    <!-- Report Location Button -->
+    {#if showReportButton && locationId && !loading}
+      <div class="absolute bottom-4 left-4 z-10">
+        <!-- Success Message -->
+        {#if reportSuccess}
+          <div class="bg-green-600 text-white px-3 py-2 rounded-lg text-sm shadow-lg">
+            Report submitted. Thank you!
+          </div>
+        {:else}
+          <!-- Report Button -->
+          <div class="relative">
+            <button
+              onclick={() => (showReportMenu = !showReportMenu)}
+              class="bg-gray-800/80 hover:bg-gray-700/90 text-white p-2 rounded-lg shadow-lg backdrop-blur-sm transition-colors"
+              title="Report location issue"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
+              </svg>
+            </button>
+
+            <!-- Report Menu -->
+            {#if showReportMenu}
+              <div class="absolute bottom-12 left-0 bg-gray-800/95 rounded-lg shadow-xl backdrop-blur-sm min-w-[220px] overflow-hidden">
+                <div class="px-3 py-2 border-b border-gray-700">
+                  <p class="text-white text-sm font-medium">Report this location</p>
+                </div>
+                <div class="py-1">
+                  {#each reportReasons as reason}
+                    <button
+                      onclick={() => reportLocation(reason.value)}
+                      disabled={reportSubmitting}
+                      class="w-full px-3 py-2 text-left hover:bg-gray-700/50 transition-colors disabled:opacity-50"
+                    >
+                      <p class="text-white text-sm">{reason.label}</p>
+                      <p class="text-gray-400 text-xs">{reason.description}</p>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+  </div>
 {/if}

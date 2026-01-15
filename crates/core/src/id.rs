@@ -49,6 +49,7 @@ pub enum EntityPrefix {
     OAuth,
     Location,
     Map,
+    Report,
 }
 
 impl EntityPrefix {
@@ -63,6 +64,7 @@ impl EntityPrefix {
             EntityPrefix::OAuth => "oau_",
             EntityPrefix::Location => "loc_",
             EntityPrefix::Map => "map_",
+            EntityPrefix::Report => "rpt_",
         }
     }
 }
@@ -115,6 +117,12 @@ pub fn generate_map_id() -> String {
     format!("{}{}", EntityPrefix::Map.as_str(), generate_id(ENTITY_ID_LEN))
 }
 
+/// Generate a prefixed ID for a location report entity.
+/// Format: `rpt_XXXXXXXXXXXX` (16 chars total, ~71 bits entropy)
+pub fn generate_report_id() -> String {
+    format!("{}{}", EntityPrefix::Report.as_str(), generate_id(ENTITY_ID_LEN))
+}
+
 /// Parse the prefix from an ID string.
 /// Returns `None` if the ID doesn't have a recognized prefix.
 pub fn parse_prefix(id: &str) -> Option<EntityPrefix> {
@@ -134,6 +142,8 @@ pub fn parse_prefix(id: &str) -> Option<EntityPrefix> {
         Some(EntityPrefix::Location)
     } else if id.starts_with("map_") {
         Some(EntityPrefix::Map)
+    } else if id.starts_with("rpt_") {
+        Some(EntityPrefix::Report)
     } else {
         None
     }
@@ -207,6 +217,13 @@ mod tests {
     }
 
     #[test]
+    fn test_report_id_format() {
+        let id = generate_report_id();
+        assert!(id.starts_with("rpt_"));
+        assert_eq!(id.len(), 16);
+    }
+
+    #[test]
     fn test_parse_prefix() {
         assert_eq!(parse_prefix("usr_abcdefghijkl"), Some(EntityPrefix::User));
         assert_eq!(parse_prefix("gam_abcdefghijkl"), Some(EntityPrefix::Game));
@@ -216,6 +233,7 @@ mod tests {
         assert_eq!(parse_prefix("oau_abcdefghijkl"), Some(EntityPrefix::OAuth));
         assert_eq!(parse_prefix("loc_abcdefghijkl"), Some(EntityPrefix::Location));
         assert_eq!(parse_prefix("map_abcdefghijkl"), Some(EntityPrefix::Map));
+        assert_eq!(parse_prefix("rpt_abcdefghijkl"), Some(EntityPrefix::Report));
         assert_eq!(parse_prefix("unknown_id"), None);
     }
 }

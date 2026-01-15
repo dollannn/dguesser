@@ -170,6 +170,9 @@ pub struct LocationInfo {
     pub lng: f64,
     /// Street View panorama ID (if applicable)
     pub panorama_id: Option<String>,
+    /// Location ID for reporting (if from location database)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location_id: Option<String>,
 }
 
 /// Submit guess request
@@ -275,6 +278,7 @@ async fn load_game_state(
             db_round.location_lat,
             db_round.location_lng,
             db_round.panorama_id.clone(),
+            db_round.location_id.clone(),
             db_round.time_limit_ms.map(|t| t as u32),
             db_round.started_at.unwrap_or_else(Utc::now),
         );
@@ -517,6 +521,7 @@ pub async fn start_game(
         location.lat,
         location.lng,
         location.panorama_id.as_deref(),
+        location.location_id.as_deref(),
         time_limit_ms.map(|t| t as i32),
     )
     .await?;
@@ -529,6 +534,7 @@ pub async fn start_game(
             lat: location.lat,
             lng: location.lng,
             panorama_id: location.panorama_id,
+            location_id: location.location_id,
         },
         started_at: now,
         time_limit_ms,
@@ -592,6 +598,7 @@ pub async fn get_current_round(
             lat: round.location_lat,
             lng: round.location_lng,
             panorama_id: round.panorama_id.clone(),
+            location_id: round.location_id.clone(),
         },
         started_at: round.started_at,
         time_remaining_ms,
@@ -710,6 +717,7 @@ pub async fn next_round(
         location.lat,
         location.lng,
         location.panorama_id.as_deref(),
+        location.location_id.as_deref(),
         time_limit_ms.map(|t| t as i32),
     )
     .await?;
@@ -722,6 +730,7 @@ pub async fn next_round(
             lat: location.lat,
             lng: location.lng,
             panorama_id: location.panorama_id,
+            location_id: location.location_id,
         },
         started_at: now,
         time_limit_ms,
@@ -829,6 +838,7 @@ pub async fn submit_guess(
             lat: current_round.location_lat,
             lng: current_round.location_lng,
             panorama_id: current_round.panorama_id.clone(),
+            location_id: current_round.location_id.clone(),
         },
     }))
 }
@@ -891,10 +901,11 @@ async fn select_location(
     exclude_ids: &[String],
 ) -> LocationData {
     match provider.select_location(map_id, exclude_ids).await {
-        Ok(loc) => LocationData::new(
+        Ok(loc) => LocationData::with_location_id(
             loc.lat,
             loc.lng,
             if loc.panorama_id.is_empty() { None } else { Some(loc.panorama_id) },
+            loc.id,
         ),
         Err(e) => {
             tracing::warn!(error = %e, map_id = %map_id, "Failed to select location, using random");

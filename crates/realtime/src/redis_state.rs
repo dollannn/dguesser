@@ -66,6 +66,8 @@ pub struct CachedRoundState {
     pub location_lng: f64,
     /// Optional panorama ID
     pub panorama_id: Option<String>,
+    /// Location ID from database (for reporting)
+    pub location_id: Option<String>,
     /// Start timestamp (unix ms)
     pub started_at_ms: i64,
     /// Time limit in ms

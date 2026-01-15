@@ -242,6 +242,7 @@ impl GameActor {
                 r.location_lat,
                 r.location_lng,
                 r.panorama_id.clone(),
+                r.location_id.clone(),
                 r.time_limit_ms,
                 chrono::DateTime::from_timestamp_millis(r.started_at_ms).unwrap_or_else(Utc::now),
             );
@@ -325,6 +326,7 @@ impl GameActor {
                 location_lat: r.location_lat,
                 location_lng: r.location_lng,
                 panorama_id: r.panorama_id.clone(),
+                location_id: r.location_id.clone(),
                 started_at_ms: r.started_at.timestamp_millis(),
                 time_limit_ms: r.time_limit_ms,
                 guesses,
@@ -545,6 +547,7 @@ impl GameActor {
             location.lat,
             location.lng,
             location.panorama_id.as_deref(),
+            location.location_id.as_deref(),
             time_limit_ms.map(|t| t as i32),
         )
         .await
@@ -735,10 +738,11 @@ impl GameActor {
         let map_id = &state.settings.map_id;
 
         match self.location_provider.select_location(map_id, &[]).await {
-            Ok(loc) => Ok(LocationData::new(
+            Ok(loc) => Ok(LocationData::with_location_id(
                 loc.lat,
                 loc.lng,
                 if loc.panorama_id.is_empty() { None } else { Some(loc.panorama_id) },
+                loc.id,
             )),
             Err(e) => {
                 tracing::warn!(error = %e, map_id = %map_id, "Failed to select location, using random");
@@ -779,6 +783,7 @@ impl GameActor {
             location.lat,
             location.lng,
             location.panorama_id.as_deref(),
+            location.location_id.as_deref(),
             time_limit_ms.map(|t| t as i32),
         )
         .await

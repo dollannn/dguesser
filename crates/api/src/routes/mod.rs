@@ -12,6 +12,7 @@ pub mod auth;
 pub mod games;
 pub mod health;
 pub mod leaderboard;
+pub mod locations;
 pub mod sessions;
 pub mod users;
 
@@ -42,6 +43,7 @@ pub mod users;
         sessions::revoke_session,
         sessions::revoke_other_sessions,
         leaderboard::get_leaderboard,
+        locations::report_location,
     ),
     components(schemas(
         dguesser_protocol::api::auth::MeResponse,
@@ -73,6 +75,8 @@ pub mod users;
         sessions::SessionInfo,
         sessions::SessionsListResponse,
         sessions::RevokeSessionResponse,
+        locations::ReportLocationRequest,
+        locations::ReportLocationResponse,
         health::HealthResponse,
         health::HealthChecks,
         health::CheckResult,
@@ -84,6 +88,7 @@ pub mod users;
         (name = "users", description = "User profile endpoints"),
         (name = "sessions", description = "Session management endpoints"),
         (name = "leaderboard", description = "Global leaderboard endpoints"),
+        (name = "locations", description = "Location management endpoints"),
     ),
     info(
         title = "DGuesser API",
@@ -101,6 +106,7 @@ pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
         .nest("/sessions", sessions::router())
         .nest("/games", games::router())
         .nest("/leaderboard", leaderboard::router())
+        .nest("/locations", locations::router())
         // Apply rate limiting to API routes
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit));
 

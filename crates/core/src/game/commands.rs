@@ -17,12 +17,24 @@ pub struct LocationData {
     pub lng: f64,
     /// Street View panorama ID (if applicable)
     pub panorama_id: Option<String>,
+    /// Location ID from the database (for reporting)
+    pub location_id: Option<String>,
 }
 
 impl LocationData {
     /// Create a new location data instance.
     pub fn new(lat: f64, lng: f64, panorama_id: Option<String>) -> Self {
-        Self { lat, lng, panorama_id }
+        Self { lat, lng, panorama_id, location_id: None }
+    }
+
+    /// Create a new location data instance with location ID.
+    pub fn with_location_id(
+        lat: f64,
+        lng: f64,
+        panorama_id: Option<String>,
+        location_id: String,
+    ) -> Self {
+        Self { lat, lng, panorama_id, location_id: Some(location_id) }
     }
 }
 

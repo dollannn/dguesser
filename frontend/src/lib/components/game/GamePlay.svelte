@@ -130,8 +130,10 @@
         lat={gameState.location.lat}
         lng={gameState.location.lng}
         panoramaId={gameState.location.panorama_id}
+        locationId={gameState.location.location_id}
         movementAllowed={game.settings.movement_allowed}
         zoomAllowed={game.settings.zoom_allowed}
+        showReportButton={true}
       />
     </div>
   {:else}

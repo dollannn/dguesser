@@ -6,6 +6,8 @@ export interface RoundLocation {
   lat: number;
   lng: number;
   panorama_id: string | null;
+  /** Location ID for reporting (loc_xxxxxxxxxxxx) */
+  location_id?: string | null;
 }
 
 export interface RoundStartPayload {

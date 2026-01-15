@@ -78,6 +78,7 @@ pub struct Round {
     pub location_lat: f64,
     pub location_lng: f64,
     pub panorama_id: Option<String>,
+    pub location_id: Option<String>, // loc_XXXXXXXXXXXX (for reporting)
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
     pub time_limit_ms: Option<i32>,
@@ -359,6 +360,7 @@ pub async fn is_player_in_game(
 // =============================================================================
 
 /// Create a new round
+#[allow(clippy::too_many_arguments)]
 pub async fn create_round(
     pool: &DbPool,
     game_id: &str,
@@ -366,6 +368,7 @@ pub async fn create_round(
     location_lat: f64,
     location_lng: f64,
     panorama_id: Option<&str>,
+    location_id: Option<&str>,
     time_limit_ms: Option<i32>,
 ) -> Result<Round, sqlx::Error> {
     let id = dguesser_core::generate_round_id();
@@ -373,9 +376,9 @@ pub async fn create_round(
     sqlx::query_as!(
         Round,
         r#"
-        INSERT INTO rounds (id, game_id, round_number, location_lat, location_lng, panorama_id, time_limit_ms)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, game_id, round_number, location_lat, location_lng, panorama_id,
+        INSERT INTO rounds (id, game_id, round_number, location_lat, location_lng, panorama_id, location_id, time_limit_ms)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,
                   started_at, ended_at, time_limit_ms
         "#,
         id,
@@ -384,6 +387,7 @@ pub async fn create_round(
         location_lat,
         location_lng,
         panorama_id,
+        location_id,
         time_limit_ms
     )
     .fetch_one(pool)
@@ -395,7 +399,7 @@ pub async fn get_round_by_id(pool: &DbPool, id: &str) -> Result<Option<Round>, s
     sqlx::query_as!(
         Round,
         r#"
-        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id,
+        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,
                started_at, ended_at, time_limit_ms
         FROM rounds WHERE id = $1
         "#,
@@ -410,7 +414,7 @@ pub async fn get_rounds_for_game(pool: &DbPool, game_id: &str) -> Result<Vec<Rou
     sqlx::query_as!(
         Round,
         r#"
-        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id,
+        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,
                started_at, ended_at, time_limit_ms
         FROM rounds WHERE game_id = $1
         ORDER BY round_number ASC
@@ -426,7 +430,7 @@ pub async fn get_current_round(pool: &DbPool, game_id: &str) -> Result<Option<Ro
     sqlx::query_as!(
         Round,
         r#"
-        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id,
+        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,
                started_at, ended_at, time_limit_ms
         FROM rounds WHERE game_id = $1
         ORDER BY round_number DESC
