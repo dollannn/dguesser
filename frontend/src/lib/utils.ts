@@ -75,8 +75,12 @@ export function formatScore(score: number): string {
 
 /**
  * Format distance in meters to human-readable form
+ * Returns "No guess" for negative values (sentinel for timeout with no guess)
  */
 export function formatDistance(meters: number): string {
+  if (meters < 0) {
+    return 'No guess';
+  }
   if (meters < 1000) {
     return `${Math.round(meters)} m`;
   }

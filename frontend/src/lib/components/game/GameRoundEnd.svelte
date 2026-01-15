@@ -55,11 +55,13 @@
           <ResultsMap
             correctLat={correctLocation.lat}
             correctLng={correctLocation.lng}
-            guesses={results.map((r) => ({
-              lat: r.guess_lat,
-              lng: r.guess_lng,
-              displayName: r.display_name,
-            }))}
+            guesses={results
+              .filter((r) => r.distance_meters >= 0)
+              .map((r) => ({
+                lat: r.guess_lat,
+                lng: r.guess_lng,
+                displayName: r.display_name,
+              }))}
           />
         {/if}
       </div>

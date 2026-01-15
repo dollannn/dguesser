@@ -80,10 +80,30 @@
   }
 
   function handleTimeUp() {
-    // Auto-submit if not guessed
-    if (!gameState.hasGuessed && guessLat !== null && guessLng !== null) {
+    if (gameState.hasGuessed) return;
+
+    if (guessLat !== null && guessLng !== null) {
+      // User placed a pin - auto-submit their guess
       submitGuess();
+    } else if (game.mode === 'solo' && gameState.location) {
+      // No pin placed in solo mode - score 0 and transition to results
+      gameStore.handleRoundEnd({
+        round_number: gameState.currentRound,
+        correct_location: gameState.location,
+        results: [
+          {
+            user_id: '',
+            display_name: '',
+            guess_lat: 0,
+            guess_lng: 0,
+            distance_meters: -1, // Sentinel value: "no guess"
+            score: 0,
+            total_score: 0,
+          },
+        ],
+      });
     }
+    // Multiplayer: server handles round end via socket event
   }
 
   function handleKeydown(e: KeyboardEvent) {
