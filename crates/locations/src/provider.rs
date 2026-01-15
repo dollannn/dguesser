@@ -7,9 +7,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 use dguesser_core::location::{GameLocation, LocationError, LocationProvider, Map, MapRules};
 
@@ -54,8 +52,6 @@ pub struct PackProvider<R: RangeReader> {
     disabled_cache: DisabledCache,
     /// Map definitions (loaded from config, not from packs).
     maps: RwLock<HashMap<String, Map>>,
-    /// Thread-safe RNG for random selection.
-    rng: Mutex<StdRng>,
 }
 
 impl<R: RangeReader> PackProvider<R> {
@@ -70,7 +66,6 @@ impl<R: RangeReader> PackProvider<R> {
             indexes: RwLock::new(HashMap::new()),
             disabled_cache,
             maps: RwLock::new(HashMap::new()),
-            rng: Mutex::new(StdRng::from_entropy()),
         }
     }
 
@@ -182,15 +177,17 @@ impl<R: RangeReader> PackProvider<R> {
         }
 
         let total_weight: u64 = weighted_buckets.iter().map(|(_, _, c)| c).sum();
+        if total_weight == 0 {
+            return Err(LocationPackError::NoEligibleBuckets);
+        }
+
         let mut results = Vec::with_capacity(count);
         let mut retries = 0;
 
         while results.len() < count && retries < MAX_RETRIES {
-            // Weighted random selection of bucket (generate random values while holding lock)
-            let (target, rand_seed) = {
-                let mut rng = self.rng.lock().await;
-                (rng.gen_range(0..total_weight), rng.gen_range(0..u64::MAX))
-            };
+            // Weighted random selection of bucket using rand::random for Send safety
+            let target = rand::random::<u64>() % total_weight;
+            let rand_seed = rand::random::<u64>();
 
             let mut cumulative = 0u64;
             let mut selected = None;
@@ -261,9 +258,15 @@ impl<R: RangeReader> PackProvider<R> {
         bucket_count: u64,
         rand_seed: u64,
     ) -> Result<Vec<PackRecord>, LocationPackError> {
+        // Guard against empty buckets
+        if bucket_count == 0 {
+            return Ok(Vec::new());
+        }
+
         // Pick a random starting index using the seed
+        // max_start is the highest valid starting index (inclusive)
         let max_start = bucket_count.saturating_sub(BATCH_SIZE as u64);
-        let start_index = if max_start > 0 { rand_seed % max_start } else { 0 };
+        let start_index = rand_seed % (max_start + 1);
 
         // Calculate byte range
         let offset = start_index * RECORD_SIZE as u64;
@@ -272,9 +275,33 @@ impl<R: RangeReader> PackProvider<R> {
         // Fetch the range
         let data = self.reader.read_pack_range(country, &bucket.object, offset, length).await?;
 
-        // Decode records
-        let records: Vec<PackRecord> =
-            data.chunks(RECORD_SIZE).filter_map(|chunk| PackRecord::decode(chunk).ok()).collect();
+        // Decode records, logging any decode errors
+        let mut records = Vec::with_capacity(data.len() / RECORD_SIZE);
+        let mut decode_errors = 0u32;
+
+        for chunk in data.chunks(RECORD_SIZE) {
+            match PackRecord::decode(chunk) {
+                Ok(record) => records.push(record),
+                Err(e) => {
+                    decode_errors += 1;
+                    tracing::warn!(
+                        country = %country,
+                        pack = %bucket.object,
+                        error = %e,
+                        "Failed to decode pack record"
+                    );
+                }
+            }
+        }
+
+        if decode_errors > 0 {
+            tracing::warn!(
+                country = %country,
+                pack = %bucket.object,
+                errors = decode_errors,
+                "Pack decode errors encountered"
+            );
+        }
 
         Ok(records)
     }
@@ -381,8 +408,8 @@ impl<R: RangeReader + 'static> LocationProvider for PackProvider<R> {
     ) -> Pin<Box<dyn Future<Output = Result<(), LocationError>> + Send + 'a>> {
         Box::pin(async move {
             // Extract hash from the location ID (format: "r2_XXXXXXXXXXXXXXXX")
-            let hash = if location_id.starts_with("r2_") {
-                u64::from_str_radix(&location_id[3..], 16)
+            let hash = if let Some(hex_part) = location_id.strip_prefix("r2_") {
+                u64::from_str_radix(hex_part, 16)
                     .map_err(|_| LocationError::LocationNotFound(location_id.to_string()))?
             } else {
                 // If it's a pano_id, hash it

@@ -13,6 +13,21 @@ use crate::error::LocationPackError;
 use crate::index::CountryIndex;
 use crate::manifest::Manifest;
 
+/// Validate a path component to prevent path traversal attacks.
+///
+/// Returns an error if the component contains path separators or is "." or "..".
+fn validate_path_component(component: &str) -> Result<(), LocationPackError> {
+    if component.contains('/')
+        || component.contains('\\')
+        || component == ".."
+        || component == "."
+        || component.is_empty()
+    {
+        return Err(LocationPackError::Storage(format!("Invalid path component: {component}")));
+    }
+    Ok(())
+}
+
 // Re-export async_trait for implementors
 pub use async_trait::async_trait;
 
@@ -86,6 +101,9 @@ impl RangeReader for HttpReader {
     }
 
     async fn read_country_index(&self, country: &str) -> Result<CountryIndex, LocationPackError> {
+        // Validate country code to prevent path traversal
+        validate_path_component(country)?;
+
         let url = self.url(&format!("countries/{}/index.json", country));
         tracing::debug!(url = %url, "Fetching country index");
 
@@ -108,6 +126,15 @@ impl RangeReader for HttpReader {
         offset: u64,
         length: u64,
     ) -> Result<Bytes, LocationPackError> {
+        // Guard against zero-length requests (would cause underflow in range calculation)
+        if length == 0 {
+            return Ok(Bytes::new());
+        }
+
+        // Validate path components to prevent path traversal
+        validate_path_component(country)?;
+        validate_path_component(pack_name)?;
+
         let url = self.url(&format!("countries/{}/{}", country, pack_name));
         let range_end = offset + length - 1;
         let range_header = format!("bytes={}-{}", offset, range_end);
@@ -161,6 +188,9 @@ impl RangeReader for FileReader {
     }
 
     async fn read_country_index(&self, country: &str) -> Result<CountryIndex, LocationPackError> {
+        // Validate country code to prevent path traversal
+        validate_path_component(country)?;
+
         let path = self.path(&format!("countries/{}/index.json", country));
         tracing::debug!(path = ?path, "Reading country index");
 
@@ -183,6 +213,15 @@ impl RangeReader for FileReader {
         offset: u64,
         length: u64,
     ) -> Result<Bytes, LocationPackError> {
+        // Guard against zero-length requests
+        if length == 0 {
+            return Ok(Bytes::new());
+        }
+
+        // Validate path components to prevent path traversal
+        validate_path_component(country)?;
+        validate_path_component(pack_name)?;
+
         let path = self.path(&format!("countries/{}/{}", country, pack_name));
         tracing::debug!(path = ?path, offset = offset, length = length, "Reading pack range");
 
@@ -199,6 +238,7 @@ impl RangeReader for FileReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pack::RECORD_SIZE;
     use tempfile::TempDir;
 
     async fn setup_test_files() -> TempDir {
@@ -217,8 +257,8 @@ mod tests {
         let index_json = serde_json::to_string(&index).unwrap();
         tokio::fs::write(country_dir.join("index.json"), index_json).await.unwrap();
 
-        // Write a sample pack file
-        let pack_data = vec![0u8; 1600]; // 10 records worth
+        // Write a sample pack file (10 records worth)
+        let pack_data = vec![0u8; RECORD_SIZE * 10];
         tokio::fs::write(country_dir.join("US_B4_S0.pack"), pack_data).await.unwrap();
 
         dir
@@ -251,12 +291,42 @@ mod tests {
         let dir = setup_test_files().await;
         let reader = FileReader::new(dir.path(), "v2026-01");
 
-        // Read first 160 bytes (one record)
-        let data = reader.read_pack_range("US", "US_B4_S0.pack", 0, 160).await.unwrap();
-        assert_eq!(data.len(), 160);
+        // Read first record
+        let data =
+            reader.read_pack_range("US", "US_B4_S0.pack", 0, RECORD_SIZE as u64).await.unwrap();
+        assert_eq!(data.len(), RECORD_SIZE);
 
         // Read second record
-        let data = reader.read_pack_range("US", "US_B4_S0.pack", 160, 160).await.unwrap();
-        assert_eq!(data.len(), 160);
+        let data = reader
+            .read_pack_range("US", "US_B4_S0.pack", RECORD_SIZE as u64, RECORD_SIZE as u64)
+            .await
+            .unwrap();
+        assert_eq!(data.len(), RECORD_SIZE);
+    }
+
+    #[tokio::test]
+    async fn test_file_reader_zero_length() {
+        let dir = setup_test_files().await;
+        let reader = FileReader::new(dir.path(), "v2026-01");
+
+        // Zero-length read should return empty bytes
+        let data = reader.read_pack_range("US", "US_B4_S0.pack", 0, 0).await.unwrap();
+        assert!(data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_path_traversal_prevention() {
+        let dir = setup_test_files().await;
+        let reader = FileReader::new(dir.path(), "v2026-01");
+
+        // Path traversal attempts should be rejected
+        let result = reader.read_country_index("../etc").await;
+        assert!(matches!(result, Err(LocationPackError::Storage(_))));
+
+        let result = reader.read_pack_range("US", "../../../etc/passwd", 0, 100).await;
+        assert!(matches!(result, Err(LocationPackError::Storage(_))));
+
+        let result = reader.read_pack_range("..", "pack.bin", 0, 100).await;
+        assert!(matches!(result, Err(LocationPackError::Storage(_))));
     }
 }

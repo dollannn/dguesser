@@ -32,7 +32,7 @@ pub struct CountryIndex {
     pub country: String,
     /// Dataset version (e.g., "v2026-01").
     pub version: String,
-    /// Record size in bytes (should always be 160).
+    /// Record size in bytes (should always be 192).
     pub record_size: usize,
     /// Map of bucket key (e.g., "B4_S0") to bucket info.
     pub buckets: HashMap<String, BucketInfo>,

@@ -72,8 +72,8 @@ impl YearBucket {
         let bucket_max = bucket_max.unwrap();
 
         // Check if ranges overlap
-        let min_ok = max_year.map_or(true, |max| bucket_min <= max);
-        let max_ok = min_year.map_or(true, |min| bucket_max >= min);
+        let min_ok = max_year.is_none_or(|max| bucket_min <= max);
+        let max_ok = min_year.is_none_or(|min| bucket_max >= min);
 
         min_ok && max_ok
     }

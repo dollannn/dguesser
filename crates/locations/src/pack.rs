@@ -1,6 +1,6 @@
 //! Pack record format for location storage.
 //!
-//! Each record is exactly 160 bytes, enabling O(1) random access via HTTP Range requests.
+//! Each record is exactly 192 bytes, enabling O(1) random access via HTTP Range requests.
 //! Records are stored pre-shuffled within each pack file.
 
 use crate::error::LocationPackError;
@@ -27,6 +27,7 @@ use xxhash_rust::xxh3::xxh3_64;
 /// - elevation_m: i16 (2)
 /// - id_hash64: u64 (8)
 /// - padding: [u8; 17] (17)
+///
 /// Total: 192 bytes
 pub const RECORD_SIZE: usize = 192;
 
@@ -50,7 +51,7 @@ const SURFACE_MAX_LEN: usize = 12;
 /// - subdiv: [u8; 12] (e.g., "US-CA", padded)
 /// - capture_days: u16 (2 bytes, days since 1970-01-01; 0 = unknown)
 /// - flags: u8 (1 byte, bit0=is_scout, bit1=has_heading)
-/// - heading_cdeg: i16 (2 bytes, centi-degrees 0-35999; -1 = unknown)
+/// - heading_cdeg: u16 (2 bytes, centi-degrees 0-35999; 0xFFFF = unknown)
 /// - surface_len: u8 (1 byte)
 /// - surface: [u8; 12] (coarse surface type, padded)
 /// - arrow_count: u8 (1 byte, 255 = unknown)
@@ -58,7 +59,7 @@ const SURFACE_MAX_LEN: usize = 12;
 /// - roads_100: u16 (2 bytes, 65535 = unknown)
 /// - elevation_m: i16 (2 bytes, 32767 = unknown)
 /// - id_hash64: u64 (8 bytes, xxh3 of pano_id for fast disabled checks)
-/// - padding: [u8; N] to reach 160 bytes
+/// - padding: [u8; 17] to reach 192 bytes
 #[derive(Debug, Clone, PartialEq)]
 pub struct PackRecord {
     /// Google Street View panorama ID
@@ -91,6 +92,7 @@ pub struct PackRecord {
 
 impl PackRecord {
     /// Create a new PackRecord, computing the hash automatically.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pano_id: String,
         lat: f64,
@@ -139,7 +141,7 @@ impl PackRecord {
         }
     }
 
-    /// Encode this record to a fixed 160-byte buffer.
+    /// Encode this record to a fixed 192-byte buffer.
     pub fn encode(&self) -> [u8; RECORD_SIZE] {
         let mut buf = [0u8; RECORD_SIZE];
         let mut offset = 0;
@@ -232,7 +234,7 @@ impl PackRecord {
         buf
     }
 
-    /// Decode a record from a 160-byte buffer.
+    /// Decode a record from a 192-byte buffer.
     pub fn decode(buf: &[u8]) -> Result<Self, LocationPackError> {
         if buf.len() < RECORD_SIZE {
             return Err(LocationPackError::InvalidRecord(format!(

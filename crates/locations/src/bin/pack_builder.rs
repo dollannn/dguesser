@@ -142,19 +142,77 @@ struct ValiLocation {
     elevation: Option<i32>,
 }
 
+/// Maximum field lengths from the pack format.
+const PANO_ID_MAX_LEN: usize = 120;
+const SUBDIV_MAX_LEN: usize = 12;
+const SURFACE_MAX_LEN: usize = 12;
+
 impl ValiLocation {
-    /// Convert to PackRecord.
+    /// Convert to PackRecord, logging warnings for truncated fields.
     fn to_pack_record(&self) -> PackRecord {
         let pano_id =
             self.pano_id.clone().unwrap_or_else(|| format!("vali_{:.6}_{:.6}", self.lat, self.lng));
 
+        // Warn about truncation of string fields
+        if pano_id.len() > PANO_ID_MAX_LEN {
+            tracing::warn!(
+                pano_id = %pano_id,
+                len = pano_id.len(),
+                max = PANO_ID_MAX_LEN,
+                "Panorama ID will be truncated"
+            );
+        }
+
+        if let Some(ref subdiv) = self.subdivision_code {
+            if subdiv.len() > SUBDIV_MAX_LEN {
+                tracing::warn!(
+                    subdivision = %subdiv,
+                    len = subdiv.len(),
+                    max = SUBDIV_MAX_LEN,
+                    "Subdivision code will be truncated"
+                );
+            }
+        }
+
+        if let Some(ref surface) = self.surface {
+            if surface.len() > SURFACE_MAX_LEN {
+                tracing::warn!(
+                    surface = %surface,
+                    len = surface.len(),
+                    max = SURFACE_MAX_LEN,
+                    "Surface type will be truncated"
+                );
+            }
+        }
+
         // Convert year/month to days since epoch
         let capture_days = match (self.year, self.month) {
             (Some(y), Some(m)) => {
-                NaiveDate::from_ymd_opt(y, m as u32, 15).map(|d| days_since_epoch(d) as u16)
+                let days = NaiveDate::from_ymd_opt(y, m as u32, 15).map(|d| days_since_epoch(d));
+                match days {
+                    Some(d) if d < 0 || d > 65535 => {
+                        tracing::warn!(
+                            year = y,
+                            month = m,
+                            days = d,
+                            "Capture date out of u16 range"
+                        );
+                        None
+                    }
+                    Some(d) => Some(d as u16),
+                    None => None,
+                }
             }
             (Some(y), None) => {
-                NaiveDate::from_ymd_opt(y, 6, 15).map(|d| days_since_epoch(d) as u16)
+                let days = NaiveDate::from_ymd_opt(y, 6, 15).map(|d| days_since_epoch(d));
+                match days {
+                    Some(d) if d < 0 || d > 65535 => {
+                        tracing::warn!(year = y, days = d, "Capture date out of u16 range");
+                        None
+                    }
+                    Some(d) => Some(d as u16),
+                    None => None,
+                }
             }
             _ => None,
         };

@@ -45,13 +45,18 @@ pub enum LocationPackError {
 impl From<LocationPackError> for dguesser_core::location::LocationError {
     fn from(err: LocationPackError) -> Self {
         match err {
-            LocationPackError::CountryNotFound(c) => {
-                dguesser_core::location::LocationError::MapNotFound(c)
-            }
             LocationPackError::NoLocationsAvailable | LocationPackError::NoEligibleBuckets => {
                 dguesser_core::location::LocationError::NoLocationsAvailable("R2 packs".to_string())
             }
-            e => dguesser_core::location::LocationError::Database(e.to_string()),
+            // CountryNotFound means the country's index file is missing in R2 storage,
+            // which is a backend/storage error, not a "map not found" error
+            LocationPackError::CountryNotFound(c) => {
+                dguesser_core::location::LocationError::NoLocationsAvailable(format!(
+                    "Country index not found: {c}"
+                ))
+            }
+            // All other errors are storage/internal errors (using Database as the closest match)
+            e => dguesser_core::location::LocationError::Database(format!("R2 storage error: {e}")),
         }
     }
 }
