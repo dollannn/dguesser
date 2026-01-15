@@ -5,6 +5,7 @@ function createAuthModalStore() {
 
   return {
     subscribe,
+    set,
     open: () => set(true),
     close: () => set(false),
     toggle: () => update((open) => !open),
