@@ -6,3 +6,5 @@ export {
   isGuest,
   isLoading,
 } from './auth';
+
+export { authModalOpen } from './authModal';

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { user, authStore } from '$lib/stores/auth';
+  import { authModalOpen } from '$lib/stores/authModal';
   import { gamesApi } from '$lib/api/games';
-  import { authApi } from '$lib/api/auth';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import * as Card from '$lib/components/ui/card';
@@ -278,14 +278,9 @@
             Sign in to track your scores and compete on leaderboards.
           </p>
         </div>
-        <div class="flex flex-col sm:flex-row gap-3">
-          <Button href={authApi.getGoogleAuthUrl()}>
-            Sign in with Google
-          </Button>
-          <Button variant="outline" disabled title="Coming soon">
-            Microsoft (Soon)
-          </Button>
-        </div>
+        <Button onclick={() => authModalOpen.open()}>
+          Sign In
+        </Button>
       </Card.Content>
     </Card.Root>
   </section>

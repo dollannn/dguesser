@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { user, isGuest, authStore } from '$lib/stores/auth';
-  import { authApi } from '$lib/api/auth';
+  import { authModalOpen } from '$lib/stores/authModal';
   import ConnectionStatus from './ConnectionStatus.svelte';
   import { Button } from '$lib/components/ui/button';
   import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
@@ -133,7 +133,7 @@
             </DropdownMenu.Group>
 
             {#if $isGuest}
-              <DropdownMenu.Item onSelect={() => window.location.href = authApi.getGoogleAuthUrl()}>
+              <DropdownMenu.Item onSelect={() => authModalOpen.open()}>
                 <UserIcon />
                 Sign in to save progress
               </DropdownMenu.Item>
@@ -146,7 +146,7 @@
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       {:else}
-        <Button href={authApi.getGoogleAuthUrl()} size="sm">
+        <Button onclick={() => authModalOpen.open()} size="sm">
           Sign In
         </Button>
       {/if}

@@ -5,6 +5,7 @@
   import { socketClient } from '$lib/socket/client';
   import { initGameSocketListeners } from '$lib/socket/game';
   import Header from '$lib/components/Header.svelte';
+  import AuthModal from '$lib/components/AuthModal.svelte';
   import ReconnectingOverlay from '$lib/components/ReconnectingOverlay.svelte';
   import { Toaster } from '$lib/components/ui/sonner';
   import { Separator } from '$lib/components/ui/separator';
@@ -96,6 +97,7 @@
 </div>
 
 <!-- Global overlays and notifications -->
+<AuthModal />
 <ReconnectingOverlay />
 <Toaster richColors closeButton />
 </Tooltip.Provider>
