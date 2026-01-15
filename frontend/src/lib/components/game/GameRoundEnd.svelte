@@ -21,41 +21,60 @@
 
   let { game, onNextRound }: Props = $props();
 
-  let state = $derived($gameStore);
-  let results = $derived(state.results);
-  let correctLocation = $derived(state.location);
+  let gameState = $derived($gameStore);
+  let results = $derived(gameState.results);
+  let correctLocation = $derived(gameState.location);
   
   // For solo mode: auto-transition to finished after last round
-  let isLastRound = $derived(state.currentRound >= state.totalRounds);
+  let isLastRound = $derived(gameState.currentRound >= gameState.totalRounds);
+  
+  // Countdown for auto-transition (only for last round)
+  let countdown = $state(3);
+  let isTransitioning = $state(false);
+  
+  async function skipToResults() {
+    if (isTransitioning) return;
+    isTransitioning = true;
+    
+    try {
+      // Fetch updated game data with final scores
+      const updatedGame = await gamesApi.get(game.id);
+      
+      // Build final standings from players (sorted by score descending)
+      const standings = updatedGame.players
+        .toSorted((a, b) => b.score - a.score)
+        .map((p, i) => ({
+          rank: i + 1,
+          user_id: p.user_id,
+          display_name: p.display_name || 'You',
+          total_score: p.score,
+        }));
+      
+      // Trigger game end transition
+      gameStore.handleGameEnd({
+        game_id: game.id,
+        final_standings: standings,
+      });
+    } catch (e) {
+      console.error('Failed to fetch final results:', e);
+      isTransitioning = false;
+    }
+  }
   
   $effect(() => {
     if (game.mode === 'solo' && isLastRound) {
-      const timer = setTimeout(async () => {
-        try {
-          // Fetch updated game data with final scores
-          const updatedGame = await gamesApi.get(game.id);
-          
-          // Build final standings from players (sorted by score descending)
-          const standings = updatedGame.players
-            .toSorted((a, b) => b.score - a.score)
-            .map((p, i) => ({
-              rank: i + 1,
-              user_id: p.user_id,
-              display_name: p.display_name || 'You',
-              total_score: p.score,
-            }));
-          
-          // Trigger game end transition
-          gameStore.handleGameEnd({
-            game_id: game.id,
-            final_standings: standings,
-          });
-        } catch (e) {
-          console.error('Failed to fetch final results:', e);
-        }
-      }, 3000);
+      countdown = 3;
       
-      return () => clearTimeout(timer);
+      // Countdown timer
+      const countdownInterval = setInterval(() => {
+        countdown -= 1;
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          skipToResults();
+        }
+      }, 1000);
+      
+      return () => clearInterval(countdownInterval);
     }
   });
   
@@ -76,10 +95,10 @@
     <!-- Header -->
     <div class="text-center space-y-2">
       <h2 class="text-2xl md:text-3xl font-bold tracking-tight">
-        Round {state.currentRound} Complete
+        Round {gameState.currentRound} Complete
       </h2>
       <p class="text-muted-foreground">
-        {state.currentRound} of {state.totalRounds} rounds
+        {gameState.currentRound} of {gameState.totalRounds} rounds
       </p>
     </div>
 
@@ -168,11 +187,11 @@
     </Card.Root>
 
     <!-- Continue/Next action -->
-    <div class="flex justify-center pt-2">
-      {#if state.currentRound < state.totalRounds}
+    <div class="flex flex-col items-center gap-2 pt-2">
+      {#if gameState.currentRound < gameState.totalRounds}
         {#if game.mode === 'solo' && onNextRound}
           <Button size="lg" onclick={onNextRound} class="gap-2">
-            Continue to Round {state.currentRound + 1}
+            Continue to Round {gameState.currentRound + 1}
             <ArrowRightIcon class="h-5 w-5" />
           </Button>
         {:else}
@@ -184,12 +203,21 @@
           </Card.Root>
         {/if}
       {:else}
-        <Card.Root class="inline-flex border-primary/20 bg-primary/5">
-          <Card.Content class="flex items-center gap-3 py-3 px-5">
-            <TrophyIcon class="h-5 w-5 text-primary" />
-            <span class="font-medium text-primary">Final results coming up...</span>
-          </Card.Content>
-        </Card.Root>
+        <!-- Last round - show skip to results button -->
+        <Button size="lg" onclick={skipToResults} disabled={isTransitioning} class="gap-2">
+          {#if isTransitioning}
+            <Loader2Icon class="h-5 w-5 animate-spin" />
+            Loading Results...
+          {:else}
+            <TrophyIcon class="h-5 w-5" />
+            View Final Results
+          {/if}
+        </Button>
+        {#if !isTransitioning && countdown > 0}
+          <p class="text-sm text-muted-foreground">
+            Auto-continuing in {countdown}s...
+          </p>
+        {/if}
       {/if}
     </div>
   </div>
