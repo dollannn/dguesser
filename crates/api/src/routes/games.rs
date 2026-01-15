@@ -173,8 +173,10 @@ pub struct SubmitGuessRequest {
 pub struct GuessResultResponse {
     /// Distance from correct location in meters
     pub distance_meters: f64,
-    /// Score awarded
+    /// Score awarded for this round
     pub score: u32,
+    /// Accumulated total score across all rounds
+    pub total_score: u32,
     /// Correct location
     pub correct_location: LocationInfo,
 }
@@ -703,13 +705,15 @@ pub async fn submit_guess(
     )
     .await?;
 
-    // Update player's total score
-    dguesser_db::games::update_player_score(state.db(), &game_id, &auth.user_id, score as i32)
-        .await?;
+    // Update player's total score and get the new total
+    let total_score =
+        dguesser_db::games::update_player_score(state.db(), &game_id, &auth.user_id, score as i32)
+            .await?;
 
     Ok(Json(GuessResultResponse {
         distance_meters: distance,
         score,
+        total_score: total_score as u32,
         correct_location: LocationInfo {
             lat: round.location_lat,
             lng: round.location_lng,

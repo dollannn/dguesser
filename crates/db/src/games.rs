@@ -289,22 +289,22 @@ pub async fn get_players(pool: &DbPool, game_id: &str) -> Result<Vec<GamePlayer>
     .await
 }
 
-/// Update player's score
+/// Update player's score and return the new total
 pub async fn update_player_score(
     pool: &DbPool,
     game_id: &str,
     user_id: &str,
     score_to_add: i32,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "UPDATE game_players SET score_total = score_total + $3 WHERE game_id = $1 AND user_id = $2",
+) -> Result<i32, sqlx::Error> {
+    let result = sqlx::query_scalar!(
+        "UPDATE game_players SET score_total = score_total + $3 WHERE game_id = $1 AND user_id = $2 RETURNING score_total",
         game_id,
         user_id,
         score_to_add
     )
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
-    Ok(())
+    Ok(result)
 }
 
 /// Set final rankings for all players in a game

@@ -79,6 +79,7 @@ export interface UserGuessInfo {
 export interface GuessResult {
   distance_meters: number;
   score: number;
+  total_score: number;
   correct_location: Location;
 }
 

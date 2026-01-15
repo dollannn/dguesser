@@ -64,7 +64,7 @@
               guess_lng: guessLng,
               distance_meters: result.distance_meters,
               score: result.score,
-              total_score: 0,
+              total_score: result.total_score,
             },
           ],
         });

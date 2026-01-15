@@ -15,8 +15,8 @@ impl Default for ScoringConfig {
     fn default() -> Self {
         Self {
             max_points: 5000,
-            zero_score_distance: 20_000_000.0, // ~half Earth circumference
-            curve_exponent: 2.0,
+            zero_score_distance: 5_000_000.0, // 5,000 km - roughly continent-scale
+            curve_exponent: 1.5,              // Steeper dropoff for far guesses
         }
     }
 }
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn test_far_guess() {
         let config = ScoringConfig::default();
-        assert_eq!(calculate_score(20_000_001.0, &config), 0);
+        assert_eq!(calculate_score(5_000_001.0, &config), 0);
     }
 
     #[test]
@@ -87,7 +87,7 @@ mod tests {
         let config = ScoringConfig::default();
         // Use distances large enough to show meaningful score differences
         let close = calculate_score(1_000_000.0, &config); // 1000 km
-        let far = calculate_score(10_000_000.0, &config); // 10,000 km
+        let far = calculate_score(4_000_000.0, &config); // 4000 km
         assert!(close > far);
     }
 
@@ -100,6 +100,34 @@ mod tests {
     #[test]
     fn test_logarithmic_far_guess() {
         let config = ScoringConfig::default();
-        assert_eq!(calculate_score_logarithmic(20_000_001.0, &config), 0);
+        assert_eq!(calculate_score_logarithmic(5_000_001.0, &config), 0);
+    }
+
+    #[test]
+    fn test_continent_scale_scoring() {
+        let config = ScoringConfig::default();
+
+        // Close guess (same city): near max points
+        let same_city = calculate_score(50_000.0, &config); // 50 km
+        assert!(same_city > 4900, "50km should give >4900 pts, got {same_city}");
+
+        // Same country, different city: still good points
+        let same_country = calculate_score(500_000.0, &config); // 500 km
+        assert!(same_country > 4500, "500km should give >4500 pts, got {same_country}");
+
+        // Same continent, far away: moderate points
+        let same_continent = calculate_score(2_000_000.0, &config); // 2000 km
+        assert!(
+            same_continent > 3000 && same_continent < 4500,
+            "2000km should give 3000-4500 pts, got {same_continent}"
+        );
+
+        // Different continent: low points
+        let diff_continent = calculate_score(4_000_000.0, &config); // 4000 km
+        assert!(diff_continent < 2000, "4000km should give <2000 pts, got {diff_continent}");
+
+        // Other side of world: zero points
+        let other_side = calculate_score(5_000_000.0, &config); // 5000 km
+        assert_eq!(other_side, 0, "5000km+ should give 0 pts");
     }
 }
