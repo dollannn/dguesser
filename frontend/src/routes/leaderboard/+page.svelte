@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { user } from '$lib/stores/auth';
   import {
     leaderboardApi,
@@ -7,58 +6,80 @@
     type TimePeriod,
     type LeaderboardEntry,
   } from '$lib/api';
+  import {
+    getRankDisplay,
+    getRankClass,
+    getRankRowClass,
+    formatScore,
+  } from '$lib/utils.js';
 
   let entries = $state<LeaderboardEntry[]>([]);
   let loading = $state(true);
+  let loadingMore = $state(false);
   let error = $state('');
   let totalPlayers = $state(0);
   let currentUserRank = $state<number | null>(null);
   let currentUserScore = $state<number | null>(null);
+  let offset = $state(0);
+  let hasMore = $state(false);
 
   let selectedType = $state<LeaderboardType>('total_score');
   let selectedPeriod = $state<TimePeriod>('all_time');
 
-  const typeLabels: Record<LeaderboardType, string> = {
-    total_score: 'Total Score',
-    best_game: 'Best Game',
-    games_played: 'Games Played',
-    average_score: 'Average Score',
-  };
+  const LIMIT = 50;
 
-  const periodLabels: Record<TimePeriod, string> = {
-    all_time: 'All Time',
-    daily: 'Today',
-    weekly: 'This Week',
-    monthly: 'This Month',
-  };
+  const typeOptions: { value: LeaderboardType; label: string }[] = [
+    { value: 'total_score', label: 'Total Score' },
+    { value: 'best_game', label: 'Best Game' },
+    { value: 'games_played', label: 'Games Played' },
+    { value: 'average_score', label: 'Average' },
+  ];
 
-  async function loadLeaderboard() {
-    loading = true;
+  const periodOptions: { value: TimePeriod; label: string }[] = [
+    { value: 'all_time', label: 'All Time' },
+    { value: 'daily', label: 'Today' },
+    { value: 'weekly', label: 'This Week' },
+    { value: 'monthly', label: 'This Month' },
+  ];
+
+  async function loadLeaderboard(append = false) {
+    if (append) {
+      loadingMore = true;
+    } else {
+      loading = true;
+      offset = 0;
+      // Don't clear entries here - keep showing old data until new data arrives
+    }
     error = '';
 
     try {
       const response = await leaderboardApi.getLeaderboard({
         type: selectedType,
         period: selectedPeriod,
-        limit: 100,
+        limit: LIMIT,
+        offset: append ? offset : 0,
       });
 
-      entries = response.entries;
+      if (append) {
+        entries = [...entries, ...response.entries];
+      } else {
+        entries = response.entries;
+      }
       totalPlayers = response.total_players;
       currentUserRank = response.current_user_rank;
       currentUserScore = response.current_user_score;
+      hasMore = entries.length < totalPlayers;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load leaderboard';
     } finally {
       loading = false;
+      loadingMore = false;
     }
   }
 
-  function formatScore(score: number, type: LeaderboardType): string {
-    if (type === 'games_played') {
-      return score.toString();
-    }
-    return score.toLocaleString();
+  function loadMore() {
+    offset += LIMIT;
+    loadLeaderboard(true);
   }
 
   function getScoreLabel(type: LeaderboardType): string {
@@ -74,100 +95,93 @@
     }
   }
 
-  function getRankIcon(rank: number): string {
-    switch (rank) {
-      case 1:
-        return '1st';
-      case 2:
-        return '2nd';
-      case 3:
-        return '3rd';
-      default:
-        return `#${rank}`;
+  function formatDisplayScore(score: number, type: LeaderboardType): string {
+    if (type === 'games_played') {
+      return score.toString();
     }
+    return formatScore(score);
   }
 
-  function getRankClass(rank: number): string {
-    switch (rank) {
-      case 1:
-        return 'text-yellow-500 font-bold';
-      case 2:
-        return 'text-gray-400 font-bold';
-      case 3:
-        return 'text-amber-600 font-bold';
-      default:
-        return 'text-gray-500';
-    }
-  }
+  // Show skeleton only on initial load, not on filter changes
+  let hasLoadedOnce = $state(false);
+  let showSkeleton = $derived(loading && !hasLoadedOnce);
 
-  onMount(() => {
-    loadLeaderboard();
-  });
-
-  // Reload when filters change
+  // Load on filter change
+  let isInitialMount = true;
   $effect(() => {
     // Track dependencies
     const _ = [selectedType, selectedPeriod];
+    
+    // Skip the initial mount since we'll load there
+    if (isInitialMount) {
+      isInitialMount = false;
+      loadLeaderboard().then(() => {
+        hasLoadedOnce = true;
+      });
+      return;
+    }
+    
     loadLeaderboard();
   });
 </script>
 
+<svelte:head>
+  <title>Leaderboard - DGuesser</title>
+</svelte:head>
+
 <div class="max-w-4xl mx-auto px-4 py-8">
+  <!-- Header -->
   <div class="mb-8">
     <h1 class="text-4xl font-bold text-gray-900 mb-2">Leaderboard</h1>
     <p class="text-gray-600">See how you stack up against other players</p>
   </div>
 
   <!-- Filters -->
-  <div class="flex flex-wrap gap-4 mb-6">
+  <div class="flex flex-col sm:flex-row gap-4 mb-6">
     <!-- Type selector -->
-    <div class="flex gap-2">
-      {#each Object.entries(typeLabels) as [value, label]}
+    <div class="flex flex-wrap gap-2">
+      {#each typeOptions as option}
         <button
-          onclick={() => (selectedType = value as LeaderboardType)}
-          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {selectedType ===
-          value
-            ? 'bg-primary-600 text-white'
+          onclick={() => (selectedType = option.value)}
+          class="px-3 py-2 rounded-lg text-sm font-medium transition-all {selectedType === option.value
+            ? 'bg-gray-900 text-white shadow-md'
             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
         >
-          {label}
+          {option.label}
         </button>
       {/each}
     </div>
 
     <!-- Period selector -->
-    <div class="flex gap-2 ml-auto">
-      {#each Object.entries(periodLabels) as [value, label]}
+    <div class="flex gap-2 sm:ml-auto">
+      {#each periodOptions as option}
         <button
-          onclick={() => (selectedPeriod = value as TimePeriod)}
-          class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {selectedPeriod ===
-          value
-            ? 'bg-accent-600 text-white'
+          onclick={() => (selectedPeriod = option.value)}
+          class="px-3 py-2 rounded-lg text-sm font-medium transition-all {selectedPeriod === option.value
+            ? 'bg-gray-900 text-white shadow-md'
             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
         >
-          {label}
+          {option.label}
         </button>
       {/each}
     </div>
   </div>
 
-  <!-- Current user rank -->
+  <!-- Current user rank (when not in top entries) -->
   {#if currentUserRank && !entries.some((e) => e.is_current_user)}
-    <div class="mb-6 p-4 bg-primary-50 rounded-lg border border-primary-200">
+    <div class="mb-6 p-4 bg-primary-50 rounded-xl border border-primary-200">
       <div class="flex items-center justify-between">
         <div>
           <span class="text-sm text-primary-600 font-medium">Your Rank</span>
           <div class="text-2xl font-bold text-primary-800">
-            {getRankIcon(currentUserRank)}
+            {getRankDisplay(currentUserRank)}
           </div>
         </div>
         {#if currentUserScore !== null}
           <div class="text-right">
-            <span class="text-sm text-primary-600 font-medium"
-              >{getScoreLabel(selectedType)}</span
-            >
+            <span class="text-sm text-primary-600 font-medium">{getScoreLabel(selectedType)}</span>
             <div class="text-2xl font-bold text-primary-800">
-              {formatScore(currentUserScore, selectedType)}
+              {formatDisplayScore(currentUserScore, selectedType)}
             </div>
           </div>
         {/if}
@@ -177,88 +191,112 @@
 
   <!-- Error -->
   {#if error}
-    <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+    <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-center gap-3">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
       {error}
     </div>
   {/if}
 
-  <!-- Loading -->
-  {#if loading}
-    <div class="flex justify-center items-center py-12">
-      <div
-        class="animate-spin rounded-full h-8 w-8 border-2 border-primary-500 border-t-transparent"
-      ></div>
+  <!-- Loading skeleton (initial load or loading with no data) -->
+  {#if showSkeleton || (loading && entries.length === 0)}
+    <div class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="animate-pulse">
+        <div class="h-12 bg-gray-100 border-b"></div>
+        {#each Array(10) as _}
+          <div class="flex items-center gap-4 px-6 py-4 border-b border-gray-100">
+            <div class="w-12 h-6 bg-gray-200 rounded"></div>
+            <div class="w-10 h-10 bg-gray-200 rounded-full"></div>
+            <div class="flex-1 h-4 bg-gray-200 rounded w-32"></div>
+            <div class="w-20 h-4 bg-gray-200 rounded"></div>
+            <div class="w-12 h-4 bg-gray-200 rounded"></div>
+          </div>
+        {/each}
+      </div>
     </div>
   {:else if entries.length === 0}
-    <div class="text-center py-12 text-gray-500">
-      <p class="text-lg">No players on the leaderboard yet.</p>
-      <p class="text-sm mt-2">Be the first to play!</p>
+    <div class="text-center py-16 bg-white rounded-xl shadow">
+      <svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+      </svg>
+      <p class="text-lg text-gray-700 font-medium">No players on the leaderboard yet</p>
+      <p class="text-sm text-gray-500 mt-2">Be the first to play and claim your spot!</p>
+      <a href="/play" class="btn-primary mt-6 inline-block">Start Playing</a>
     </div>
   {:else}
     <!-- Leaderboard table -->
-    <div class="bg-white rounded-xl shadow overflow-hidden">
+    <div class="bg-white rounded-xl shadow overflow-hidden {loading ? 'opacity-60' : ''}">
       <table class="w-full">
         <thead>
           <tr class="bg-gray-50 border-b border-gray-200">
-            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-600"
-              >Rank</th
-            >
-            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-600"
-              >Player</th
-            >
-            <th class="px-6 py-4 text-right text-sm font-semibold text-gray-600"
-              >{getScoreLabel(selectedType)}</th
-            >
-            <th class="px-6 py-4 text-right text-sm font-semibold text-gray-600"
-              >Games</th
-            >
+            <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-gray-600 w-20">
+              Rank
+            </th>
+            <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-gray-600">
+              Player
+            </th>
+            <th class="px-4 sm:px-6 py-4 text-right text-sm font-semibold text-gray-600">
+              {getScoreLabel(selectedType)}
+            </th>
+            <th class="hidden sm:table-cell px-6 py-4 text-right text-sm font-semibold text-gray-600">
+              Games
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          {#each entries as entry}
+          {#each entries as entry (entry.user_id + entry.rank)}
             <tr
-              class="hover:bg-gray-50 transition-colors {entry.is_current_user
-                ? 'bg-primary-50 ring-2 ring-primary-200 ring-inset'
-                : ''}"
+              class="transition-colors hover:bg-gray-50 {getRankRowClass(entry.rank, entry.is_current_user)}"
             >
-              <td class="px-6 py-4">
-                <span class={getRankClass(entry.rank)}>
-                  {getRankIcon(entry.rank)}
+              <td class="px-4 sm:px-6 py-4">
+                <span class="text-lg font-semibold {getRankClass(entry.rank)}">
+                  {getRankDisplay(entry.rank)}
                 </span>
               </td>
-              <td class="px-6 py-4">
+              <td class="px-4 sm:px-6 py-4">
                 <div class="flex items-center gap-3">
                   {#if entry.avatar_url}
                     <img
                       src={entry.avatar_url}
                       alt=""
-                      class="w-8 h-8 rounded-full"
+                      class="w-10 h-10 rounded-full ring-2 ring-white shadow"
                     />
                   {:else}
                     <div
-                      class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center"
+                      class="w-10 h-10 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center ring-2 ring-white shadow"
                     >
-                      <span class="text-gray-500 text-sm font-medium">
+                      <span class="text-gray-600 text-sm font-bold">
                         {entry.display_name.charAt(0).toUpperCase()}
                       </span>
                     </div>
                   {/if}
-                  <span
-                    class="font-medium {entry.is_current_user
-                      ? 'text-primary-700'
-                      : 'text-gray-900'}"
-                  >
-                    {entry.display_name}
+                  <div>
+                    <span
+                      class="font-medium {entry.is_current_user
+                        ? 'text-primary-700'
+                        : 'text-gray-900'}"
+                    >
+                      {entry.display_name}
+                    </span>
                     {#if entry.is_current_user}
-                      <span class="text-xs text-primary-600 ml-1">(You)</span>
+                      <span class="ml-1.5 text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">
+                        You
+                      </span>
                     {/if}
-                  </span>
+                    <!-- Show games on mobile under the name -->
+                    <div class="sm:hidden text-xs text-gray-500 mt-0.5">
+                      {entry.games_played} games
+                    </div>
+                  </div>
                 </div>
               </td>
-              <td class="px-6 py-4 text-right font-semibold text-gray-900">
-                {formatScore(entry.score, selectedType)}
+              <td class="px-4 sm:px-6 py-4 text-right">
+                <span class="font-bold text-gray-900 text-lg">
+                  {formatDisplayScore(entry.score, selectedType)}
+                </span>
               </td>
-              <td class="px-6 py-4 text-right text-gray-600">
+              <td class="hidden sm:table-cell px-6 py-4 text-right text-gray-600">
                 {entry.games_played}
               </td>
             </tr>
@@ -267,9 +305,29 @@
       </table>
     </div>
 
-    <!-- Total players -->
-    <div class="mt-4 text-center text-sm text-gray-500">
-      Showing top {entries.length} of {totalPlayers.toLocaleString()} players
+    <!-- Load more / Stats -->
+    <div class="mt-6 flex flex-col items-center gap-4">
+      {#if hasMore}
+        <button
+          onclick={loadMore}
+          disabled={loadingMore}
+          class="btn-secondary px-6 py-2.5 {loadingMore ? 'opacity-50 cursor-not-allowed' : ''}"
+        >
+          {#if loadingMore}
+            <svg class="inline-block w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading...
+          {:else}
+            Load More
+          {/if}
+        </button>
+      {/if}
+      
+      <p class="text-sm text-gray-500">
+        Showing {entries.length} of {totalPlayers.toLocaleString()} players
+      </p>
     </div>
   {/if}
 </div>

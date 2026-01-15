@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use tokio::signal;
 use tower_http::cors::CorsLayer;
 
+mod cache;
 mod config;
 mod error;
 mod logging;

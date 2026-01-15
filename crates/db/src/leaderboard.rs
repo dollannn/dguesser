@@ -137,11 +137,11 @@ pub async fn get_by_average_score(
             id as user_id,
             display_name,
             avatar_url,
-            (total_score / games_played) as "score!: i64",
+            ROUND(total_score::numeric / games_played, 0)::bigint as "score!: i64",
             games_played as games_count
         FROM users
         WHERE games_played >= 3
-        ORDER BY (total_score / games_played) DESC, games_played DESC
+        ORDER BY (total_score::numeric / games_played) DESC, games_played DESC
         LIMIT $1 OFFSET $2
         "#,
         limit,
@@ -304,7 +304,7 @@ pub async fn get_by_average_score_period(
             u.id as user_id,
             u.display_name,
             u.avatar_url,
-            (COALESCE(SUM(gp.score_total), 0) / NULLIF(COUNT(DISTINCT gp.game_id), 0))::bigint as "score!: i64",
+            ROUND(COALESCE(SUM(gp.score_total), 0)::numeric / NULLIF(COUNT(DISTINCT gp.game_id), 0), 0)::bigint as "score!: i64",
             COUNT(DISTINCT gp.game_id)::bigint as "games_count!: i64"
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
@@ -312,7 +312,7 @@ pub async fn get_by_average_score_period(
         WHERE g.status = 'finished' AND g.ended_at >= $1
         GROUP BY u.id, u.display_name, u.avatar_url
         HAVING COUNT(DISTINCT gp.game_id) >= 3
-        ORDER BY (SUM(gp.score_total) / NULLIF(COUNT(DISTINCT gp.game_id), 0)) DESC, COUNT(DISTINCT gp.game_id) DESC
+        ORDER BY (SUM(gp.score_total)::numeric / NULLIF(COUNT(DISTINCT gp.game_id), 0)) DESC, COUNT(DISTINCT gp.game_id) DESC
         LIMIT $2 OFFSET $3
         "#,
         since,
@@ -438,7 +438,7 @@ pub async fn get_user_rank_average_score(
         r#"
         SELECT rank::bigint as "rank"
         FROM (
-            SELECT id, RANK() OVER (ORDER BY (total_score / NULLIF(games_played, 0)) DESC) as rank
+            SELECT id, RANK() OVER (ORDER BY (total_score::numeric / NULLIF(games_played, 0)) DESC) as rank
             FROM users
             WHERE games_played >= 3
         ) ranked
@@ -449,6 +449,132 @@ pub async fn get_user_rank_average_score(
     .fetch_optional(pool)
     .await?;
     Ok(result.flatten())
+}
+
+/// Get a user's rank by total score within a time period
+pub async fn get_user_rank_total_score_period(
+    pool: &DbPool,
+    user_id: &str,
+    since: DateTime<Utc>,
+) -> Result<Option<(i64, i64)>, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        SELECT rank::bigint as "rank!", score::bigint as "score!"
+        FROM (
+            SELECT 
+                u.id,
+                COALESCE(SUM(gp.score_total), 0) as score,
+                RANK() OVER (ORDER BY COALESCE(SUM(gp.score_total), 0) DESC) as rank
+            FROM users u
+            INNER JOIN game_players gp ON gp.user_id = u.id
+            INNER JOIN games g ON g.id = gp.game_id
+            WHERE g.status = 'finished' AND g.ended_at >= $1
+            GROUP BY u.id
+            HAVING SUM(gp.score_total) > 0
+        ) ranked
+        WHERE id = $2
+        "#,
+        since,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(result.map(|r| (r.rank, r.score)))
+}
+
+/// Get a user's rank by best score within a time period
+pub async fn get_user_rank_best_score_period(
+    pool: &DbPool,
+    user_id: &str,
+    since: DateTime<Utc>,
+) -> Result<Option<(i64, i64)>, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        SELECT rank::bigint as "rank!", score::bigint as "score!"
+        FROM (
+            SELECT 
+                u.id,
+                COALESCE(MAX(gp.score_total), 0) as score,
+                RANK() OVER (ORDER BY COALESCE(MAX(gp.score_total), 0) DESC) as rank
+            FROM users u
+            INNER JOIN game_players gp ON gp.user_id = u.id
+            INNER JOIN games g ON g.id = gp.game_id
+            WHERE g.status = 'finished' AND g.ended_at >= $1
+            GROUP BY u.id
+            HAVING MAX(gp.score_total) > 0
+        ) ranked
+        WHERE id = $2
+        "#,
+        since,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(result.map(|r| (r.rank, r.score)))
+}
+
+/// Get a user's rank by games played within a time period
+pub async fn get_user_rank_games_played_period(
+    pool: &DbPool,
+    user_id: &str,
+    since: DateTime<Utc>,
+) -> Result<Option<(i64, i64)>, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        SELECT rank::bigint as "rank!", games_count::bigint as "score!"
+        FROM (
+            SELECT 
+                u.id,
+                COUNT(DISTINCT gp.game_id) as games_count,
+                RANK() OVER (ORDER BY COUNT(DISTINCT gp.game_id) DESC) as rank
+            FROM users u
+            INNER JOIN game_players gp ON gp.user_id = u.id
+            INNER JOIN games g ON g.id = gp.game_id
+            WHERE g.status = 'finished' AND g.ended_at >= $1
+            GROUP BY u.id
+            HAVING COUNT(DISTINCT gp.game_id) > 0
+        ) ranked
+        WHERE id = $2
+        "#,
+        since,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(result.map(|r| (r.rank, r.score)))
+}
+
+/// Get a user's rank by average score within a time period (minimum 3 games)
+pub async fn get_user_rank_average_score_period(
+    pool: &DbPool,
+    user_id: &str,
+    since: DateTime<Utc>,
+) -> Result<Option<(i64, i64)>, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        SELECT rank::bigint as "rank!", avg_score::bigint as "score!"
+        FROM (
+            SELECT 
+                u.id,
+                ROUND(COALESCE(SUM(gp.score_total), 0)::numeric / NULLIF(COUNT(DISTINCT gp.game_id), 0), 0) as avg_score,
+                RANK() OVER (
+                    ORDER BY (SUM(gp.score_total)::numeric / NULLIF(COUNT(DISTINCT gp.game_id), 0)) DESC
+                ) as rank
+            FROM users u
+            INNER JOIN game_players gp ON gp.user_id = u.id
+            INNER JOIN games g ON g.id = gp.game_id
+            WHERE g.status = 'finished' AND g.ended_at >= $1
+            GROUP BY u.id
+            HAVING COUNT(DISTINCT gp.game_id) >= 3
+        ) ranked
+        WHERE id = $2
+        "#,
+        since,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(result.map(|r| (r.rank, r.score)))
 }
 
 /// Helper to get the start of a time period

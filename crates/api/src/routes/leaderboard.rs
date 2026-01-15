@@ -4,7 +4,11 @@ use axum::{Json, Router, extract::State, routing::get};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::{error::ApiError, state::AppState};
+use crate::{
+    cache::leaderboard::{CachedLeaderboard, LeaderboardCache},
+    error::ApiError,
+    state::AppState,
+};
 use dguesser_auth::MaybeAuthUser;
 use dguesser_protocol::api::leaderboard::{
     LeaderboardEntry, LeaderboardQuery, LeaderboardType, TimePeriod,
@@ -60,106 +64,188 @@ pub async fn get_leaderboard(
     let offset = query.offset.max(0);
 
     let db = state.db();
+    let redis = state.redis();
 
     // Get the period start date if applicable
     let period_start = dguesser_db::leaderboard::period_start(&query.period.to_string());
 
-    // Fetch leaderboard entries
-    let rows = match (&query.r#type, &period_start) {
-        // All-time queries
-        (LeaderboardType::TotalScore, None) => {
-            dguesser_db::leaderboard::get_by_total_score(db, limit, offset).await?
-        }
-        (LeaderboardType::BestGame, None) => {
-            dguesser_db::leaderboard::get_by_best_score(db, limit, offset).await?
-        }
-        (LeaderboardType::GamesPlayed, None) => {
-            dguesser_db::leaderboard::get_by_games_played(db, limit, offset).await?
-        }
-        (LeaderboardType::AverageScore, None) => {
-            dguesser_db::leaderboard::get_by_average_score(db, limit, offset).await?
-        }
-        // Time-filtered queries
-        (LeaderboardType::TotalScore, Some(since)) => {
-            dguesser_db::leaderboard::get_by_total_score_period(db, *since, limit, offset).await?
-        }
-        (LeaderboardType::BestGame, Some(since)) => {
-            dguesser_db::leaderboard::get_by_best_score_period(db, *since, limit, offset).await?
-        }
-        (LeaderboardType::GamesPlayed, Some(since)) => {
-            dguesser_db::leaderboard::get_by_games_played_period(db, *since, limit, offset).await?
-        }
-        (LeaderboardType::AverageScore, Some(since)) => {
-            dguesser_db::leaderboard::get_by_average_score_period(db, *since, limit, offset).await?
-        }
-    };
+    // Try to get cached leaderboard data first
+    let cached = LeaderboardCache::get(redis, &query.r#type, &query.period, limit, offset).await;
 
-    // Convert to response entries with rank
-    let entries: Vec<LeaderboardEntry> = rows
-        .into_iter()
-        .enumerate()
-        .map(|(i, row)| {
-            let is_current = maybe_auth.0.as_ref().is_some_and(|a| a.user_id == row.user_id);
-            LeaderboardEntry {
+    let (mut entries, total_players) = if let Some(cached) = cached {
+        tracing::debug!("Leaderboard cache hit");
+        (cached.entries, cached.total_players)
+    } else {
+        tracing::debug!("Leaderboard cache miss, fetching from DB");
+
+        // Fetch leaderboard entries
+        let rows = match (&query.r#type, &period_start) {
+            // All-time queries
+            (LeaderboardType::TotalScore, None) => {
+                dguesser_db::leaderboard::get_by_total_score(db, limit, offset).await?
+            }
+            (LeaderboardType::BestGame, None) => {
+                dguesser_db::leaderboard::get_by_best_score(db, limit, offset).await?
+            }
+            (LeaderboardType::GamesPlayed, None) => {
+                dguesser_db::leaderboard::get_by_games_played(db, limit, offset).await?
+            }
+            (LeaderboardType::AverageScore, None) => {
+                dguesser_db::leaderboard::get_by_average_score(db, limit, offset).await?
+            }
+            // Time-filtered queries
+            (LeaderboardType::TotalScore, Some(since)) => {
+                dguesser_db::leaderboard::get_by_total_score_period(db, *since, limit, offset)
+                    .await?
+            }
+            (LeaderboardType::BestGame, Some(since)) => {
+                dguesser_db::leaderboard::get_by_best_score_period(db, *since, limit, offset)
+                    .await?
+            }
+            (LeaderboardType::GamesPlayed, Some(since)) => {
+                dguesser_db::leaderboard::get_by_games_played_period(db, *since, limit, offset)
+                    .await?
+            }
+            (LeaderboardType::AverageScore, Some(since)) => {
+                dguesser_db::leaderboard::get_by_average_score_period(db, *since, limit, offset)
+                    .await?
+            }
+        };
+
+        // Convert to response entries with rank (without is_current_user for caching)
+        let entries: Vec<LeaderboardEntry> = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| LeaderboardEntry {
                 rank: (offset as u32) + (i as u32) + 1,
                 user_id: row.user_id,
                 display_name: row.display_name,
                 avatar_url: row.avatar_url,
                 score: row.score,
                 games_played: row.games_count,
-                is_current_user: is_current,
-            }
-        })
-        .collect();
+                is_current_user: false, // Set later per-user
+            })
+            .collect();
 
-    // Get total count
-    let total_players = match &period_start {
-        None => dguesser_db::leaderboard::count_ranked_players(db).await?,
-        Some(since) => dguesser_db::leaderboard::count_ranked_players_period(db, *since).await?,
+        // Get total count
+        let total_players = match &period_start {
+            None => dguesser_db::leaderboard::count_ranked_players(db).await?,
+            Some(since) => {
+                dguesser_db::leaderboard::count_ranked_players_period(db, *since).await?
+            }
+        };
+
+        // Cache the result (without user-specific data)
+        LeaderboardCache::set(
+            redis,
+            &query.r#type,
+            &query.period,
+            limit,
+            offset,
+            &CachedLeaderboard { entries: entries.clone(), total_players },
+        )
+        .await;
+
+        (entries, total_players)
     };
+
+    // Mark current user in entries (user-specific, not cached)
+    if let Some(auth) = &maybe_auth.0 {
+        for entry in &mut entries {
+            if entry.user_id == auth.user_id {
+                entry.is_current_user = true;
+            }
+        }
+    }
 
     // Get current user's rank if authenticated
     let (current_user_rank, current_user_score) = if let Some(auth) = &maybe_auth.0 {
-        // Only fetch rank for all-time queries (time-filtered rank queries are expensive)
-        if period_start.is_none() {
-            let rank = match query.r#type {
-                LeaderboardType::TotalScore => {
-                    dguesser_db::leaderboard::get_user_rank_total_score(db, &auth.user_id).await?
-                }
-                LeaderboardType::BestGame => {
-                    dguesser_db::leaderboard::get_user_rank_best_score(db, &auth.user_id).await?
-                }
-                LeaderboardType::GamesPlayed => {
-                    dguesser_db::leaderboard::get_user_rank_games_played(db, &auth.user_id).await?
-                }
-                LeaderboardType::AverageScore => {
-                    dguesser_db::leaderboard::get_user_rank_average_score(db, &auth.user_id).await?
-                }
-            };
-
-            // If user is ranked, get their score too
-            if let Some(r) = rank {
-                let user = dguesser_db::users::get_by_id(db, &auth.user_id).await?.map(|u| {
-                    match query.r#type {
-                        LeaderboardType::TotalScore => u.total_score,
-                        LeaderboardType::BestGame => u.best_score as i64,
-                        LeaderboardType::GamesPlayed => u.games_played as i64,
-                        LeaderboardType::AverageScore => {
-                            if u.games_played > 0 {
-                                u.total_score / u.games_played as i64
-                            } else {
-                                0
-                            }
-                        }
+        match &period_start {
+            // All-time queries
+            None => {
+                let rank = match query.r#type {
+                    LeaderboardType::TotalScore => {
+                        dguesser_db::leaderboard::get_user_rank_total_score(db, &auth.user_id)
+                            .await?
                     }
-                });
-                (Some(r as u32), user)
-            } else {
-                (None, None)
+                    LeaderboardType::BestGame => {
+                        dguesser_db::leaderboard::get_user_rank_best_score(db, &auth.user_id)
+                            .await?
+                    }
+                    LeaderboardType::GamesPlayed => {
+                        dguesser_db::leaderboard::get_user_rank_games_played(db, &auth.user_id)
+                            .await?
+                    }
+                    LeaderboardType::AverageScore => {
+                        dguesser_db::leaderboard::get_user_rank_average_score(db, &auth.user_id)
+                            .await?
+                    }
+                };
+
+                // If user is ranked, get their score too
+                if let Some(r) = rank {
+                    let user =
+                        dguesser_db::users::get_by_id(db, &auth.user_id).await?.map(
+                            |u| match query.r#type {
+                                LeaderboardType::TotalScore => u.total_score,
+                                LeaderboardType::BestGame => u.best_score as i64,
+                                LeaderboardType::GamesPlayed => u.games_played as i64,
+                                LeaderboardType::AverageScore => {
+                                    if u.games_played > 0 {
+                                        u.total_score / u.games_played as i64
+                                    } else {
+                                        0
+                                    }
+                                }
+                            },
+                        );
+                    (Some(r as u32), user)
+                } else {
+                    (None, None)
+                }
             }
-        } else {
-            // For time-filtered, we'd need complex queries - skip for now
-            (None, None)
+            // Time-filtered queries - now supported!
+            Some(since) => {
+                let result = match query.r#type {
+                    LeaderboardType::TotalScore => {
+                        dguesser_db::leaderboard::get_user_rank_total_score_period(
+                            db,
+                            &auth.user_id,
+                            *since,
+                        )
+                        .await?
+                    }
+                    LeaderboardType::BestGame => {
+                        dguesser_db::leaderboard::get_user_rank_best_score_period(
+                            db,
+                            &auth.user_id,
+                            *since,
+                        )
+                        .await?
+                    }
+                    LeaderboardType::GamesPlayed => {
+                        dguesser_db::leaderboard::get_user_rank_games_played_period(
+                            db,
+                            &auth.user_id,
+                            *since,
+                        )
+                        .await?
+                    }
+                    LeaderboardType::AverageScore => {
+                        dguesser_db::leaderboard::get_user_rank_average_score_period(
+                            db,
+                            &auth.user_id,
+                            *since,
+                        )
+                        .await?
+                    }
+                };
+
+                match result {
+                    Some((rank, score)) => (Some(rank as u32), Some(score)),
+                    None => (None, None),
+                }
+            }
         }
     } else {
         (None, None)
