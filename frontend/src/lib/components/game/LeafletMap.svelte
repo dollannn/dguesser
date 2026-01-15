@@ -22,6 +22,7 @@
   let container: HTMLDivElement;
   let map: L.Map | null = null;
   let marker: L.Marker | null = null;
+  let hoverMarker: L.Marker | null = null;
   let leaflet: typeof L | null = null;
 
   onMount(async () => {
@@ -30,15 +31,30 @@
     // Dynamically import Leaflet only on client side
     leaflet = (await import('leaflet')).default;
 
-    // Custom marker icon
+    // Custom marker icon for placed guess (using inline styles for Leaflet injection)
     const guessIcon = leaflet.divIcon({
       className: 'guess-marker',
       html: `
-        <div class="relative">
-          <div class="w-6 h-6 bg-green-500 rounded-full border-3 border-white shadow-lg flex items-center justify-center">
-            <div class="w-2 h-2 bg-white rounded-full"></div>
+        <div style="position: relative;">
+          <div style="width: 24px; height: 24px; background: #22c55e; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
+            <div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div>
           </div>
-          <div class="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-green-500 -mt-1"></div>
+          <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 100%; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #22c55e; margin-top: -3px;"></div>
+        </div>
+      `,
+      iconSize: [24, 32],
+      iconAnchor: [12, 32],
+    });
+
+    // Semi-transparent hover preview marker
+    const hoverIcon = leaflet.divIcon({
+      className: 'hover-marker',
+      html: `
+        <div style="position: relative; opacity: 0.5;">
+          <div style="width: 24px; height: 24px; background: #22c55e; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
+            <div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div>
+          </div>
+          <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 100%; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #22c55e; margin-top: -3px;"></div>
         </div>
       `,
       iconSize: [24, 32],
@@ -66,16 +82,61 @@
       if (disabled) return;
 
       const { lat, lng } = e.latlng;
+      
+      // Hide hover marker once a guess is placed
+      if (hoverMarker) {
+        hoverMarker.remove();
+        hoverMarker = null;
+      }
+
+      // Create or update marker immediately for instant feedback
+      if (marker) {
+        marker.setLatLng([lat, lng]);
+      } else {
+        marker = leaflet!.marker([lat, lng], { icon: guessIcon }).addTo(map!);
+      }
+
+      // Notify parent
       onclick?.({ lat, lng });
+    });
+
+    // Handle mouse move for hover preview
+    map.on('mousemove', (e: L.LeafletMouseEvent) => {
+      // Don't show hover if disabled or already have a placed marker
+      if (disabled || marker !== null) return;
+
+      const { lat, lng } = e.latlng;
+      if (hoverMarker) {
+        hoverMarker.setLatLng([lat, lng]);
+      } else {
+        hoverMarker = leaflet!.marker([lat, lng], { icon: hoverIcon, interactive: false }).addTo(map!);
+      }
+    });
+
+    // Remove hover marker when mouse leaves the map
+    map.on('mouseout', () => {
+      if (hoverMarker) {
+        hoverMarker.remove();
+        hoverMarker = null;
+      }
     });
 
     // Set initial marker if coords exist
     if (guessLat !== null && guessLng !== null) {
       marker = leaflet.marker([guessLat, guessLng], { icon: guessIcon }).addTo(map);
     }
+
+    // Invalidate size after a brief delay to fix initial centering
+    setTimeout(() => {
+      map?.invalidateSize();
+    }, 100);
   });
 
   onDestroy(() => {
+    if (hoverMarker) {
+      hoverMarker.remove();
+      hoverMarker = null;
+    }
     if (map) {
       map.remove();
       map = null;
@@ -89,11 +150,11 @@
     const guessIcon = leaflet.divIcon({
       className: 'guess-marker',
       html: `
-        <div class="relative">
-          <div class="w-6 h-6 bg-green-500 rounded-full border-3 border-white shadow-lg flex items-center justify-center">
-            <div class="w-2 h-2 bg-white rounded-full"></div>
+        <div style="position: relative;">
+          <div style="width: 24px; height: 24px; background: #22c55e; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
+            <div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div>
           </div>
-          <div class="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-green-500 -mt-1"></div>
+          <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 100%; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #22c55e; margin-top: -3px;"></div>
         </div>
       `,
       iconSize: [24, 32],
@@ -101,6 +162,12 @@
     });
 
     if (guessLat !== null && guessLng !== null) {
+      // Remove hover marker when placing a real guess
+      if (hoverMarker) {
+        hoverMarker.remove();
+        hoverMarker = null;
+      }
+
       if (marker) {
         marker.setLatLng([guessLat, guessLng]);
       } else {
@@ -131,9 +198,14 @@
 ></div>
 
 <style>
-  :global(.guess-marker) {
+  :global(.guess-marker),
+  :global(.hover-marker) {
     background: transparent;
     border: none;
+  }
+
+  :global(.hover-marker) {
+    pointer-events: none;
   }
 
   :global(.leaflet-control-zoom) {

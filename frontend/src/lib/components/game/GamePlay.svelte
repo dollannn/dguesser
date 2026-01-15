@@ -86,13 +86,23 @@
     }
   }
 
+  function handleKeydown(e: KeyboardEvent) {
+    // Space to submit guess (global shortcut)
+    if (e.code === 'Space' && canSubmit && !submitting) {
+      e.preventDefault();
+      submitGuess();
+    }
+  }
+
   onMount(() => {
     guessStartTime = Date.now();
   });
 </script>
 
-<!-- Full screen game container -->
-<div class="h-screen w-screen relative overflow-hidden bg-gray-900">
+<!-- Full screen game container (fixed to cover entire viewport) -->
+<svelte:window onkeydown={handleKeydown} />
+
+<div class="fixed inset-0 overflow-hidden bg-gray-900 z-40">
   <!-- Street View (full screen background) -->
   {#if gameState.location}
     <div class="absolute inset-0 w-full h-full">
@@ -165,61 +175,65 @@
       </div>
     {/snippet}
 
-    <!-- Bottom Right: Interactive Map -->
+    <!-- Bottom Right: Interactive Map + Guess Button -->
     {#snippet bottomRight()}
-      <div
-        class="transition-all duration-300 ease-out"
-        class:w-64={!mapExpanded}
-        class:h-48={!mapExpanded}
-        class:w-[500px]={mapExpanded}
-        class:h-[350px]={mapExpanded}
-        class:md:w-[600px]={mapExpanded}
-        class:md:h-[400px]={mapExpanded}
-      >
+      <div class="flex flex-col items-stretch gap-3">
+        <!-- Map Container -->
         <div
-          class="relative w-full h-full bg-background/90 backdrop-blur-sm rounded-xl border border-border/50 shadow-2xl overflow-hidden"
-          role="region"
-          aria-label="Guess map"
-          onmouseenter={() => (mapExpanded = true)}
-          onmouseleave={() => !guessLat && (mapExpanded = false)}
+          class="transition-all duration-300 ease-out"
+          class:w-64={!mapExpanded}
+          class:h-48={!mapExpanded}
+          class:w-[500px]={mapExpanded}
+          class:h-[350px]={mapExpanded}
+          class:md:w-[600px]={mapExpanded}
+          class:md:h-[400px]={mapExpanded}
         >
-          <LeafletMap
-            {guessLat}
-            {guessLng}
-            disabled={gameState.hasGuessed}
-            expanded={mapExpanded}
-            onclick={handleMapClick}
-          />
+          <div
+            class="relative w-full h-full bg-background/90 backdrop-blur-sm rounded-xl border border-border/50 shadow-2xl overflow-hidden"
+            role="region"
+            aria-label="Guess map"
+            onmouseenter={() => (mapExpanded = true)}
+            onmouseleave={() => !guessLat && (mapExpanded = false)}
+          >
+            <LeafletMap
+              {guessLat}
+              {guessLng}
+              disabled={gameState.hasGuessed}
+              expanded={mapExpanded}
+              onclick={handleMapClick}
+            />
 
-          <!-- Submit button overlay -->
-          {#if mapExpanded && canSubmit}
-            <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
-              <Button
-                onclick={submitGuess}
-                disabled={submitting}
-                size="lg"
-                class="px-8 shadow-lg gap-2"
-              >
-                {#if submitting}
-                  <Loader2 class="w-5 h-5 animate-spin" />
-                  Submitting...
-                {:else}
-                  <Send class="w-5 h-5" />
-                  Submit Guess
-                {/if}
-              </Button>
-            </div>
-          {/if}
-
-          <!-- Expand hint (when collapsed and no guess) -->
-          {#if !mapExpanded && !guessLat}
-            <div class="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
-              <span class="text-white text-sm font-medium drop-shadow-md">
-                Hover to expand
-              </span>
-            </div>
-          {/if}
+            <!-- Expand hint (when collapsed and no guess) -->
+            {#if !mapExpanded && !guessLat}
+              <div class="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+                <span class="text-white text-sm font-medium drop-shadow-md">
+                  Hover to expand
+                </span>
+              </div>
+            {/if}
+          </div>
         </div>
+
+        <!-- Guess Button (always visible, disabled until location selected) -->
+        {#if !gameState.hasGuessed}
+          <Button
+            onclick={submitGuess}
+            disabled={!canSubmit || submitting}
+            size="lg"
+            class="w-full shadow-lg gap-2"
+          >
+            {#if submitting}
+              <Loader2 class="w-5 h-5 animate-spin" />
+              Guessing...
+            {:else}
+              <Send class="w-5 h-5" />
+              {guessLat !== null ? 'Guess' : 'Place a pin to guess'}
+              {#if guessLat !== null}
+                <kbd class="ml-2 px-1.5 py-0.5 text-xs bg-primary-foreground/20 rounded">Space</kbd>
+              {/if}
+            {/if}
+          </Button>
+        {/if}
       </div>
     {/snippet}
 

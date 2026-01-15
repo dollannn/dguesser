@@ -30,7 +30,7 @@
 
   <!-- Bottom Right - Map -->
   {#if bottomRight}
-    <div class="absolute bottom-6 right-6 pointer-events-auto">
+    <div class="absolute bottom-8 right-8 pointer-events-auto">
       {@render bottomRight()}
     </div>
   {/if}
