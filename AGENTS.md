@@ -1,96 +1,84 @@
 # AGENTS.md - DGuesser Codebase Guide
 
-This document provides guidelines for AI coding agents working in this repository.
+Guidelines for AI coding agents working in this repository.
 
 ## Project Overview
 
 DGuesser is a geography guessing game with:
-- **Backend**: Rust workspace (Axum API on port 3001, Socket.IO realtime on port 3002)
-- **Frontend**: SvelteKit with Svelte 5, TypeScript, Tailwind CSS (port 5173)
+- **Backend**: Rust workspace (Axum API :3001, Socket.IO realtime :3002)
+- **Frontend**: SvelteKit 5, TypeScript, Tailwind CSS 4 (:5173)
 - **Infrastructure**: PostgreSQL + Redis via Docker Compose
 
 ## Architecture
 
 ```
 crates/
-  api/        # REST API (Axum)
-  realtime/   # Socket.IO server
-  core/       # Domain logic (scoring, geo calculations)
+  api/        # REST API (Axum) - routes, middleware, error handling
+  realtime/   # Socket.IO server for multiplayer
+  core/       # Domain logic (scoring, geo calculations, ID generation)
   db/         # Database layer (sqlx + PostgreSQL)
   auth/       # Authentication (OAuth, sessions)
   protocol/   # Shared DTOs for API and Socket events
-frontend/     # SvelteKit app
+frontend/     # SvelteKit app with shadcn-svelte components
 ```
 
-## Build & Test Commands
+## Build & Run Commands
 
-### Backend (Rust)
 ```bash
-cargo build                           # Debug build
-cargo run -p dguesser-api             # Run API server
-cargo run -p dguesser-realtime        # Run realtime server
-make dev                              # API with hot reload (requires cargo-watch)
-make dev-realtime                     # Realtime with hot reload
-```
+cargo build --workspace            # Build all crates
+just dev                           # API with hot reload
+just devr                          # Realtime with hot reload
+just deva                          # Both servers
+just db-up && just migrate         # Start DB + run migrations
 
-### Frontend
-```bash
-cd frontend && bun install            # Install dependencies
-cd frontend && bun run dev            # Development server
-cd frontend && bun run check          # TypeScript + Svelte type checking
-```
-
-### Infrastructure
-```bash
-make db-up                            # Start PostgreSQL + Redis
-make db-down                          # Stop containers
+cd frontend && bun install && bun run dev   # Frontend dev server
 ```
 
 ## Testing
 
 ```bash
-cargo test --workspace                # All tests
-cargo test -p dguesser-core           # Single crate
-cargo test -p dguesser-core test_perfect_score   # Single test by name
-cargo test distance                   # Tests matching pattern
-cargo test -- --nocapture             # With output
+cargo test --workspace                          # All tests
+cargo test -p dguesser-core                     # Single crate
+cargo test -p dguesser-api test_bad_request    # Single test by name
+cargo test distance                             # Tests matching pattern
+cargo test -- --nocapture                       # Show stdout/stderr
 ```
 
 ## Linting & Formatting
 
 ```bash
-cargo fmt --all                       # Format code
-cargo fmt --all -- --check            # Check formatting
-cargo clippy --workspace -- -D warnings   # Lint (warnings as errors)
+cargo fmt --all                       # Format Rust code
+cargo fmt --all -- --check            # Check formatting (CI)
+cargo clippy --workspace -- -D warnings  # Lint with warnings as errors
+cd frontend && bun run check          # TypeScript + Svelte type checking
 ```
 
 ## Rust Code Style
 
-### rustfmt.toml Settings
-- Max width: 100 chars, Edition 2021
-- Imports grouped: std first, external crates, then local
+### rustfmt.toml: `max_width = 100`, `edition = "2024"`, `group_imports = "StdExternalCrate"`
 
 ### Import Order
 ```rust
 use std::net::SocketAddr;           // 1. Standard library
-use axum::Router;                   // 2. External crates
-use crate::config::Config;          // 3. Local modules
+use axum::{Json, Router};           // 2. External crates
+use crate::error::ApiError;         // 3. Local modules
 ```
 
-### Documentation
+### Module Documentation
 ```rust
-//! Module-level docs at file top
+//! Module-level docs at file top (use //! not //)
 
 /// Function/struct docs above item
-pub fn calculate_score(...) -> u32 { ... }
+pub fn calculate_score() -> u32 { ... }
 ```
 
 ### Error Handling
-- `thiserror` for custom error types in libraries
-- `anyhow::Result` for application-level errors
+- `thiserror` for custom error types in library crates
+- `anyhow::Result` for application-level errors in binaries
+- Implement `From<SourceError>` for automatic error conversion
 
 ```rust
-#[derive(Error, Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error("Not found: {0}")]
     NotFound(String),
@@ -99,11 +87,7 @@ pub enum ApiError {
 }
 ```
 
-### Naming Conventions
-- Types: `PascalCase` (GameSession, ApiError)
-- Functions: `snake_case` (calculate_score)
-- Constants: `SCREAMING_SNAKE_CASE` (MAX_SCORE)
-- Modules: `snake_case`
+### Naming: Types `PascalCase`, functions `snake_case`, constants `SCREAMING_SNAKE`, modules `snake_case`
 
 ### Tests
 ```rust
@@ -112,70 +96,80 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_score_decreases_with_distance() {
-        // descriptive test names
+    fn test_descriptive_name() {
+        // Arrange, Act, Assert pattern
     }
 }
 ```
 
-## Frontend Code Style (Svelte/TypeScript)
+### Axum Route Handler Pattern
+```rust
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/resource", get(get_handler))
+        .route("/resource", post(create_handler))
+}
 
-### File Structure
+async fn get_handler(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<Response>, ApiError> { ... }
+```
+
+## Frontend Code Style (Svelte 5 / TypeScript)
+
+### Component Structure
 ```svelte
 <script lang="ts">
-  // TypeScript with strict mode
+  import { goto } from '$app/navigation';
+  import { Button } from '$lib/components/ui/button';
+  import type { User } from '$lib/api/auth';
+
+  let loading = $state(false);  // Svelte 5 runes
 </script>
 
-<main class="min-h-screen flex...">
+<main class="container mx-auto px-4">
   <!-- Tailwind utility classes only -->
 </main>
 ```
 
-### Stores
+### Import Order: 1) SvelteKit (`$app/*`), 2) External libraries, 3) Local (`$lib/*`)
+
+### Store Pattern
 ```typescript
-import { writable } from 'svelte/store';
-export const user = writable<User | null>(null);
-```
-
-## Common Patterns
-
-### Axum Route Handler
-```rust
-pub fn router() -> Router<AppState> {
-    Router::new().route("/me", get(get_me))
+function createStore() {
+  const { subscribe, set, update } = writable<State>(initialState);
+  return { subscribe, async action() { /* ... */ } };
 }
+export const store = createStore();
+export const derived$ = derived(store, ($s) => $s.value);
+```
 
-async fn get_me(State(state): State<AppState>) -> Result<Json<User>, ApiError> {
-    // implementation
+### API Client Usage
+```typescript
+import { api, ApiClientError } from '$lib/api/client';
+try {
+  const result = await api.post<Response>('/endpoint', body);
+} catch (e) {
+  if (e instanceof ApiClientError) console.error(e.code, e.message);
 }
-```
-
-### Config Loading
-```rust
-dotenvy::dotenv().ok();
-let config = Config::from_env()?;
-```
-
-### Type Aliases
-```rust
-pub type DbPool = PgPool;   // Prefer for external types
 ```
 
 ## Key Dependencies
 
-**Backend**: axum, socketioxide, sqlx, tokio, serde, tracing
-**Frontend**: svelte 5.x, @sveltejs/kit, tailwindcss 4.x, socket.io-client
+**Backend**: axum 0.8, socketioxide 0.15, sqlx 0.8, tokio, serde, tracing, utoipa
+**Frontend**: svelte 5.x, @sveltejs/kit 2.x, tailwindcss 4.x, bits-ui, socket.io-client
 
 ## Environment Setup
 
 ```bash
 cp .env.example .env
+just db-up      # Start PostgreSQL (5432) + Redis (6379)
+just migrate    # Run migrations
 ```
-
-Required: PostgreSQL (5432), Redis (6379)
 
 ## Socket Events
 
 Defined in `crates/protocol/src/socket/events.rs`:
-- Client events: `client::JOIN_GAME`, `client::SUBMIT_GUESS`, etc.
-- Server events: `server::GAME_STATE`, `server::ROUND_START`, etc.
+- Client → Server: `JOIN_GAME`, `SUBMIT_GUESS`, `LEAVE_GAME`
+- Server → Client: `GAME_STATE`, `ROUND_START`, `ROUND_END`, `GAME_END`
