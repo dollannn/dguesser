@@ -129,7 +129,7 @@
 }
 
 /* Hide Google Maps branding in Street View */
-.street-view-container .gm-style-cc,
-.street-view-container .gmnoprint {
+/* Note: Do NOT hide .gmnoprint - it's used for internal rendering, not just branding */
+.street-view-container .gm-style-cc {
   display: none !important;
 }
