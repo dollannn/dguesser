@@ -1,0 +1,242 @@
+//! Location types and provider trait definitions.
+
+use std::future::Future;
+use std::pin::Pin;
+
+use chrono::{DateTime, NaiveDate, Utc};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+/// Errors that can occur during location operations.
+#[derive(Error, Debug)]
+pub enum LocationError {
+    #[error("No locations available for map: {0}")]
+    NoLocationsAvailable(String),
+
+    #[error("Map not found: {0}")]
+    MapNotFound(String),
+
+    #[error("Location not found: {0}")]
+    LocationNotFound(String),
+
+    #[error("Database error: {0}")]
+    Database(String),
+
+    #[error("Location validation failed: {0}")]
+    ValidationFailed(String),
+}
+
+/// Validation status for a location.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocationValidationStatus {
+    /// Location is valid and active
+    Ok,
+    /// Google API returned no results for this location
+    ZeroResults,
+    /// Location is indoor (filtered out for gameplay)
+    Indoor,
+    /// Location is restricted/unavailable
+    Restricted,
+    /// Validation status unknown
+    Unknown,
+    /// Client reported panorama failed to load
+    ClientFailed,
+}
+
+impl std::fmt::Display for LocationValidationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LocationValidationStatus::Ok => write!(f, "ok"),
+            LocationValidationStatus::ZeroResults => write!(f, "zero_results"),
+            LocationValidationStatus::Indoor => write!(f, "indoor"),
+            LocationValidationStatus::Restricted => write!(f, "restricted"),
+            LocationValidationStatus::Unknown => write!(f, "unknown"),
+            LocationValidationStatus::ClientFailed => write!(f, "client_failed"),
+        }
+    }
+}
+
+impl std::str::FromStr for LocationValidationStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ok" => Ok(LocationValidationStatus::Ok),
+            "zero_results" => Ok(LocationValidationStatus::ZeroResults),
+            "indoor" => Ok(LocationValidationStatus::Indoor),
+            "restricted" => Ok(LocationValidationStatus::Restricted),
+            "unknown" => Ok(LocationValidationStatus::Unknown),
+            "client_failed" => Ok(LocationValidationStatus::ClientFailed),
+            _ => Err(format!("Unknown validation status: {s}")),
+        }
+    }
+}
+
+/// A pre-validated Street View location.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Location {
+    /// Unique location ID (loc_XXXXXXXXXXXX)
+    pub id: String,
+    /// Google Street View panorama ID
+    pub panorama_id: String,
+    /// Canonical latitude from panorama metadata
+    pub lat: f64,
+    /// Canonical longitude from panorama metadata
+    pub lng: f64,
+    /// ISO 3166-1 alpha-2 country code
+    pub country_code: Option<String>,
+    /// ISO 3166-2 subdivision code
+    pub subdivision_code: Option<String>,
+    /// Date the Street View imagery was captured
+    pub capture_date: Option<NaiveDate>,
+    /// Provider of the Street View imagery
+    pub provider: String,
+    /// Whether this location is active
+    pub active: bool,
+    /// Last time this location was validated
+    pub last_validated_at: Option<DateTime<Utc>>,
+    /// Current validation status
+    pub validation_status: LocationValidationStatus,
+    /// When this location was added
+    pub created_at: DateTime<Utc>,
+}
+
+/// A simplified location for use during gameplay.
+/// Contains only the data needed to render a round.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameLocation {
+    /// Location ID for reference
+    pub id: String,
+    /// Panorama ID for Street View
+    pub panorama_id: String,
+    /// Latitude (correct answer)
+    pub lat: f64,
+    /// Longitude (correct answer)
+    pub lng: f64,
+    /// Country code for display
+    pub country_code: Option<String>,
+}
+
+impl From<Location> for GameLocation {
+    fn from(loc: Location) -> Self {
+        Self {
+            id: loc.id,
+            panorama_id: loc.panorama_id,
+            lat: loc.lat,
+            lng: loc.lng,
+            country_code: loc.country_code,
+        }
+    }
+}
+
+/// Rules for filtering locations within a map.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MapRules {
+    /// Restrict to specific countries (ISO 3166-1 alpha-2)
+    #[serde(default)]
+    pub countries: Vec<String>,
+    /// Minimum capture year
+    pub min_year: Option<i32>,
+    /// Maximum capture year
+    pub max_year: Option<i32>,
+    /// Only outdoor panoramas
+    #[serde(default)]
+    pub outdoor_only: bool,
+}
+
+/// A map definition (playable region).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Map {
+    /// Unique map ID (map_XXXXXXXXXXXX)
+    pub id: String,
+    /// URL-friendly slug
+    pub slug: String,
+    /// Display name
+    pub name: String,
+    /// Description
+    pub description: Option<String>,
+    /// Filtering rules
+    pub rules: MapRules,
+    /// Whether this is the default map
+    pub is_default: bool,
+    /// Whether this map is active
+    pub active: bool,
+    /// When this map was created
+    pub created_at: DateTime<Utc>,
+    /// When this map was last updated
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Trait for selecting random locations from the location pool.
+///
+/// This trait abstracts location selection so it can be implemented
+/// for different backends (PostgreSQL, mock for testing, etc.).
+pub trait LocationProvider: Send + Sync {
+    /// Select a random location for the given map.
+    ///
+    /// # Arguments
+    /// * `map_id` - The map ID or slug to select from
+    /// * `exclude_ids` - Location IDs to exclude (already used in this game)
+    ///
+    /// # Returns
+    /// A `GameLocation` ready for gameplay, or an error if no locations are available.
+    fn select_location<'a>(
+        &'a self,
+        map_id: &'a str,
+        exclude_ids: &'a [String],
+    ) -> Pin<Box<dyn Future<Output = Result<GameLocation, LocationError>> + Send + 'a>>;
+
+    /// Get a map by ID or slug.
+    fn get_map<'a>(
+        &'a self,
+        map_id_or_slug: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Map, LocationError>> + Send + 'a>>;
+
+    /// Get the default map.
+    fn get_default_map<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Map, LocationError>> + Send + 'a>>;
+
+    /// Get the count of active locations for a map.
+    fn get_location_count<'a>(
+        &'a self,
+        map_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<i64, LocationError>> + Send + 'a>>;
+
+    /// Mark a location as failed (e.g., client reported panorama didn't load).
+    fn mark_location_failed<'a>(
+        &'a self,
+        location_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), LocationError>> + Send + 'a>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validation_status_display() {
+        assert_eq!(LocationValidationStatus::Ok.to_string(), "ok");
+        assert_eq!(LocationValidationStatus::ZeroResults.to_string(), "zero_results");
+        assert_eq!(LocationValidationStatus::ClientFailed.to_string(), "client_failed");
+    }
+
+    #[test]
+    fn test_validation_status_from_str() {
+        assert_eq!("ok".parse::<LocationValidationStatus>().unwrap(), LocationValidationStatus::Ok);
+        assert_eq!(
+            "zero_results".parse::<LocationValidationStatus>().unwrap(),
+            LocationValidationStatus::ZeroResults
+        );
+        assert!("invalid".parse::<LocationValidationStatus>().is_err());
+    }
+
+    #[test]
+    fn test_map_rules_default() {
+        let rules = MapRules::default();
+        assert!(rules.countries.is_empty());
+        assert!(rules.min_year.is_none());
+        assert!(!rules.outdoor_only);
+    }
+}

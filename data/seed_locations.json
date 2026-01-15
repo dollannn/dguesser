@@ -1,0 +1,122 @@
+[
+  {
+    "lat": 48.858370,
+    "lng": 2.294481,
+    "pano_id": "CAoSK0FGMVFpcE5LSTd3dXdRLTdJcjdEb3JRM2lOd1VQc2VFd0N4c05ReExBdnM.",
+    "country_code": "FR"
+  },
+  {
+    "lat": 40.689247,
+    "lng": -74.044502,
+    "pano_id": "CAoSLEFGMVFpcE1GTWxKMGhPVFJuNEFGSHVDUHdlVTR4bGVDQmRDbGE4Wmx2dmRj",
+    "country_code": "US"
+  },
+  {
+    "lat": 51.500729,
+    "lng": -0.124625,
+    "pano_id": "CAoSLEFGMVFpcE1KN0ZidWxYZlR6MHJKbWFnT1BfN1pBSUV1WGlHOUlFZ0kta1ly",
+    "country_code": "GB"
+  },
+  {
+    "lat": 35.658581,
+    "lng": 139.745433,
+    "pano_id": "CAoSLEFGMVFpcE1jMk9PNXR5cXRDNHNVLTRqLWUtOXUtc0Ytd1BncEVBQWFaRVBn",
+    "country_code": "JP"
+  },
+  {
+    "lat": -33.856784,
+    "lng": 151.215297,
+    "pano_id": "CAoSLEFGMVFpcE1TeUVoZVItWjAtU1BfenBXLXRtcWhsaW9hZTBLUGNrSk1DZ0Nh",
+    "country_code": "AU"
+  },
+  {
+    "lat": 41.902783,
+    "lng": 12.496366,
+    "pano_id": "CAoSLEFGMVFpcE5xWjBfZ0RfVHN3OGprVWlOdUItZzJYZHNGTWZYcHNJb2V5VUdM",
+    "country_code": "IT"
+  },
+  {
+    "lat": 55.755826,
+    "lng": 37.617300,
+    "pano_id": "CAoSLEFGMVFpcE1tMHpSeDNzYXNNQmNocVhPZHNsUXYtRldVcHVjc3dzX0xCQ0tZ",
+    "country_code": "RU"
+  },
+  {
+    "lat": 52.520008,
+    "lng": 13.404954,
+    "pano_id": "CAoSLEFGMVFpcE9ITnJERnZGZ3lSM0tfRDFfTEFIQjBLMm5jTjBvM0o0c0ZsOXZi",
+    "country_code": "DE"
+  },
+  {
+    "lat": 40.416775,
+    "lng": -3.703790,
+    "pano_id": "CAoSLEFGMVFpcE5JSklXVkU4OEZ5STVhQTZQZWtORlBZNFpTVzBNcHdwX3ZBY1Ri",
+    "country_code": "ES"
+  },
+  {
+    "lat": 59.329323,
+    "lng": 18.068581,
+    "pano_id": "CAoSLEFGMVFpcE9xWm5iMjQ5Q2p4RU44M1JFUURtQ2d4VjBSbk1HdldhTHZUSmJI",
+    "country_code": "SE"
+  },
+  {
+    "lat": -22.906847,
+    "lng": -43.172896,
+    "pano_id": "CAoSLEFGMVFpcE5YMHZfLXNUOXg2cEN4VkFwblU3Z1FMa3JENzRmeXZMZUEtYTJi",
+    "country_code": "BR"
+  },
+  {
+    "lat": 37.774929,
+    "lng": -122.419418,
+    "pano_id": "CAoSLEFGMVFpcE9Wb2RQNHdQYmVRLWhJcXdBblB5bS1tYUhGUkRuR1VIdUlBRVBk",
+    "country_code": "US"
+  },
+  {
+    "lat": 34.052235,
+    "lng": -118.243683,
+    "pano_id": "CAoSLEFGMVFpcE9fa3d6LVMtQ2h4UjdSSFJLRU1VTVdCQndGMEZkbHl3MTNpeUNJ",
+    "country_code": "US"
+  },
+  {
+    "lat": 43.653226,
+    "lng": -79.383184,
+    "pano_id": "CAoSLEFGMVFpcE9rTUJ0MldINXdMMkJfMDdCTy14SW5lVGlzZzhUZzc5YzJXOEZJ",
+    "country_code": "CA"
+  },
+  {
+    "lat": 1.352083,
+    "lng": 103.819836,
+    "pano_id": "CAoSLEFGMVFpcE8tQU1sMXNGQ0VUcm1mbjBRWjBCQmZnQ3M5MWNRWnVtT3VyZFRD",
+    "country_code": "SG"
+  },
+  {
+    "lat": 25.204849,
+    "lng": 55.270782,
+    "pano_id": "CAoSLEFGMVFpcE96RjJHZWtFZW9RWWlvcWlsYXlzek9ETmlMaUxneXdXRG5LcUtF",
+    "country_code": "AE"
+  },
+  {
+    "lat": 48.208174,
+    "lng": 16.373819,
+    "pano_id": "CAoSLEFGMVFpcE5NUy1TbEIySkhZLWZJMFBORWJZcWNTOE51RmlmV05GWHR0LVBX",
+    "country_code": "AT"
+  },
+  {
+    "lat": 50.087461,
+    "lng": 14.421253,
+    "pano_id": "CAoSLEFGMVFpcE5MdFVYci10LWdqaGxNVkdoYTM0OW9MV2twOHFGN0g4UjdUYjNl",
+    "country_code": "CZ"
+  },
+  {
+    "lat": 52.367573,
+    "lng": 4.904138,
+    "pano_id": "CAoSLEFGMVFpcE9nVGNUcEMxTlNNaXJkZUd1RkhnbFlqVXZUTUpYbll0cXJITkJV",
+    "country_code": "NL"
+  },
+  {
+    "lat": 41.385064,
+    "lng": 2.173403,
+    "pano_id": "CAoSLEFGMVFpcE9kT1VJdE5oSTRqYkZUd1VJaUhHNVgxcV9lSEJqVUVvVHBfanBm",
+    "country_code": "ES"
+  }
+]

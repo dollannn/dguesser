@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use dguesser_auth::{GoogleOAuth, MicrosoftOAuth, SessionConfig};
-use dguesser_db::DbPool;
+use dguesser_core::location::LocationProvider;
+use dguesser_db::{DbPool, LocationRepository};
 
 use crate::config::Config;
 
@@ -21,6 +22,7 @@ struct AppStateInner {
     google_oauth: Option<GoogleOAuth>,
     microsoft_oauth: Option<MicrosoftOAuth>,
     frontend_url: String,
+    location_provider: Arc<dyn LocationProvider>,
 }
 
 impl AppState {
@@ -68,6 +70,10 @@ impl AppState {
             None
         };
 
+        // Create location provider
+        let location_provider: Arc<dyn LocationProvider> =
+            Arc::new(LocationRepository::new(db.clone()));
+
         Ok(Self {
             inner: Arc::new(AppStateInner {
                 db,
@@ -76,6 +82,7 @@ impl AppState {
                 google_oauth,
                 microsoft_oauth,
                 frontend_url: config.frontend_url.clone(),
+                location_provider,
             }),
         })
     }
@@ -109,6 +116,11 @@ impl AppState {
     /// Get the frontend URL
     pub fn frontend_url(&self) -> &str {
         &self.inner.frontend_url
+    }
+
+    /// Get the location provider
+    pub fn location_provider(&self) -> &dyn LocationProvider {
+        self.inner.location_provider.as_ref()
     }
 }
 

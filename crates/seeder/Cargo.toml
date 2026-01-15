@@ -1,0 +1,38 @@
+[package]
+name = "dguesser-seeder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "seeder"
+path = "src/main.rs"
+
+[dependencies]
+dguesser-core = { path = "../core" }
+dguesser-db = { path = "../db" }
+
+sqlx.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dotenvy.workspace = true
+rand.workspace = true
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# HTTP client for Google API validation
+reqwest = { version = "0.12", features = ["json"] }
+
+# Progress bar
+indicatif = "0.17"
+
+# CSV parsing for location data
+csv = "1"

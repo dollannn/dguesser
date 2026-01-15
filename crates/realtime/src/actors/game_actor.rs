@@ -1,10 +1,12 @@
 //! Game actor - manages game state and player interactions
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use dguesser_core::game::rules::GameSettings;
 use dguesser_core::game::scoring::{ScoringConfig, calculate_score};
 use dguesser_core::geo::distance::haversine_distance;
+use dguesser_core::location::LocationProvider;
 use dguesser_db::DbPool;
 use dguesser_protocol::socket::events;
 use dguesser_protocol::socket::payloads::{
@@ -86,6 +88,8 @@ pub struct GameActor {
     redis_state: Option<std::sync::Arc<RedisStateManager>>,
     /// Track when we last saved to Redis (for debouncing)
     last_redis_save: Option<std::time::Instant>,
+    /// Location provider for selecting game locations
+    location_provider: Arc<dyn LocationProvider>,
 }
 
 /// Minimum interval between Redis saves (debouncing)
@@ -97,6 +101,7 @@ impl GameActor {
         db: DbPool,
         rx: mpsc::Receiver<GameCommand>,
         io: Option<SocketIo>,
+        location_provider: Arc<dyn LocationProvider>,
     ) -> Self {
         Self {
             game_id: game_id.to_string(),
@@ -106,6 +111,7 @@ impl GameActor {
             io,
             redis_state: None,
             last_redis_save: None,
+            location_provider,
         }
     }
 
@@ -742,8 +748,28 @@ impl GameActor {
             return self.end_game().await;
         }
 
-        // Generate location
-        let (lat, lng) = generate_random_location();
+        // Get map_id from settings
+        let map_id = state.settings.map_id.clone();
+
+        // Collect already-used location IDs from this game to avoid repeats
+        let exclude_ids: Vec<String> = Vec::new(); // TODO: Track used location IDs if desired
+
+        // Select location from the pool, with fallback to random
+        let (lat, lng, panorama_id) = match self
+            .location_provider
+            .select_location(&map_id, &exclude_ids)
+            .await
+        {
+            Ok(loc) => {
+                let pano = if loc.panorama_id.is_empty() { None } else { Some(loc.panorama_id) };
+                (loc.lat, loc.lng, pano)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, map_id = %map_id, game_id = %self.game_id, "Failed to select location from pool, falling back to random");
+                let (lat, lng) = generate_random_location();
+                (lat, lng, None)
+            }
+        };
 
         // Calculate time limit
         let time_limit = if state.settings.time_limit_seconds > 0 {
@@ -759,7 +785,7 @@ impl GameActor {
             state.round_number as i16,
             lat,
             lng,
-            None,
+            panorama_id.as_deref(),
             time_limit.map(|t| t as i32),
         )
         .await
@@ -775,7 +801,7 @@ impl GameActor {
             round_number: state.round_number,
             location_lat: lat,
             location_lng: lng,
-            panorama_id: None,
+            panorama_id,
             started_at,
             started_at_ts,
             time_limit_ms: time_limit,

@@ -11,7 +11,8 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 use crate::actors::GameActor;
 use crate::config::Config;
 use crate::redis_state::RedisStateManager;
-use dguesser_db::DbPool;
+use dguesser_core::location::LocationProvider;
+use dguesser_db::{DbPool, LocationRepository};
 
 /// Application state shared across all socket connections
 #[derive(Clone)]
@@ -33,6 +34,8 @@ struct AppStateInner {
     pub socket_users: RwLock<HashMap<String, String>>,
     /// User ID to Socket ID mapping (for reconnects)
     pub user_sockets: RwLock<HashMap<String, String>>,
+    /// Location provider for game location selection
+    pub location_provider: Arc<dyn LocationProvider>,
 }
 
 /// Handle to communicate with a game actor
@@ -94,6 +97,10 @@ impl AppState {
         redis_state: RedisStateManager,
         config: Config,
     ) -> Self {
+        // Create location provider
+        let location_provider: Arc<dyn LocationProvider> =
+            Arc::new(LocationRepository::new(db.clone()));
+
         Self {
             inner: Arc::new(AppStateInner {
                 db,
@@ -104,6 +111,7 @@ impl AppState {
                 games: RwLock::new(HashMap::new()),
                 socket_users: RwLock::new(HashMap::new()),
                 user_sockets: RwLock::new(HashMap::new()),
+                location_provider,
             }),
         }
     }
@@ -197,8 +205,10 @@ impl AppState {
         let gid = game_id.to_string();
         let io = self.inner.io.read().await.clone();
         let redis_state = std::sync::Arc::new(RedisStateManager::new(self.inner.redis.clone()));
+        let location_provider = self.inner.location_provider.clone();
         tokio::spawn(async move {
-            let mut actor = GameActor::new(&gid, db, rx, io).with_redis(redis_state);
+            let mut actor =
+                GameActor::new(&gid, db, rx, io, location_provider).with_redis(redis_state);
             actor.run().await;
         });
 

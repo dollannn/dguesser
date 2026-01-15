@@ -47,6 +47,8 @@ pub enum EntityPrefix {
     Round,
     Guess,
     OAuth,
+    Location,
+    Map,
 }
 
 impl EntityPrefix {
@@ -59,6 +61,8 @@ impl EntityPrefix {
             EntityPrefix::Round => "rnd_",
             EntityPrefix::Guess => "gss_",
             EntityPrefix::OAuth => "oau_",
+            EntityPrefix::Location => "loc_",
+            EntityPrefix::Map => "map_",
         }
     }
 }
@@ -99,6 +103,18 @@ pub fn generate_oauth_id() -> String {
     format!("{}{}", EntityPrefix::OAuth.as_str(), generate_id(ENTITY_ID_LEN))
 }
 
+/// Generate a prefixed ID for a location entity.
+/// Format: `loc_XXXXXXXXXXXX` (16 chars total, ~71 bits entropy)
+pub fn generate_location_id() -> String {
+    format!("{}{}", EntityPrefix::Location.as_str(), generate_id(ENTITY_ID_LEN))
+}
+
+/// Generate a prefixed ID for a map entity.
+/// Format: `map_XXXXXXXXXXXX` (16 chars total, ~71 bits entropy)
+pub fn generate_map_id() -> String {
+    format!("{}{}", EntityPrefix::Map.as_str(), generate_id(ENTITY_ID_LEN))
+}
+
 /// Parse the prefix from an ID string.
 /// Returns `None` if the ID doesn't have a recognized prefix.
 pub fn parse_prefix(id: &str) -> Option<EntityPrefix> {
@@ -114,6 +130,10 @@ pub fn parse_prefix(id: &str) -> Option<EntityPrefix> {
         Some(EntityPrefix::Guess)
     } else if id.starts_with("oau_") {
         Some(EntityPrefix::OAuth)
+    } else if id.starts_with("loc_") {
+        Some(EntityPrefix::Location)
+    } else if id.starts_with("map_") {
+        Some(EntityPrefix::Map)
     } else {
         None
     }
@@ -173,6 +193,20 @@ mod tests {
     }
 
     #[test]
+    fn test_location_id_format() {
+        let id = generate_location_id();
+        assert!(id.starts_with("loc_"));
+        assert_eq!(id.len(), 16);
+    }
+
+    #[test]
+    fn test_map_id_format() {
+        let id = generate_map_id();
+        assert!(id.starts_with("map_"));
+        assert_eq!(id.len(), 16);
+    }
+
+    #[test]
     fn test_parse_prefix() {
         assert_eq!(parse_prefix("usr_abcdefghijkl"), Some(EntityPrefix::User));
         assert_eq!(parse_prefix("gam_abcdefghijkl"), Some(EntityPrefix::Game));
@@ -180,6 +214,8 @@ mod tests {
         assert_eq!(parse_prefix("rnd_abcdefghijkl"), Some(EntityPrefix::Round));
         assert_eq!(parse_prefix("gss_abcdefghijkl"), Some(EntityPrefix::Guess));
         assert_eq!(parse_prefix("oau_abcdefghijkl"), Some(EntityPrefix::OAuth));
+        assert_eq!(parse_prefix("loc_abcdefghijkl"), Some(EntityPrefix::Location));
+        assert_eq!(parse_prefix("map_abcdefghijkl"), Some(EntityPrefix::Map));
         assert_eq!(parse_prefix("unknown_id"), None);
     }
 }

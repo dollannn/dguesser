@@ -328,12 +328,34 @@ pub async fn start_game(
     // Update game status
     dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Active).await?;
 
-    // Create first round with random location
-    let location = generate_random_location();
+    // Get map_id from settings, default to "world"
+    let map_id = game.settings.get("map_id").and_then(|v| v.as_str()).unwrap_or("world");
+
+    // Select a random location from the location pool
+    let location = match state.location_provider().select_location(map_id, &[]).await {
+        Ok(loc) => loc,
+        Err(e) => {
+            tracing::warn!(error = %e, map_id = %map_id, "Failed to select location from pool, falling back to random");
+            // Fallback to random coordinates if no locations in pool
+            let fallback = generate_random_location();
+            dguesser_core::location::GameLocation {
+                id: String::new(),
+                panorama_id: String::new(),
+                lat: fallback.lat,
+                lng: fallback.lng,
+                country_code: None,
+            }
+        }
+    };
+
     let time_limit_seconds =
         game.settings.get("time_limit_seconds").and_then(|v| v.as_u64()).map(|s| s as u32);
 
     let time_limit_ms = time_limit_seconds.map(|s| s * 1000);
+
+    // Use panorama_id if available, otherwise None
+    let panorama_id =
+        if location.panorama_id.is_empty() { None } else { Some(location.panorama_id.as_str()) };
 
     let round = dguesser_db::games::create_round(
         state.db(),
@@ -341,7 +363,7 @@ pub async fn start_game(
         1,
         location.lat,
         location.lng,
-        None, // panorama_id
+        panorama_id,
         time_limit_ms.map(|t| t as i32),
     )
     .await?;
@@ -351,7 +373,15 @@ pub async fn start_game(
 
     Ok(Json(RoundInfo {
         round_number: 1,
-        location: LocationInfo { lat: location.lat, lng: location.lng, panorama_id: None },
+        location: LocationInfo {
+            lat: location.lat,
+            lng: location.lng,
+            panorama_id: if location.panorama_id.is_empty() {
+                None
+            } else {
+                Some(location.panorama_id)
+            },
+        },
         started_at: Utc::now(),
         time_limit_ms,
     }))
