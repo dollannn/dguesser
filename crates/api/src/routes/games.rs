@@ -1,4 +1,12 @@
 //! Game routes
+//!
+//! This module handles REST API endpoints for singleplayer games.
+//! Multiplayer games use the realtime server via Socket.IO.
+//!
+//! For singleplayer, the database is the source of truth. We use the
+//! core reducer for validation to ensure consistent rules with multiplayer.
+
+use std::collections::HashMap;
 
 use axum::{
     Json, Router,
@@ -11,7 +19,10 @@ use utoipa::ToSchema;
 
 use crate::{error::ApiError, state::AppState};
 use dguesser_auth::AuthUser;
-use dguesser_core::{game::scoring, geo::distance::haversine_distance};
+use dguesser_core::game::{
+    GameCommand, GameEvent, GamePhase, GameSettings, GameState, LocationData, PlayerState,
+    RoundState, reduce,
+};
 use dguesser_db::{GameMode, GameStatus};
 
 pub fn router() -> Router<AppState> {
@@ -24,6 +35,10 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/rounds/{round}/guess", post(submit_guess))
         .route("/history", get(get_game_history))
 }
+
+// =============================================================================
+// DTOs
+// =============================================================================
 
 /// Create game request
 #[derive(Debug, Deserialize, ToSchema)]
@@ -197,6 +212,135 @@ pub struct GameSummary {
     pub played_at: DateTime<Utc>,
 }
 
+// =============================================================================
+// State Loading Helpers
+// =============================================================================
+
+/// Load a GameState from the database for validation purposes.
+///
+/// This constructs a core `GameState` from database records so we can
+/// use the reducer for consistent validation with multiplayer.
+async fn load_game_state(
+    db: &dguesser_db::DbPool,
+    game_id: &str,
+) -> Result<(GameState, Option<String>), ApiError> {
+    let db_game = dguesser_db::games::get_game_by_id(db, game_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Game"))?;
+
+    let db_players = dguesser_db::games::get_players(db, game_id).await?;
+    let db_rounds = dguesser_db::games::get_rounds_for_game(db, game_id).await?;
+
+    // Parse settings
+    let settings: GameSettings =
+        serde_json::from_value(db_game.settings.clone()).unwrap_or_default();
+
+    // Map DB status to core phase
+    let phase = match db_game.status {
+        GameStatus::Lobby => GamePhase::Lobby,
+        GameStatus::Active => {
+            if db_rounds.is_empty() {
+                GamePhase::Active
+            } else {
+                GamePhase::RoundInProgress
+            }
+        }
+        GameStatus::Finished => GamePhase::Finished,
+        GameStatus::Abandoned => GamePhase::Finished,
+    };
+
+    // Build player states
+    let mut players = HashMap::new();
+    for p in &db_players {
+        let user = dguesser_db::users::get_by_id(db, &p.user_id).await.ok().flatten();
+        let mut player = PlayerState::new(
+            p.user_id.clone(),
+            user.as_ref().map(|u| u.display_name.clone()).unwrap_or_default(),
+            user.as_ref().and_then(|u| u.avatar_url.clone()),
+            p.is_host,
+        );
+        player.total_score = p.score_total as u32;
+        player.connected = true; // For REST API, assume connected
+        players.insert(p.user_id.clone(), player);
+    }
+
+    // Build current round state (if any)
+    let (current_round, current_round_db_id) = if let Some(db_round) = db_rounds.last() {
+        // Load guesses for this round
+        let guesses_result = dguesser_db::games::get_guesses_for_round(db, &db_round.id).await;
+        let db_guesses = guesses_result.unwrap_or_default();
+
+        let mut round = RoundState::new(
+            db_round.round_number as u8,
+            db_round.location_lat,
+            db_round.location_lng,
+            db_round.panorama_id.clone(),
+            db_round.time_limit_ms.map(|t| t as u32),
+            db_round.started_at.unwrap_or_else(Utc::now),
+        );
+
+        // Add guesses to round state
+        for g in db_guesses {
+            round.guesses.insert(
+                g.user_id.clone(),
+                dguesser_core::game::Guess {
+                    user_id: g.user_id,
+                    lat: g.guess_lat,
+                    lng: g.guess_lng,
+                    distance_meters: g.distance_meters,
+                    score: g.score as u32,
+                    time_taken_ms: g.time_taken_ms.map(|t| t as u32),
+                    submitted_at: g.submitted_at,
+                },
+            );
+        }
+
+        (Some(round), Some(db_round.id.clone()))
+    } else {
+        (None, None)
+    };
+
+    // Build GameState
+    let mut state = GameState::new(game_id.to_string(), settings);
+    state.phase = phase;
+    state.players = players;
+    state.current_round = current_round;
+    state.round_number = db_rounds.len() as u8;
+    state.created_at = db_game.created_at;
+    state.started_at = db_game.started_at;
+
+    Ok((state, current_round_db_id))
+}
+
+/// Extract error message from reducer result
+fn extract_reducer_error(result: &dguesser_core::game::ReducerResult) -> Option<(String, String)> {
+    result.events.iter().find_map(|e| {
+        if let GameEvent::Error { code, message } = e {
+            Some((code.clone(), message.clone()))
+        } else {
+            None
+        }
+    })
+}
+
+/// Convert reducer error to ApiError
+fn reducer_error_to_api_error(result: &dguesser_core::game::ReducerResult) -> ApiError {
+    if let Some((code, message)) = extract_reducer_error(result) {
+        match code.as_str() {
+            "NOT_HOST" => ApiError::forbidden(&message),
+            "NOT_IN_GAME" => ApiError::forbidden(&message),
+            "ALREADY_GUESSED" => ApiError::conflict(&code, &message),
+            _ => ApiError::bad_request(&code, &message),
+        }
+    } else {
+        ApiError::internal().with_internal("Unknown reducer error")
+    }
+}
+
+// =============================================================================
+// Route Handlers
+// =============================================================================
+
 /// Create a new game
 #[utoipa::path(
     post,
@@ -232,24 +376,16 @@ pub async fn create_game(
         "rotation_allowed": req.rotation_allowed.unwrap_or(true),
     });
 
-    // Validate settings
-    let rounds = settings["rounds"].as_u64().unwrap_or(5) as u8;
-    if rounds == 0 || rounds > 20 {
-        return Err(ApiError::bad_request("INVALID_SETTINGS", "Rounds must be between 1 and 20"));
-    }
-
-    let time_limit = settings["time_limit_seconds"].as_u64().unwrap_or(120) as u32;
-    if time_limit > 600 {
-        return Err(ApiError::bad_request(
-            "INVALID_SETTINGS",
-            "Time limit cannot exceed 10 minutes",
-        ));
+    // Validate settings using core rules
+    let core_settings: GameSettings = serde_json::from_value(settings.clone()).unwrap_or_default();
+    if let Err(errors) = dguesser_core::game::validate_settings(&core_settings) {
+        return Err(ApiError::bad_request("INVALID_SETTINGS", errors.join(", ")));
     }
 
     // Generate join code for multiplayer
     let join_code = if mode == GameMode::Multiplayer { Some(generate_join_code()) } else { None };
 
-    // Create game
+    // Create game in database
     let game = dguesser_db::games::create_game(
         state.db(),
         mode,
@@ -345,53 +481,34 @@ pub async fn start_game(
     auth: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<RoundInfo>, ApiError> {
-    let game = dguesser_db::games::get_game_by_id(state.db(), &id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Game"))?;
+    let now = Utc::now();
 
-    // Verify user is host (for multiplayer) or the creator (for solo)
-    let players = dguesser_db::games::get_players(state.db(), &id).await?;
-    let is_host = players.iter().any(|p| p.user_id == auth.user_id && p.is_host);
+    // Load current game state
+    let (game_state, _) = load_game_state(state.db(), &id).await?;
 
-    if !is_host {
-        return Err(ApiError::forbidden("Only host can start game"));
+    // Select location for first round
+    let map_id = &game_state.settings.map_id;
+    let location = select_location(state.location_provider(), map_id, &[]).await;
+
+    // Use reducer for validation
+    let result = reduce(
+        &game_state,
+        GameCommand::Start { user_id: auth.user_id.clone(), first_location: location.clone() },
+        now,
+    );
+
+    if result.has_error() {
+        return Err(reducer_error_to_api_error(&result));
     }
 
-    if game.status != GameStatus::Lobby {
-        return Err(ApiError::bad_request("INVALID_STATE", "Game already started"));
-    }
-
-    // Update game status
+    // Persist to database
     dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Active).await?;
 
-    // Get map_id from settings, default to "world"
-    let map_id = game.settings.get("map_id").and_then(|v| v.as_str()).unwrap_or("world");
-
-    // Select a random location from the location pool
-    let location = match state.location_provider().select_location(map_id, &[]).await {
-        Ok(loc) => loc,
-        Err(e) => {
-            tracing::warn!(error = %e, map_id = %map_id, "Failed to select location from pool, falling back to random");
-            // Fallback to random coordinates if no locations in pool
-            let fallback = generate_random_location();
-            dguesser_core::location::GameLocation {
-                id: String::new(),
-                panorama_id: String::new(),
-                lat: fallback.lat,
-                lng: fallback.lng,
-                country_code: None,
-            }
-        }
+    let time_limit_ms = if game_state.settings.time_limit_seconds > 0 {
+        Some(game_state.settings.time_limit_seconds * 1000)
+    } else {
+        None
     };
-
-    let time_limit_seconds =
-        game.settings.get("time_limit_seconds").and_then(|v| v.as_u64()).map(|s| s as u32);
-
-    let time_limit_ms = time_limit_seconds.map(|s| s * 1000);
-
-    // Use panorama_id if available, otherwise None
-    let panorama_id =
-        if location.panorama_id.is_empty() { None } else { Some(location.panorama_id.as_str()) };
 
     let round = dguesser_db::games::create_round(
         state.db(),
@@ -399,12 +516,11 @@ pub async fn start_game(
         1,
         location.lat,
         location.lng,
-        panorama_id,
+        location.panorama_id.as_deref(),
         time_limit_ms.map(|t| t as i32),
     )
     .await?;
 
-    // Start the round
     dguesser_db::games::start_round(state.db(), &round.id).await?;
 
     Ok(Json(RoundInfo {
@@ -412,13 +528,9 @@ pub async fn start_game(
         location: LocationInfo {
             lat: location.lat,
             lng: location.lng,
-            panorama_id: if location.panorama_id.is_empty() {
-                None
-            } else {
-                Some(location.panorama_id)
-            },
+            panorama_id: location.panorama_id,
         },
-        started_at: Utc::now(),
+        started_at: now,
         time_limit_ms,
     }))
 }
@@ -443,66 +555,47 @@ pub async fn get_current_round(
     auth: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<CurrentRoundInfo>, ApiError> {
-    let game = dguesser_db::games::get_game_by_id(state.db(), &id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Game"))?;
+    let now = Utc::now();
+
+    // Load game state
+    let (game_state, _) = load_game_state(state.db(), &id).await?;
 
     // Verify user is a player
-    let players = dguesser_db::games::get_players(state.db(), &id).await?;
-    let is_player = players.iter().any(|p| p.user_id == auth.user_id);
-
-    if !is_player {
+    if !game_state.players.contains_key(&auth.user_id) {
         return Err(ApiError::forbidden("Not a player in this game"));
     }
 
-    // Game must be active
-    if game.status != GameStatus::Active {
+    // Check game is active
+    if !matches!(game_state.phase, GamePhase::Active | GamePhase::RoundInProgress) {
         return Err(ApiError::bad_request("INVALID_STATE", "Game is not active"));
     }
 
-    // Get all rounds and find the current (last) one
-    let rounds = dguesser_db::games::get_rounds_for_game(state.db(), &id).await?;
-    let round = rounds.last().ok_or_else(|| ApiError::not_found("No rounds found"))?;
+    // Get current round
+    let round =
+        game_state.current_round.as_ref().ok_or_else(|| ApiError::not_found("No rounds found"))?;
 
-    let total_rounds = game.settings.get("rounds").and_then(|v| v.as_u64()).unwrap_or(5) as u8;
+    // Check if user already guessed
+    let user_guess = round.guesses.get(&auth.user_id).map(|g| UserGuessInfo {
+        guess_lat: g.lat,
+        guess_lng: g.lng,
+        distance_meters: g.distance_meters,
+        score: g.score,
+    });
 
-    // Calculate time remaining
-    let time_remaining_ms = match (round.started_at, round.time_limit_ms) {
-        (Some(started), Some(limit)) => {
-            let elapsed = (Utc::now() - started).num_milliseconds();
-            Some((limit as i64 - elapsed).max(0))
-        }
-        _ => None,
-    };
-
-    // Check if user has already guessed this round
-    let existing_guess =
-        dguesser_db::games::get_guess(state.db(), &round.id, &auth.user_id).await?;
-
-    let (has_guessed, user_guess) = match existing_guess {
-        Some(guess) => (
-            true,
-            Some(UserGuessInfo {
-                guess_lat: guess.guess_lat,
-                guess_lng: guess.guess_lng,
-                distance_meters: guess.distance_meters,
-                score: guess.score as u32,
-            }),
-        ),
-        None => (false, None),
-    };
+    // Calculate time remaining (lazy timer check)
+    let time_remaining_ms = round.time_remaining_ms(now);
 
     Ok(Json(CurrentRoundInfo {
-        round_number: round.round_number as u8,
-        total_rounds,
+        round_number: round.round_number,
+        total_rounds: game_state.settings.rounds,
         location: LocationInfo {
             lat: round.location_lat,
             lng: round.location_lng,
             panorama_id: round.panorama_id.clone(),
         },
-        started_at: round.started_at.unwrap_or_else(Utc::now),
+        started_at: round.started_at,
         time_remaining_ms,
-        has_guessed,
+        has_guessed: user_guess.is_some(),
         user_guess,
     }))
 }
@@ -527,78 +620,76 @@ pub async fn next_round(
     auth: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<RoundInfo>, ApiError> {
-    let game = dguesser_db::games::get_game_by_id(state.db(), &id)
+    let now = Utc::now();
+
+    // Load game state
+    let (game_state, _) = load_game_state(state.db(), &id).await?;
+
+    // Verify user is a player
+    if !game_state.players.contains_key(&auth.user_id) {
+        return Err(ApiError::forbidden("Not a player in this game"));
+    }
+
+    // Solo games only via REST API
+    let db_game = dguesser_db::games::get_game_by_id(state.db(), &id)
         .await?
         .ok_or_else(|| ApiError::not_found("Game"))?;
 
-    // Only works for solo games via REST API
-    if game.mode != GameMode::Solo {
+    if db_game.mode != GameMode::Solo {
         return Err(ApiError::bad_request(
             "INVALID_MODE",
             "Next round via API only available for solo games",
         ));
     }
 
-    // Verify user is the player in this game
-    let players = dguesser_db::games::get_players(state.db(), &id).await?;
-    let is_player = players.iter().any(|p| p.user_id == auth.user_id);
-
-    if !is_player {
-        return Err(ApiError::forbidden("Not a player in this game"));
-    }
-
-    // Game must be active (not lobby, not finished)
-    if game.status != GameStatus::Active {
+    // Check if game is active
+    if !matches!(
+        game_state.phase,
+        GamePhase::Active | GamePhase::RoundInProgress | GamePhase::BetweenRounds
+    ) {
         return Err(ApiError::bad_request(
             "INVALID_STATE",
             "Game must be active to advance rounds",
         ));
     }
 
-    // Get current rounds to determine next round number
-    let rounds = dguesser_db::games::get_rounds_for_game(state.db(), &id).await?;
-    let current_round = rounds.len() as u8;
-    let next_round_number = current_round + 1;
+    // First, end the current round if there is one
+    let game_state = if game_state.current_round.is_some() {
+        let result = reduce(&game_state, GameCommand::EndRound, now);
+        result.state
+    } else {
+        game_state
+    };
 
-    // Get total rounds from settings
-    let total_rounds = game.settings.get("rounds").and_then(|v| v.as_u64()).unwrap_or(5) as u8;
-
-    if next_round_number > total_rounds {
-        // End the game
+    // Check if game should end
+    if game_state.round_number >= game_state.settings.rounds {
         dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Finished).await?;
         return Err(ApiError::bad_request("GAME_COMPLETE", "All rounds completed"));
     }
 
-    // Get map_id from settings, default to "world"
-    let map_id = game.settings.get("map_id").and_then(|v| v.as_str()).unwrap_or("world");
+    // Select location for next round
+    let map_id = &game_state.settings.map_id;
+    let db_rounds = dguesser_db::games::get_rounds_for_game(state.db(), &id).await?;
+    let exclude_ids: Vec<String> = db_rounds.iter().filter_map(|r| r.panorama_id.clone()).collect();
+    let location = select_location(state.location_provider(), map_id, &exclude_ids).await;
 
-    // Get existing location IDs to exclude
-    let exclude_ids: Vec<String> = rounds.iter().filter_map(|r| r.panorama_id.clone()).collect();
+    // Use reducer for validation
+    let result =
+        reduce(&game_state, GameCommand::AdvanceRound { next_location: location.clone() }, now);
 
-    // Select a random location from the location pool
-    let location = match state.location_provider().select_location(map_id, &exclude_ids).await {
-        Ok(loc) => loc,
-        Err(e) => {
-            tracing::warn!(error = %e, map_id = %map_id, "Failed to select location from pool, falling back to random");
-            let fallback = generate_random_location();
-            dguesser_core::location::GameLocation {
-                id: String::new(),
-                panorama_id: String::new(),
-                lat: fallback.lat,
-                lng: fallback.lng,
-                country_code: None,
-            }
-        }
+    if result.has_error() {
+        // Game is complete
+        dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Finished).await?;
+        return Err(ApiError::bad_request("GAME_COMPLETE", "All rounds completed"));
+    }
+
+    // Persist to database
+    let next_round_number = result.state.round_number;
+    let time_limit_ms = if game_state.settings.time_limit_seconds > 0 {
+        Some(game_state.settings.time_limit_seconds * 1000)
+    } else {
+        None
     };
-
-    let time_limit_seconds =
-        game.settings.get("time_limit_seconds").and_then(|v| v.as_u64()).map(|s| s as u32);
-
-    let time_limit_ms = time_limit_seconds.map(|s| s * 1000);
-
-    // Use panorama_id if available, otherwise None
-    let panorama_id =
-        if location.panorama_id.is_empty() { None } else { Some(location.panorama_id.as_str()) };
 
     let round = dguesser_db::games::create_round(
         state.db(),
@@ -606,12 +697,11 @@ pub async fn next_round(
         next_round_number as i16,
         location.lat,
         location.lng,
-        panorama_id,
+        location.panorama_id.as_deref(),
         time_limit_ms.map(|t| t as i32),
     )
     .await?;
 
-    // Start the round
     dguesser_db::games::start_round(state.db(), &round.id).await?;
 
     Ok(Json(RoundInfo {
@@ -619,13 +709,9 @@ pub async fn next_round(
         location: LocationInfo {
             lat: location.lat,
             lng: location.lng,
-            panorama_id: if location.panorama_id.is_empty() {
-                None
-            } else {
-                Some(location.panorama_id)
-            },
+            panorama_id: location.panorama_id,
         },
-        started_at: Utc::now(),
+        started_at: now,
         time_limit_ms,
     }))
 }
@@ -653,49 +739,62 @@ pub async fn submit_guess(
     Path((game_id, round_number)): Path<(String, u8)>,
     Json(req): Json<SubmitGuessRequest>,
 ) -> Result<Json<GuessResultResponse>, ApiError> {
+    let now = Utc::now();
+
     // Validate coordinates
     if !(-90.0..=90.0).contains(&req.lat) || !(-180.0..=180.0).contains(&req.lng) {
         return Err(ApiError::bad_request("INVALID_COORDS", "Invalid coordinates"));
     }
 
-    let game = dguesser_db::games::get_game_by_id(state.db(), &game_id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Game"))?;
+    // Load game state
+    let (game_state, current_round_db_id) = load_game_state(state.db(), &game_id).await?;
 
-    if game.status != GameStatus::Active {
-        return Err(ApiError::bad_request("INVALID_STATE", "Game not active"));
+    // Verify we're on the correct round
+    let current_round =
+        game_state.current_round.as_ref().ok_or_else(|| ApiError::not_found("Round"))?;
+
+    if current_round.round_number != round_number {
+        return Err(ApiError::bad_request(
+            "WRONG_ROUND",
+            "Round number does not match current round",
+        ));
     }
 
-    // Get the specific round
-    let rounds = dguesser_db::games::get_rounds_for_game(state.db(), &game_id).await?;
-    let round = rounds
-        .iter()
-        .find(|r| r.round_number == round_number as i16)
-        .ok_or_else(|| ApiError::not_found("Round"))?;
+    // Use reducer for validation and scoring
+    let result = reduce(
+        &game_state,
+        GameCommand::SubmitGuess {
+            user_id: auth.user_id.clone(),
+            lat: req.lat,
+            lng: req.lng,
+            time_taken_ms: req.time_taken_ms,
+        },
+        now,
+    );
 
-    // Check if already guessed
-    let existing = dguesser_db::games::get_guess(state.db(), &round.id, &auth.user_id).await?;
-    if existing.is_some() {
-        return Err(ApiError::conflict("ALREADY_GUESSED", "Already submitted guess"));
+    if result.has_error() {
+        return Err(reducer_error_to_api_error(&result));
     }
 
-    // Check time limit
-    if let (Some(started), Some(time_limit)) = (round.started_at, round.time_limit_ms) {
-        let elapsed = (Utc::now() - started).num_milliseconds();
-        if elapsed > time_limit as i64 {
-            return Err(ApiError::bad_request("TIME_EXPIRED", "Round time expired"));
-        }
-    }
+    // Extract guess result from updated state
+    let guess = result
+        .state
+        .current_round
+        .as_ref()
+        .and_then(|r| r.guesses.get(&auth.user_id))
+        .ok_or_else(|| ApiError::internal().with_internal("Guess not recorded"))?;
 
-    // Calculate distance and score
-    let distance = haversine_distance(round.location_lat, round.location_lng, req.lat, req.lng);
+    let distance = guess.distance_meters;
+    let score = guess.score;
 
-    let score = scoring::calculate_score(distance, &scoring::ScoringConfig::default());
+    // Get round DB ID
+    let round_db_id = current_round_db_id
+        .ok_or_else(|| ApiError::internal().with_internal("Round DB ID not found"))?;
 
-    // Save guess
+    // Persist to database
     dguesser_db::games::create_guess(
         state.db(),
-        &round.id,
+        &round_db_id,
         &auth.user_id,
         req.lat,
         req.lng,
@@ -715,9 +814,9 @@ pub async fn submit_guess(
         score,
         total_score: total_score as u32,
         correct_location: LocationInfo {
-            lat: round.location_lat,
-            lng: round.location_lng,
-            panorama_id: round.panorama_id.clone(),
+            lat: current_round.location_lat,
+            lng: current_round.location_lng,
+            panorama_id: current_round.panorama_id.clone(),
         },
     }))
 }
@@ -740,7 +839,6 @@ pub async fn get_game_history(
 
     let mut summaries = Vec::new();
     for game in games {
-        // Get player's score in this game
         let players = dguesser_db::games::get_players(state.db(), &game.id).await?;
         let player_score =
             players.iter().find(|p| p.user_id == auth.user_id).map(|p| p.score_total).unwrap_or(0);
@@ -758,7 +856,7 @@ pub async fn get_game_history(
 }
 
 // =============================================================================
-// Helper functions
+// Helper Functions
 // =============================================================================
 
 /// Generate a random 6-character join code
@@ -774,16 +872,23 @@ fn generate_join_code() -> String {
         .collect()
 }
 
-struct RandomLocation {
-    lat: f64,
-    lng: f64,
-}
-
-/// Generate a random location (placeholder - will be replaced with proper location service)
-fn generate_random_location() -> RandomLocation {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    // Simple random for now - replace with proper location service
-    // Biased towards land masses (rough approximation)
-    RandomLocation { lat: rng.gen_range(-60.0..70.0), lng: rng.gen_range(-180.0..180.0) }
+/// Select a location for a round
+async fn select_location(
+    provider: &dyn dguesser_core::location::LocationProvider,
+    map_id: &str,
+    exclude_ids: &[String],
+) -> LocationData {
+    match provider.select_location(map_id, exclude_ids).await {
+        Ok(loc) => LocationData::new(
+            loc.lat,
+            loc.lng,
+            if loc.panorama_id.is_empty() { None } else { Some(loc.panorama_id) },
+        ),
+        Err(e) => {
+            tracing::warn!(error = %e, map_id = %map_id, "Failed to select location, using random");
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            LocationData::new(rng.gen_range(-60.0..70.0), rng.gen_range(-180.0..180.0), None)
+        }
+    }
 }

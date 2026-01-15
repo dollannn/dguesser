@@ -47,6 +47,8 @@ pub struct GameHandle {
 }
 
 /// Grace period for reconnection in seconds
+/// NOTE: This is now defined in dguesser_core::game::reducer::RECONNECTION_GRACE_PERIOD_MS
+#[allow(dead_code)]
 pub const RECONNECTION_GRACE_PERIOD_SECS: u64 = 30;
 
 /// Tick interval for game actors in seconds
