@@ -77,7 +77,7 @@
     if (!game || !gameId) return;
 
     try {
-      const round = await gamesApi.start(gameId);
+      const round = await gamesApi.nextRound(gameId);
       gameStore.handleRoundStart({
         round_number: round.round_number,
         total_rounds: game.total_rounds,

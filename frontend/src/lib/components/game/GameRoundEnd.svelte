@@ -3,7 +3,15 @@
   import { gameStore } from '$lib/socket/game';
   import { user } from '$lib/stores/auth';
   import { getRankDisplay, getRankClass, formatScore, formatDistance } from '$lib/utils.js';
+  import { Button } from '$lib/components/ui/button';
+  import { Badge } from '$lib/components/ui/badge';
+  import * as Card from '$lib/components/ui/card';
+  import * as Table from '$lib/components/ui/table';
   import ResultsMap from './ResultsMap.svelte';
+  import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
+  import TrophyIcon from '@lucide/svelte/icons/trophy';
+  import MapPinIcon from '@lucide/svelte/icons/map-pin';
+  import Loader2Icon from '@lucide/svelte/icons/loader-2';
 
   interface Props {
     game: GameDetails;
@@ -28,113 +36,124 @@
   });
 </script>
 
-<div class="min-h-screen bg-gray-50 p-4">
-  <div class="max-w-6xl mx-auto">
+<div class="min-h-screen bg-background p-4 md:p-6 pt-20 md:pt-24">
+  <div class="max-w-5xl mx-auto space-y-6">
     <!-- Header -->
-    <div class="text-center mb-6">
-      <h2 class="text-3xl font-bold text-gray-900">
-        Round {state.currentRound} Results
+    <div class="text-center space-y-2">
+      <h2 class="text-2xl md:text-3xl font-bold tracking-tight">
+        Round {state.currentRound} Complete
       </h2>
-      <p class="text-gray-600 mt-1">
-        {state.currentRound} of {state.totalRounds} rounds complete
+      <p class="text-muted-foreground">
+        {state.currentRound} of {state.totalRounds} rounds
       </p>
     </div>
 
-    <!-- Results map showing all guesses -->
-    <div class="h-[400px] rounded-xl overflow-hidden shadow-lg mb-6 ring-1 ring-gray-200">
-      {#if correctLocation}
-        <ResultsMap
-          correctLat={correctLocation.lat}
-          correctLng={correctLocation.lng}
-          guesses={results.map((r) => ({
-            lat: r.guess_lat,
-            lng: r.guess_lng,
-            displayName: r.display_name,
-          }))}
-        />
-      {/if}
-    </div>
-
-    <!-- Results table -->
-    <div class="bg-white rounded-xl shadow-lg overflow-hidden">
-      <table class="w-full">
-        <thead class="bg-gradient-to-r from-gray-50 to-gray-100 border-b">
-          <tr>
-            <th class="text-left py-4 px-4 sm:px-6 font-semibold text-gray-700 w-16">Rank</th>
-            <th class="text-left py-4 px-4 sm:px-6 font-semibold text-gray-700">Player</th>
-            <th class="text-right py-4 px-4 sm:px-6 font-semibold text-gray-700">Distance</th>
-            <th class="text-right py-4 px-4 sm:px-6 font-semibold text-gray-700">Score</th>
-            <th class="hidden sm:table-cell text-right py-4 px-6 font-semibold text-gray-700">Total</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          {#each rankedResults() as result (result.user_id)}
-            {@const bgClass = result.rank === 1 ? 'bg-yellow-50' : result.rank === 2 ? 'bg-gray-50' : result.rank === 3 ? 'bg-amber-50' : ''}
-            <tr class="transition-colors {bgClass} {result.isCurrentUser ? 'ring-2 ring-primary-500 ring-inset' : ''}">
-              <td class="py-4 px-4 sm:px-6">
-                <span class="text-lg font-semibold {getRankClass(result.rank)}">
-                  {getRankDisplay(result.rank)}
-                </span>
-              </td>
-              <td class="py-4 px-4 sm:px-6">
-                <div class="flex items-center gap-2">
-                  <span class="font-medium {result.isCurrentUser ? 'text-primary-700' : 'text-gray-900'}">
-                    {result.display_name || 'You'}
-                  </span>
-                  {#if result.isCurrentUser}
-                    <span class="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">
-                      You
-                    </span>
-                  {/if}
-                </div>
-                <!-- Show total on mobile under the name -->
-                <div class="sm:hidden text-xs text-gray-500 mt-1">
-                  Total: {formatScore(result.total_score)}
-                </div>
-              </td>
-              <td class="text-right py-4 px-4 sm:px-6 text-gray-600">
-                {formatDistance(result.distance_meters)}
-              </td>
-              <td class="text-right py-4 px-4 sm:px-6">
-                <span class="font-bold text-green-600">
-                  +{formatScore(result.score)}
-                </span>
-              </td>
-              <td class="hidden sm:table-cell text-right py-4 px-6 font-bold text-gray-900">
-                {formatScore(result.total_score)}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Continue prompt -->
-    {#if state.currentRound < state.totalRounds}
-      <div class="text-center mt-8">
-        {#if game.mode === 'solo' && onNextRound}
-          <button onclick={onNextRound} class="btn-primary px-8 py-3 text-lg">
-            Continue to Round {state.currentRound + 1}
-            <svg class="inline-block w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-            </svg>
-          </button>
-        {:else}
-          <div class="inline-flex items-center gap-3 px-6 py-4 bg-white rounded-xl shadow">
-            <div class="animate-spin w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full"></div>
-            <span class="text-gray-700 font-medium">Next round starting soon...</span>
-          </div>
+    <!-- Results map -->
+    <Card.Root class="overflow-hidden p-0">
+      <div class="h-[350px] md:h-[400px]">
+        {#if correctLocation}
+          <ResultsMap
+            correctLat={correctLocation.lat}
+            correctLng={correctLocation.lng}
+            guesses={results.map((r) => ({
+              lat: r.guess_lat,
+              lng: r.guess_lng,
+              displayName: r.display_name,
+            }))}
+          />
         {/if}
       </div>
-    {:else}
-      <div class="text-center mt-8">
-        <div class="inline-flex items-center gap-3 px-6 py-4 bg-primary-50 rounded-xl border border-primary-200">
-          <svg class="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
-          </svg>
-          <span class="text-primary-700 font-medium">Final results coming up...</span>
-        </div>
-      </div>
-    {/if}
+    </Card.Root>
+
+    <!-- Results table -->
+    <Card.Root>
+      <Card.Header class="pb-3">
+        <Card.Title class="flex items-center gap-2">
+          <TrophyIcon class="h-5 w-5 text-yellow-500" />
+          Round Results
+        </Card.Title>
+      </Card.Header>
+      <Card.Content class="p-0">
+        <Table.Root>
+          <Table.Header>
+            <Table.Row class="hover:bg-transparent">
+              <Table.Head class="w-16 pl-6">Rank</Table.Head>
+              <Table.Head>Player</Table.Head>
+              <Table.Head class="text-right">
+                <span class="hidden sm:inline">Distance</span>
+                <MapPinIcon class="inline sm:hidden h-4 w-4" />
+              </Table.Head>
+              <Table.Head class="text-right">Score</Table.Head>
+              <Table.Head class="text-right pr-6 hidden sm:table-cell">Total</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {#each rankedResults() as result (result.user_id)}
+              {@const isTop3 = result.rank <= 3}
+              <Table.Row 
+                class={result.isCurrentUser ? 'bg-primary/5' : ''}
+              >
+                <Table.Cell class="pl-6 font-semibold">
+                  <span class={getRankClass(result.rank)}>
+                    {getRankDisplay(result.rank)}
+                  </span>
+                </Table.Cell>
+                <Table.Cell>
+                  <div class="flex items-center gap-2">
+                    <span class={result.isCurrentUser ? 'font-medium text-primary' : 'font-medium'}>
+                      {result.display_name || 'You'}
+                    </span>
+                    {#if result.isCurrentUser}
+                      <Badge variant="secondary" class="text-xs">You</Badge>
+                    {/if}
+                  </div>
+                  <!-- Mobile total -->
+                  <div class="sm:hidden text-xs text-muted-foreground mt-0.5">
+                    Total: {formatScore(result.total_score)}
+                  </div>
+                </Table.Cell>
+                <Table.Cell class="text-right text-muted-foreground">
+                  {formatDistance(result.distance_meters)}
+                </Table.Cell>
+                <Table.Cell class="text-right">
+                  <span class="font-semibold text-green-600 dark:text-green-500">
+                    +{formatScore(result.score)}
+                  </span>
+                </Table.Cell>
+                <Table.Cell class="text-right pr-6 font-semibold hidden sm:table-cell">
+                  {formatScore(result.total_score)}
+                </Table.Cell>
+              </Table.Row>
+            {/each}
+          </Table.Body>
+        </Table.Root>
+      </Card.Content>
+    </Card.Root>
+
+    <!-- Continue/Next action -->
+    <div class="flex justify-center pt-2">
+      {#if state.currentRound < state.totalRounds}
+        {#if game.mode === 'solo' && onNextRound}
+          <Button size="lg" onclick={onNextRound} class="gap-2">
+            Continue to Round {state.currentRound + 1}
+            <ArrowRightIcon class="h-5 w-5" />
+          </Button>
+        {:else}
+          <Card.Root class="inline-flex">
+            <Card.Content class="flex items-center gap-3 py-3 px-5">
+              <Loader2Icon class="h-5 w-5 animate-spin text-primary" />
+              <span class="font-medium">Next round starting soon...</span>
+            </Card.Content>
+          </Card.Root>
+        {/if}
+      {:else}
+        <Card.Root class="inline-flex border-primary/20 bg-primary/5">
+          <Card.Content class="flex items-center gap-3 py-3 px-5">
+            <TrophyIcon class="h-5 w-5 text-primary" />
+            <span class="font-medium text-primary">Final results coming up...</span>
+          </Card.Content>
+        </Card.Root>
+      {/if}
+    </div>
   </div>
 </div>

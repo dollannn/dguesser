@@ -90,6 +90,11 @@ export const gamesApi = {
     return api.post<RoundInfo>(`/games/${gameId}/start`);
   },
 
+  /** Advance to the next round (solo games only) */
+  async nextRound(gameId: string): Promise<RoundInfo> {
+    return api.post<RoundInfo>(`/games/${gameId}/rounds/next`);
+  },
+
   /** Submit a guess */
   async submitGuess(
     gameId: string,

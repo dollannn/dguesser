@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
+  import type L from 'leaflet';
 
   interface Guess {
     lat: number;
@@ -17,80 +18,214 @@
   let { correctLat, correctLng, guesses }: Props = $props();
 
   let container: HTMLDivElement;
-  let map: google.maps.Map | null = null;
+  let map: L.Map | null = null;
+  let leaflet: typeof L | null = null;
 
-  onMount(() => {
+  // Player colors for guesses
+  const colors = ['#22c55e', '#3b82f6', '#a855f7', '#f59e0b', '#ec4899', '#06b6d4'];
+
+  onMount(async () => {
     if (!browser) return;
 
-    // Initialize map
-    map = new google.maps.Map(container, {
-      center: { lat: correctLat, lng: correctLng },
+    // Dynamically import Leaflet only on client side
+    leaflet = (await import('leaflet')).default;
+
+    // Initialize map centered on correct location
+    map = leaflet.map(container, {
+      center: [correctLat, correctLng],
       zoom: 4,
-      disableDefaultUI: true,
-      zoomControl: true,
-      gestureHandling: 'greedy',
+      zoomControl: false,
+      attributionControl: false,
     });
 
-    // Add correct location marker
-    new google.maps.Marker({
-      position: { lat: correctLat, lng: correctLng },
-      map,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 12,
-        fillColor: '#ef4444',
-        fillOpacity: 1,
-        strokeColor: '#ffffff',
-        strokeWeight: 3,
-      },
-      title: 'Correct Location',
+    // Add OpenStreetMap tiles with a clean style
+    leaflet.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    // Add zoom control to bottom right
+    leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    // Create bounds to fit all markers
+    const bounds = leaflet.latLngBounds([[correctLat, correctLng]]);
+
+    // Add correct location marker (red circle with pin)
+    const correctIcon = leaflet.divIcon({
+      className: 'correct-marker',
+      html: `
+        <div class="marker-container">
+          <div class="marker-circle correct"></div>
+          <div class="marker-pulse"></div>
+        </div>
+      `,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
     });
+
+    leaflet.marker([correctLat, correctLng], { icon: correctIcon })
+      .bindTooltip('Correct Location', { 
+        permanent: false, 
+        direction: 'top',
+        className: 'results-tooltip'
+      })
+      .addTo(map);
 
     // Add guess markers and lines
-    const bounds = new google.maps.LatLngBounds();
-    bounds.extend({ lat: correctLat, lng: correctLng });
-
-    const colors = ['#22c55e', '#3b82f6', '#a855f7', '#f59e0b', '#ec4899', '#06b6d4'];
-
     guesses.forEach((guess, i) => {
       const color = colors[i % colors.length];
 
-      // Guess marker
-      new google.maps.Marker({
-        position: { lat: guess.lat, lng: guess.lng },
-        map,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 8,
-          fillColor: color,
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 2,
-        },
-        title: guess.displayName,
+      // Create custom icon for guess
+      const guessIcon = leaflet!.divIcon({
+        className: 'guess-marker',
+        html: `
+          <div class="marker-container">
+            <div class="marker-circle" style="background-color: ${color};"></div>
+          </div>
+        `,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
       });
 
-      // Line from guess to correct location
-      new google.maps.Polyline({
-        path: [
-          { lat: guess.lat, lng: guess.lng },
-          { lat: correctLat, lng: correctLng },
-        ],
-        geodesic: true,
-        strokeColor: color,
-        strokeOpacity: 0.8,
-        strokeWeight: 2,
-        map,
-      });
+      // Add guess marker
+      leaflet!.marker([guess.lat, guess.lng], { icon: guessIcon })
+        .bindTooltip(guess.displayName || 'Your guess', { 
+          permanent: false, 
+          direction: 'top',
+          className: 'results-tooltip'
+        })
+        .addTo(map!);
 
-      bounds.extend({ lat: guess.lat, lng: guess.lng });
+      // Draw line from guess to correct location
+      leaflet!.polyline(
+        [[guess.lat, guess.lng], [correctLat, correctLng]],
+        {
+          color: color,
+          weight: 2,
+          opacity: 0.7,
+          dashArray: '6, 8',
+        }
+      ).addTo(map!);
+
+      // Extend bounds to include this guess
+      bounds.extend([guess.lat, guess.lng]);
     });
 
-    // Fit map to show all markers
+    // Fit map to show all markers with padding
     if (guesses.length > 0) {
-      map.fitBounds(bounds, 50);
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+
+    // Invalidate size after a brief delay to fix initial rendering
+    setTimeout(() => {
+      map?.invalidateSize();
+    }, 100);
+  });
+
+  onDestroy(() => {
+    if (map) {
+      map.remove();
+      map = null;
     }
   });
 </script>
 
-<div bind:this={container} class="w-full h-full"></div>
+<div bind:this={container} class="w-full h-full rounded-lg"></div>
+
+<style>
+  :global(.correct-marker),
+  :global(.guess-marker) {
+    background: transparent;
+    border: none;
+  }
+
+  :global(.marker-container) {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  :global(.marker-circle) {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 3px solid white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  :global(.marker-circle.correct) {
+    width: 24px;
+    height: 24px;
+    background-color: #ef4444;
+    border: 3px solid white;
+  }
+
+  :global(.marker-pulse) {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: rgba(239, 68, 68, 0.3);
+    animation: pulse 2s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% {
+      transform: scale(0.5);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1.5);
+      opacity: 0;
+    }
+  }
+
+  :global(.results-tooltip) {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border: 1px solid hsl(var(--border));
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: hsl(var(--foreground));
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  :global(.results-tooltip::before) {
+    border-top-color: rgba(255, 255, 255, 0.95) !important;
+  }
+
+  :global(.leaflet-control-zoom) {
+    border: none !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+    border-radius: 8px !important;
+    overflow: hidden;
+  }
+
+  :global(.leaflet-control-zoom a) {
+    background: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(8px);
+    color: hsl(var(--foreground)) !important;
+    border: none !important;
+    width: 32px !important;
+    height: 32px !important;
+    line-height: 32px !important;
+    font-size: 16px !important;
+    transition: background 0.15s ease;
+  }
+
+  :global(.leaflet-control-zoom a:hover) {
+    background: rgba(255, 255, 255, 1) !important;
+    color: hsl(var(--foreground)) !important;
+  }
+
+  :global(.leaflet-control-zoom-in) {
+    border-radius: 8px 8px 0 0 !important;
+    border-bottom: 1px solid hsl(var(--border)) !important;
+  }
+
+  :global(.leaflet-control-zoom-out) {
+    border-radius: 0 0 8px 8px !important;
+  }
+</style>

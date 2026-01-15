@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/", post(create_game))
         .route("/{id}", get(get_game))
         .route("/{id}/start", post(start_game))
+        .route("/{id}/rounds/next", post(next_round))
         .route("/{id}/rounds/{round}/guess", post(submit_guess))
         .route("/history", get(get_game_history))
 }
@@ -373,6 +374,129 @@ pub async fn start_game(
 
     Ok(Json(RoundInfo {
         round_number: 1,
+        location: LocationInfo {
+            lat: location.lat,
+            lng: location.lng,
+            panorama_id: if location.panorama_id.is_empty() {
+                None
+            } else {
+                Some(location.panorama_id)
+            },
+        },
+        started_at: Utc::now(),
+        time_limit_ms,
+    }))
+}
+
+/// Start the next round in a solo game
+#[utoipa::path(
+    post,
+    path = "/api/v1/games/{id}/rounds/next",
+    params(
+        ("id" = String, Path, description = "Game ID")
+    ),
+    responses(
+        (status = 200, description = "Next round started", body = RoundInfo),
+        (status = 400, description = "Game not active or all rounds completed"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Game not found"),
+    ),
+    tag = "games"
+)]
+pub async fn next_round(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<RoundInfo>, ApiError> {
+    let game = dguesser_db::games::get_game_by_id(state.db(), &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Game"))?;
+
+    // Only works for solo games via REST API
+    if game.mode != GameMode::Solo {
+        return Err(ApiError::bad_request(
+            "INVALID_MODE",
+            "Next round via API only available for solo games",
+        ));
+    }
+
+    // Verify user is the player in this game
+    let players = dguesser_db::games::get_players(state.db(), &id).await?;
+    let is_player = players.iter().any(|p| p.user_id == auth.user_id);
+
+    if !is_player {
+        return Err(ApiError::forbidden("Not a player in this game"));
+    }
+
+    // Game must be active (not lobby, not finished)
+    if game.status != GameStatus::Active {
+        return Err(ApiError::bad_request(
+            "INVALID_STATE",
+            "Game must be active to advance rounds",
+        ));
+    }
+
+    // Get current rounds to determine next round number
+    let rounds = dguesser_db::games::get_rounds_for_game(state.db(), &id).await?;
+    let current_round = rounds.len() as u8;
+    let next_round_number = current_round + 1;
+
+    // Get total rounds from settings
+    let total_rounds = game.settings.get("rounds").and_then(|v| v.as_u64()).unwrap_or(5) as u8;
+
+    if next_round_number > total_rounds {
+        // End the game
+        dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Finished).await?;
+        return Err(ApiError::bad_request("GAME_COMPLETE", "All rounds completed"));
+    }
+
+    // Get map_id from settings, default to "world"
+    let map_id = game.settings.get("map_id").and_then(|v| v.as_str()).unwrap_or("world");
+
+    // Get existing location IDs to exclude
+    let exclude_ids: Vec<String> = rounds.iter().filter_map(|r| r.panorama_id.clone()).collect();
+
+    // Select a random location from the location pool
+    let location = match state.location_provider().select_location(map_id, &exclude_ids).await {
+        Ok(loc) => loc,
+        Err(e) => {
+            tracing::warn!(error = %e, map_id = %map_id, "Failed to select location from pool, falling back to random");
+            let fallback = generate_random_location();
+            dguesser_core::location::GameLocation {
+                id: String::new(),
+                panorama_id: String::new(),
+                lat: fallback.lat,
+                lng: fallback.lng,
+                country_code: None,
+            }
+        }
+    };
+
+    let time_limit_seconds =
+        game.settings.get("time_limit_seconds").and_then(|v| v.as_u64()).map(|s| s as u32);
+
+    let time_limit_ms = time_limit_seconds.map(|s| s * 1000);
+
+    // Use panorama_id if available, otherwise None
+    let panorama_id =
+        if location.panorama_id.is_empty() { None } else { Some(location.panorama_id.as_str()) };
+
+    let round = dguesser_db::games::create_round(
+        state.db(),
+        &id,
+        next_round_number as i16,
+        location.lat,
+        location.lng,
+        panorama_id,
+        time_limit_ms.map(|t| t as i32),
+    )
+    .await?;
+
+    // Start the round
+    dguesser_db::games::start_round(state.db(), &round.id).await?;
+
+    Ok(Json(RoundInfo {
+        round_number: next_round_number,
         location: LocationInfo {
             lat: location.lat,
             lng: location.lng,
