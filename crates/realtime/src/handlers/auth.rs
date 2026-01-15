@@ -5,10 +5,14 @@ use socketioxide::extract::{Data, SocketRef, State};
 
 use crate::state::AppState;
 
-/// Payload for authentication request
+/// Cookie name for session ID
+const SESSION_COOKIE_NAME: &str = "dguesser_sid";
+
+/// Payload for authentication request (session_id can be empty if using cookies)
 #[derive(Debug, Deserialize)]
 pub struct AuthPayload {
-    /// Session token from cookie or passed explicitly
+    /// Session token - if empty, will be extracted from cookie
+    #[serde(default)]
     pub session_id: String,
 }
 
@@ -23,6 +27,23 @@ pub struct AuthResponse {
     pub error: Option<String>,
 }
 
+/// Extract session ID from cookie header
+fn extract_session_from_cookie(socket: &SocketRef) -> Option<String> {
+    let req_parts = socket.req_parts();
+    let cookie_header = req_parts.headers.get("cookie")?.to_str().ok()?;
+
+    // Parse cookies (format: "name1=value1; name2=value2")
+    for cookie in cookie_header.split(';') {
+        let cookie = cookie.trim();
+        if let Some((name, value)) = cookie.split_once('=') {
+            if name.trim() == SESSION_COOKIE_NAME {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Handle authentication request
 pub async fn handle_auth(
     socket: SocketRef,
@@ -31,7 +52,28 @@ pub async fn handle_auth(
 ) {
     let socket_id = socket.id.to_string();
 
-    match authenticate(&state, &payload.session_id).await {
+    // Try to get session_id from payload first, then from cookie
+    let session_id = if payload.session_id.is_empty() {
+        extract_session_from_cookie(&socket)
+    } else {
+        Some(payload.session_id)
+    };
+
+    let Some(session_id) = session_id else {
+        socket
+            .emit(
+                "auth:error",
+                &AuthResponse {
+                    success: false,
+                    user_id: None,
+                    error: Some("No session found".to_string()),
+                },
+            )
+            .ok();
+        return;
+    };
+
+    match authenticate(&state, &session_id).await {
         Ok(user_id) => {
             // Register socket-user mapping
             state.register_socket(&socket_id, &user_id).await;

@@ -1,78 +1,155 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { user, isGuest, authStore } from '$lib/stores/auth';
   import { authApi } from '$lib/api/auth';
   import ConnectionStatus from './ConnectionStatus.svelte';
+  import { Button } from '$lib/components/ui/button';
+  import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
+  import { Badge } from '$lib/components/ui/badge';
+  import { Separator } from '$lib/components/ui/separator';
+  import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+  import GlobeIcon from '@lucide/svelte/icons/globe';
+  import LogOutIcon from '@lucide/svelte/icons/log-out';
+  import UserIcon from '@lucide/svelte/icons/user';
+  import HistoryIcon from '@lucide/svelte/icons/history';
+  import TrophyIcon from '@lucide/svelte/icons/trophy';
+  import PlayIcon from '@lucide/svelte/icons/play';
+  import SettingsIcon from '@lucide/svelte/icons/settings';
+  import MenuIcon from '@lucide/svelte/icons/menu';
 
   async function handleLogout() {
     await authStore.logout();
   }
+
+  function isActive(path: string): boolean {
+    return $page.url.pathname === path || $page.url.pathname.startsWith(path + '/');
+  }
 </script>
 
-<header class="bg-white shadow-sm">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex justify-between items-center h-16">
-      <a href="/" class="text-2xl font-bold text-primary-600">
-        dguesser
-      </a>
+<header class="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+  <div class="container mx-auto px-4 flex h-14 items-center">
+    <!-- Logo -->
+    <a href="/" class="flex items-center gap-2.5 mr-6 group">
+      <div class="flex items-center justify-center size-8 rounded-lg bg-primary text-primary-foreground shadow-sm group-hover:shadow transition-shadow">
+        <GlobeIcon class="size-4" />
+      </div>
+      <span class="font-semibold text-lg tracking-tight">DGuesser</span>
+    </a>
 
-      <nav class="flex items-center gap-4">
-        {#if $user}
-          <ConnectionStatus />
-          
-          <a href="/play" class="text-gray-600 hover:text-gray-900">
-            Play
-          </a>
-          <a href="/history" class="text-gray-600 hover:text-gray-900">
-            History
-          </a>
-          
-          <div class="flex items-center gap-3 ml-4">
-            {#if $user.avatar_url}
-              <img 
-                src={$user.avatar_url} 
-                alt={$user.display_name}
-                class="w-8 h-8 rounded-full"
-              />
-            {:else}
-              <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center">
-                <span class="text-primary-600 font-medium">
-                  {$user.display_name.charAt(0).toUpperCase()}
+    <!-- Desktop Navigation -->
+    {#if $user}
+      <nav class="hidden md:flex items-center gap-1">
+        <a 
+          href="/play" 
+          class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors
+            {isActive('/play') 
+              ? 'bg-accent text-accent-foreground' 
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}"
+        >
+          <PlayIcon class="size-4" />
+          Play
+        </a>
+        <a 
+          href="/leaderboard" 
+          class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors
+            {isActive('/leaderboard') 
+              ? 'bg-accent text-accent-foreground' 
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}"
+        >
+          <TrophyIcon class="size-4" />
+          Leaderboard
+        </a>
+        <a 
+          href="/history" 
+          class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors
+            {isActive('/history') 
+              ? 'bg-accent text-accent-foreground' 
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}"
+        >
+          <HistoryIcon class="size-4" />
+          History
+        </a>
+      </nav>
+    {/if}
+
+    <!-- Right Section -->
+    <div class="ml-auto flex items-center gap-2">
+      {#if $user}
+        <ConnectionStatus />
+        
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}
+              <button 
+                class="flex items-center gap-2 rounded-full p-1 pr-2 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                {...props}
+              >
+                <Avatar class="size-8 border border-border/50">
+                  {#if $user.avatar_url}
+                    <AvatarImage src={$user.avatar_url} alt={$user.display_name} />
+                  {/if}
+                  <AvatarFallback class="bg-muted text-muted-foreground text-sm font-medium">
+                    {$user.display_name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <span class="hidden sm:block text-sm font-medium max-w-[100px] truncate">
+                  {$user.display_name}
                 </span>
+                {#if $isGuest}
+                  <Badge variant="secondary" class="text-[10px] px-1.5 py-0">Guest</Badge>
+                {/if}
+              </button>
+            {/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content class="w-56" align="end" sideOffset={8}>
+            <DropdownMenu.Label>
+              <div class="flex flex-col gap-1">
+                <span class="font-medium">{$user.display_name}</span>
+                {#if $user.email}
+                  <span class="text-xs font-normal text-muted-foreground">{$user.email}</span>
+                {:else if $isGuest}
+                  <span class="text-xs font-normal text-muted-foreground">Playing as guest</span>
+                {/if}
               </div>
-            {/if}
+            </DropdownMenu.Label>
+            <DropdownMenu.Separator />
             
-            <span class="text-sm font-medium text-gray-700">
-              {$user.display_name}
-              {#if $isGuest}
-                <span class="text-xs text-gray-500">(Guest)</span>
-              {/if}
-            </span>
+            <!-- Mobile-only nav items -->
+            <DropdownMenu.Group class="md:hidden">
+              <DropdownMenu.Item onSelect={() => goto('/play')}>
+                <PlayIcon />
+                Play
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => goto('/leaderboard')}>
+                <TrophyIcon />
+                Leaderboard
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => goto('/history')}>
+                <HistoryIcon />
+                History
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+            </DropdownMenu.Group>
 
             {#if $isGuest}
-              <a 
-                href={authApi.getGoogleAuthUrl()}
-                class="btn-primary text-sm"
-              >
-                Sign In
-              </a>
+              <DropdownMenu.Item onSelect={() => window.location.href = authApi.getGoogleAuthUrl()}>
+                <UserIcon />
+                Sign in to save progress
+              </DropdownMenu.Item>
             {:else}
-              <button 
-                onclick={handleLogout}
-                class="btn-secondary text-sm"
-              >
-                Logout
-              </button>
+              <DropdownMenu.Item onSelect={handleLogout} variant="destructive">
+                <LogOutIcon />
+                Log out
+              </DropdownMenu.Item>
             {/if}
-          </div>
-        {:else}
-          <a 
-            href={authApi.getGoogleAuthUrl()}
-            class="btn-primary"
-          >
-            Sign In with Google
-          </a>
-        {/if}
-      </nav>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      {:else}
+        <Button href={authApi.getGoogleAuthUrl()} size="sm">
+          Sign In
+        </Button>
+      {/if}
     </div>
   </div>
 </header>
