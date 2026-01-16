@@ -26,9 +26,20 @@
   let { game, onStart }: Props = $props();
 
   let gameState = $derived($gameStore);
+  // Check both API response (game.players) and live socket state ($gameStore.players)
+  // Socket state is updated when player joins/leaves
+  let isPlayerFromApi = $derived(game.players.some((p) => p.user_id === $user?.id));
+  let isPlayerFromSocket = $derived($user?.id ? $gameStore.players.has($user.id) : false);
+  let isPlayer = $derived(isPlayerFromApi || isPlayerFromSocket);
   let isHost = $derived(game.players.find((p) => p.user_id === $user?.id)?.is_host ?? false);
-  let playerCount = $derived(game.players.length);
+  // Use socket state for player count if available, otherwise fall back to API
+  let playerCount = $derived($gameStore.players.size > 0 ? $gameStore.players.size : game.players.length);
   let canStart = $derived(isHost && (game.mode === 'solo' || playerCount >= 2));
+  let canJoin = $derived(!isPlayer && game.mode === 'multiplayer' && playerCount < 8);
+
+  function joinGame() {
+    gameStore.joinGame(game.id);
+  }
   
   let copied = $state(false);
   let joinCode = $derived(game.join_code ?? '------');
@@ -158,8 +169,9 @@
           </div>
           <div class="space-y-2">
             {#each game.players as player}
+              {@const isYou = player.user_id === $user?.id}
               <div
-                class="flex items-center justify-between rounded-lg border bg-card p-3 transition-colors hover:bg-muted/50"
+                class="flex items-center justify-between rounded-lg border bg-card p-3 transition-colors hover:bg-muted/50 {isYou ? 'ring-2 ring-primary/50' : ''}"
               >
                 <div class="flex items-center gap-3">
                   <Avatar.Root class="size-8">
@@ -170,14 +182,24 @@
                       {getInitials(player.display_name)}
                     </Avatar.Fallback>
                   </Avatar.Root>
-                  <span class="font-medium">{player.display_name}</span>
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium">{player.display_name}</span>
+                    {#if isYou}
+                      <Badge variant="outline" class="text-xs py-0">You</Badge>
+                    {/if}
+                  </div>
                 </div>
-                {#if player.is_host}
-                  <Badge variant="default" class="gap-1">
-                    <CrownIcon class="size-3" />
-                    Host
-                  </Badge>
-                {/if}
+                <div class="flex items-center gap-2">
+                  {#if player.is_guest}
+                    <Badge variant="secondary" class="text-xs">Guest</Badge>
+                  {/if}
+                  {#if player.is_host}
+                    <Badge variant="default" class="gap-1">
+                      <CrownIcon class="size-3" />
+                      Host
+                    </Badge>
+                  {/if}
+                </div>
               </div>
             {/each}
           </div>
@@ -189,7 +211,12 @@
 
     <Card.Footer class="pt-6">
       <div class="w-full text-center">
-        {#if canStart}
+        {#if canJoin}
+          <Button onclick={joinGame} size="lg" class="w-full sm:w-auto px-8">
+            <UsersIcon class="size-5" />
+            Join Game
+          </Button>
+        {:else if canStart}
           <Button onclick={onStart} size="lg" class="w-full sm:w-auto px-8">
             <PlayIcon class="size-5" />
             Start Game

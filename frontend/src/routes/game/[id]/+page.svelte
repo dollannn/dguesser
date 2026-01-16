@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { gamesApi, type GameDetails } from '$lib/api/games';
   import { gameStore, initGameSocketListeners } from '$lib/socket/game';
+  import { authStore, user } from '$lib/stores/auth';
 
   import GameLoading from '$lib/components/game/GameLoading.svelte';
   import GameLobby from '$lib/components/game/GameLobby.svelte';
@@ -28,6 +29,12 @@
     }
 
     try {
+      // Ensure user has a session (create guest if needed)
+      // This allows direct links to multiplayer games to work
+      if (!$user) {
+        await authStore.createGuest();
+      }
+
       // Load game data
       game = await gamesApi.get(gameId);
 

@@ -17,8 +17,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use axum::http::{HeaderMap, header::SET_COOKIE};
+
 use crate::{error::ApiError, state::AppState};
-use dguesser_auth::AuthUser;
+use dguesser_auth::{AuthUser, MaybeAuthUser, build_cookie_header, create_guest_session};
 use dguesser_core::game::{
     GameCommand, GameEvent, GamePhase, GameSettings, GameState, LocationData, PlayerState,
     RoundState, reduce,
@@ -126,6 +128,8 @@ pub struct PlayerInfo {
     pub avatar_url: Option<String>,
     /// Whether this player is the host
     pub is_host: bool,
+    /// Whether this player is a guest (not signed in with OAuth)
+    pub is_guest: bool,
     /// Total score in this game
     pub score: i32,
 }
@@ -426,6 +430,7 @@ pub async fn create_game(
     request_body = JoinGameRequest,
     responses(
         (status = 200, description = "Game details", body = GameDetails),
+        (status = 201, description = "Game details (guest session created)", body = GameDetails),
         (status = 400, description = "Invalid code format"),
         (status = 404, description = "Game not found or not joinable"),
     ),
@@ -433,9 +438,27 @@ pub async fn create_game(
 )]
 pub async fn join_game_by_code(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    headers: HeaderMap,
+    MaybeAuthUser(maybe_auth): MaybeAuthUser,
     Json(req): Json<JoinGameRequest>,
-) -> Result<Json<GameDetails>, ApiError> {
+) -> Result<(axum::http::StatusCode, HeaderMap, Json<GameDetails>), ApiError> {
+    // Auto-create guest session if not authenticated
+    let (is_new_session, session_id) = match maybe_auth {
+        Some(auth) => (false, Some(auth.session_id)),
+        None => {
+            // Extract IP and user agent for guest creation
+            let ip = headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.split(',').next().unwrap_or(s).trim());
+            let user_agent = headers.get("user-agent").and_then(|v| v.to_str().ok());
+
+            let result =
+                create_guest_session(state.db(), state.session_config(), ip, user_agent).await?;
+            (true, Some(result.session_id))
+        }
+    };
+
     // Validate code format (6 alphanumeric characters)
     let code = req.code.trim().to_uppercase();
     if code.len() != 6 || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -466,21 +489,22 @@ pub async fn join_game_by_code(
     let mut player_infos = Vec::new();
     for p in players {
         let user = dguesser_db::users::get_by_id(state.db(), &p.user_id).await?;
-        let (display_name, avatar_url) = user
-            .map(|u| (u.display_name, u.avatar_url))
-            .unwrap_or_else(|| ("Unknown".to_string(), None));
+        let (display_name, avatar_url, is_guest) = user
+            .map(|u| (u.display_name, u.avatar_url, u.kind == dguesser_db::UserKind::Guest))
+            .unwrap_or_else(|| ("Unknown".to_string(), None, true));
         player_infos.push(PlayerInfo {
             user_id: p.user_id,
             display_name,
             avatar_url,
             is_host: p.is_host,
+            is_guest,
             score: p.score_total,
         });
     }
 
     let total_rounds = game.settings.get("rounds").and_then(|v| v.as_u64()).unwrap_or(5) as u8;
 
-    Ok(Json(GameDetails {
+    let game_details = GameDetails {
         id: game.id,
         mode: game.mode.to_string(),
         status: game.status.to_string(),
@@ -492,7 +516,25 @@ pub async fn join_game_by_code(
         players: player_infos,
         current_round: rounds.len() as u8,
         total_rounds,
-    }))
+    };
+
+    // Build response with Set-Cookie header if new session was created
+    let mut response_headers = HeaderMap::new();
+    let status = if is_new_session {
+        if let Some(sid) = session_id {
+            let cookie = build_cookie_header(
+                &sid,
+                state.session_config(),
+                state.session_config().max_age_seconds(),
+            );
+            response_headers.insert(SET_COOKIE, cookie.parse().unwrap());
+        }
+        axum::http::StatusCode::CREATED
+    } else {
+        axum::http::StatusCode::OK
+    };
+
+    Ok((status, response_headers, Json(game_details)))
 }
 
 /// Get game details
@@ -521,9 +563,11 @@ pub async fn get_game(
     let players = dguesser_db::games::get_players(state.db(), &id).await?;
     let rounds = dguesser_db::games::get_rounds_for_game(state.db(), &id).await?;
 
-    // Check if user is a player (for non-solo games)
+    // Check if user is a player (for non-solo games that have started)
+    // Allow viewing lobby for multiplayer games so users can join
     let is_player = players.iter().any(|p| p.user_id == auth.user_id);
-    if !is_player && game.mode != GameMode::Solo {
+    let is_joinable_lobby = game.mode == GameMode::Multiplayer && game.status == GameStatus::Lobby;
+    if !is_player && game.mode != GameMode::Solo && !is_joinable_lobby {
         return Err(ApiError::forbidden("Not a player in this game"));
     }
 
@@ -531,14 +575,15 @@ pub async fn get_game(
     let mut player_infos = Vec::new();
     for p in players {
         let user = dguesser_db::users::get_by_id(state.db(), &p.user_id).await?;
-        let (display_name, avatar_url) = user
-            .map(|u| (u.display_name, u.avatar_url))
-            .unwrap_or_else(|| ("Unknown".to_string(), None));
+        let (display_name, avatar_url, is_guest) = user
+            .map(|u| (u.display_name, u.avatar_url, u.kind == dguesser_db::UserKind::Guest))
+            .unwrap_or_else(|| ("Unknown".to_string(), None, true));
         player_infos.push(PlayerInfo {
             user_id: p.user_id,
             display_name,
             avatar_url,
             is_host: p.is_host,
+            is_guest,
             score: p.score_total,
         });
     }

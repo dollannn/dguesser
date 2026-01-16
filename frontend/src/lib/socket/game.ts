@@ -477,6 +477,11 @@ export function initGameSocketListeners(): () => void {
     socketClient.on<ScoresUpdatePayload>('scores:update', (data) => {
       gameStore.handleScoresUpdate(data);
     }),
+    // Error handling
+    socketClient.on<{ code: string; message: string }>('error', (data) => {
+      console.error('[Socket Error]', data.code, data.message);
+      toastStore.add('error', data.message);
+    }),
   ];
 
   return () => {

@@ -31,6 +31,8 @@ export interface Player {
   /** Avatar URL from OAuth provider */
   avatar_url: string | null;
   is_host: boolean;
+  /** Whether this player is a guest (not signed in with OAuth) */
+  is_guest: boolean;
   score: number;
 }
 
