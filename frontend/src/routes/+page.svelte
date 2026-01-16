@@ -1,14 +1,9 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
-  import { user, authStore } from '$lib/stores/auth';
+  import { user } from '$lib/stores/auth';
   import { authModalOpen } from '$lib/stores/authModal';
-  import { gamesApi } from '$lib/api/games';
   import { Button } from '$lib/components/ui/button';
-  import { Input } from '$lib/components/ui/input';
   import * as Card from '$lib/components/ui/card';
   import { Badge } from '$lib/components/ui/badge';
-  import * as Alert from '$lib/components/ui/alert';
-  import GlobeIcon from '@lucide/svelte/icons/globe';
   import UsersIcon from '@lucide/svelte/icons/users';
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import PlayIcon from '@lucide/svelte/icons/play';
@@ -16,67 +11,8 @@
   import TargetIcon from '@lucide/svelte/icons/target';
   import MapPinIcon from '@lucide/svelte/icons/map-pin';
   import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
-  import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
-
-  let joinCode = $state('');
-  let loading = $state(false);
-  let error = $state('');
-
-  async function startSoloGame() {
-    loading = true;
-    error = '';
-
-    try {
-      if (!$user) {
-        await authStore.createGuest();
-      }
-
-      const game = await gamesApi.create({ mode: 'solo' });
-      goto(`/game/${game.id}`);
-    } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to start game';
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function createMultiplayerGame() {
-    loading = true;
-    error = '';
-
-    try {
-      if (!$user) {
-        await authStore.createGuest();
-      }
-
-      const game = await gamesApi.create({ mode: 'multiplayer' });
-      goto(`/game/${game.id}`);
-    } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to create game';
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function joinGame() {
-    if (!joinCode.trim()) return;
-
-    loading = true;
-    error = '';
-
-    try {
-      if (!$user) {
-        await authStore.createGuest();
-      }
-
-      const game = await gamesApi.joinByCode(joinCode.trim().toUpperCase());
-      goto(`/game/${game.id}`);
-    } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to join game';
-    } finally {
-      loading = false;
-    }
-  }
+  import ZapIcon from '@lucide/svelte/icons/zap';
+  import Share2Icon from '@lucide/svelte/icons/share-2';
 </script>
 
 <!-- Hero Section -->
@@ -116,17 +52,6 @@
   </div>
 </section>
 
-<!-- Error Alert -->
-{#if error}
-  <div class="container mx-auto px-4 -mt-8 mb-8">
-    <Alert.Root variant="destructive">
-      <AlertCircleIcon class="size-4" />
-      <Alert.Title>Error</Alert.Title>
-      <Alert.Description>{error}</Alert.Description>
-    </Alert.Root>
-  </div>
-{/if}
-
 <!-- Game Mode Cards -->
 <section class="container mx-auto px-4 py-16">
   <div class="text-center mb-12">
@@ -138,93 +63,88 @@
 
   <div class="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
     <!-- Solo Play Card -->
-    <Card.Root class="relative overflow-hidden group hover:shadow-lg transition-all duration-300 border-2 hover:border-primary/50">
-      <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-      <Card.Header>
-        <div class="flex items-center gap-3 mb-2">
-          <div class="p-2 rounded-lg bg-primary/10">
-            <TargetIcon class="size-6 text-primary" />
+    <a href="/play" class="block group">
+      <Card.Root class="relative overflow-hidden h-full hover:shadow-lg transition-all duration-300 border-2 hover:border-primary/50">
+        <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+        <Card.Header>
+          <div class="flex items-center gap-3 mb-2">
+            <div class="p-2 rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
+              <TargetIcon class="size-6 text-primary" />
+            </div>
+            <Card.Title class="text-2xl">Solo Play</Card.Title>
           </div>
-          <Card.Title class="text-2xl">Solo Play</Card.Title>
+          <Card.Description class="text-base">
+            Play on your own and try to beat your personal best. Perfect for practice!
+          </Card.Description>
+        </Card.Header>
+        <Card.Content>
+          <ul class="space-y-2 text-sm text-muted-foreground">
+            <li class="flex items-center gap-2">
+              <MapPinIcon class="size-4 text-primary" />
+              5 rounds per game
+            </li>
+            <li class="flex items-center gap-2">
+              <TrophyIcon class="size-4 text-primary" />
+              Track your progress
+            </li>
+            <li class="flex items-center gap-2">
+              <SparklesIcon class="size-4 text-primary" />
+              No account required
+            </li>
+          </ul>
+        </Card.Content>
+        <!-- Hover Overlay -->
+        <div class="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300">
+          <div class="flex items-center gap-2 text-lg font-semibold text-primary">
+            <PlayIcon class="size-5" />
+            Start Playing
+            <ArrowRightIcon class="size-5 transition-transform group-hover:translate-x-1" />
+          </div>
         </div>
-        <Card.Description class="text-base">
-          Play on your own and try to beat your personal best. Perfect for practice!
-        </Card.Description>
-      </Card.Header>
-      <Card.Content>
-        <ul class="space-y-2 text-sm text-muted-foreground mb-6">
-          <li class="flex items-center gap-2">
-            <MapPinIcon class="size-4 text-primary" />
-            5 rounds per game
-          </li>
-          <li class="flex items-center gap-2">
-            <TrophyIcon class="size-4 text-primary" />
-            Track your progress
-          </li>
-          <li class="flex items-center gap-2">
-            <SparklesIcon class="size-4 text-primary" />
-            No account required
-          </li>
-        </ul>
-      </Card.Content>
-      <Card.Footer>
-        <Button onclick={startSoloGame} disabled={loading} class="w-full">
-          <PlayIcon class="size-4" />
-          {loading ? 'Starting...' : 'Start Solo Game'}
-        </Button>
-      </Card.Footer>
-    </Card.Root>
+      </Card.Root>
+    </a>
 
     <!-- Multiplayer Card -->
-    <Card.Root class="relative overflow-hidden group hover:shadow-lg transition-all duration-300 border-2 hover:border-primary/50">
-      <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-      <Card.Header>
-        <div class="flex items-center gap-3 mb-2">
-          <div class="p-2 rounded-lg bg-primary/10">
-            <UsersIcon class="size-6 text-primary" />
-          </div>
-          <Card.Title class="text-2xl">Multiplayer</Card.Title>
-        </div>
-        <Card.Description class="text-base">
-          Create a room or join friends with a code. Compete in real-time!
-        </Card.Description>
-      </Card.Header>
-      <Card.Content>
-        <div class="space-y-4">
-          <Button variant="outline" onclick={createMultiplayerGame} disabled={loading} class="w-full">
-            <UsersIcon class="size-4" />
-            Create Room
-          </Button>
-          
-          <div class="relative">
-            <div class="absolute inset-0 flex items-center">
-              <span class="w-full border-t"></span>
+    <a href="/play" class="block group">
+      <Card.Root class="relative overflow-hidden h-full hover:shadow-lg transition-all duration-300 border-2 hover:border-primary/50">
+        <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+        <Card.Header>
+          <div class="flex items-center gap-3 mb-2">
+            <div class="p-2 rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
+              <UsersIcon class="size-6 text-primary" />
             </div>
-            <div class="relative flex justify-center text-xs uppercase">
-              <span class="bg-card px-2 text-muted-foreground">or join with code</span>
-            </div>
+            <Card.Title class="text-2xl">Multiplayer</Card.Title>
           </div>
-
-          <div class="flex gap-2">
-            <Input
-              type="text"
-              bind:value={joinCode}
-              placeholder="Enter code"
-              maxlength={6}
-              class="uppercase font-mono text-center tracking-widest"
-            />
-            <Button
-              variant="secondary"
-              onclick={joinGame}
-              disabled={loading || !joinCode.trim()}
-            >
-              Join
-              <ArrowRightIcon class="size-4" />
-            </Button>
+          <Card.Description class="text-base">
+            Create a room or join friends with a code. Compete in real-time!
+          </Card.Description>
+        </Card.Header>
+        <Card.Content>
+          <ul class="space-y-2 text-sm text-muted-foreground">
+            <li class="flex items-center gap-2">
+              <ZapIcon class="size-4 text-primary" />
+              Real-time competition
+            </li>
+            <li class="flex items-center gap-2">
+              <Share2Icon class="size-4 text-primary" />
+              Share room codes
+            </li>
+            <li class="flex items-center gap-2">
+              <UsersIcon class="size-4 text-primary" />
+              Play with friends
+            </li>
+          </ul>
+        </Card.Content>
+        <!-- Hover Overlay -->
+        <div class="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300">
+          <div class="flex items-center gap-2 text-lg font-semibold text-primary">
+            <PlayIcon class="size-5" />
+            Start Playing
+            <ArrowRightIcon class="size-5 transition-transform group-hover:translate-x-1" />
           </div>
         </div>
-      </Card.Content>
-    </Card.Root>
+      </Card.Root>
+    </a>
   </div>
 </section>
 
