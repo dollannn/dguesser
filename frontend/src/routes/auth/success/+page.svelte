@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { authStore } from '$lib/stores/auth';
+  import SEO from '$lib/components/SEO.svelte';
 
   onMount(() => {
     // Refresh user data after OAuth callback
@@ -13,6 +14,8 @@
     });
   });
 </script>
+
+<SEO title="Signing In" noindex />
 
 <div class="flex items-center justify-center min-h-[60vh]">
   <div class="text-center">

@@ -8,6 +8,7 @@
   import { Badge } from '$lib/components/ui/badge';
   import { Separator } from '$lib/components/ui/separator';
   import * as Alert from '$lib/components/ui/alert';
+  import SEO from '$lib/components/SEO.svelte';
   import PlayIcon from '@lucide/svelte/icons/play';
   import UsersIcon from '@lucide/svelte/icons/users';
   import TargetIcon from '@lucide/svelte/icons/target';
@@ -85,9 +86,10 @@
   }
 </script>
 
-<svelte:head>
-  <title>Play - DGuesser</title>
-</svelte:head>
+<SEO
+  title="Play"
+  description="Start a new geography guessing game. Choose your map, difficulty, and challenge yourself to identify locations from around the world."
+/>
 
 <div class="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
   <div class="w-full max-w-md space-y-6">

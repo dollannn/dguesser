@@ -4,7 +4,9 @@ declare global {
 	namespace App {
 		// interface Error {}
 		// interface Locals {}
-		// interface PageData {}
+		interface PageData {
+			// SSR data will be typed per-route
+		}
 		// interface PageState {}
 		// interface Platform {}
 	}

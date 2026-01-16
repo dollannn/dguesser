@@ -11,6 +11,7 @@
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
   import EyeIcon from '@lucide/svelte/icons/eye';
   import FlagIcon from '@lucide/svelte/icons/flag';
+  import SEO from '$lib/components/SEO.svelte';
 
   let data: ReportsListResponse | null = $state(null);
   let loading = $state(true);
@@ -69,9 +70,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>Reports - Admin - DGuesser</title>
-</svelte:head>
+<SEO title="Admin Reports" noindex />
 
 <div class="space-y-6">
   <!-- Header -->

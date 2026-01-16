@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { user as currentUser } from '$lib/stores/auth';
-  import { usersApi, type UserProfile } from '$lib/api';
+  import { type UserProfile } from '$lib/api';
   import { formatScore } from '$lib/utils';
   import { Button } from '$lib/components/ui/button';
   import { Badge } from '$lib/components/ui/badge';
@@ -12,47 +12,50 @@
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import GamepadIcon from '@lucide/svelte/icons/gamepad-2';
   import StarIcon from '@lucide/svelte/icons/star';
-  import CalendarIcon from '@lucide/svelte/icons/calendar';
   import SettingsIcon from '@lucide/svelte/icons/settings';
+  import SEO from '$lib/components/SEO.svelte';
+  import type { PageData } from './$types';
 
-  let profile = $state<UserProfile | null>(null);
-  let loading = $state(true);
+  let { data }: { data: PageData } = $props();
+
+  // Profile is now available immediately from SSR
+  let profile = $state<UserProfile | null>(data.profile as UserProfile);
+  let loading = $state(false);
   let error = $state('');
 
-  // Load profile when username changes
-  $effect(() => {
-    const username = $page.params.username;
-    if (username) {
-      loadProfile(username);
-    }
-  });
-
-  async function loadProfile(username: string) {
-    loading = true;
-    error = '';
-    try {
-      profile = await usersApi.getUserByUsername(username);
-    } catch (e: any) {
-      if (e.code === 'NOT_FOUND') {
-        error = 'User not found';
-      } else {
-        error = e.message || 'Failed to load profile';
-      }
-    } finally {
-      loading = false;
-    }
-  }
-
   let isOwnProfile = $derived(profile && $currentUser && profile.id === $currentUser.id);
+
+  let seoDescription = $derived(
+    profile
+      ? `${profile.display_name}'s DGuesser profile. ${profile.games_played} games played with a total score of ${profile.total_score.toLocaleString()}.`
+      : 'DGuesser player profile'
+  );
+
+  let jsonLd = $derived(
+    profile
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'ProfilePage',
+          mainEntity: {
+            '@type': 'Person',
+            name: profile.display_name,
+            identifier: profile.username,
+            ...(profile.avatar_url && { image: profile.avatar_url })
+          }
+        }
+      : undefined
+  );
 </script>
 
-<svelte:head>
-  {#if profile}
-    <title>{profile.display_name} (@{profile.username}) - DGuesser</title>
-  {:else}
-    <title>Profile - DGuesser</title>
-  {/if}
-</svelte:head>
+{#if profile}
+  <SEO
+    title="{profile.display_name} (@{profile.username})"
+    description={seoDescription}
+    canonical="/u/{profile.username}"
+    ogType="profile"
+    jsonLd={jsonLd}
+  />
+{/if}
 
 <div class="max-w-2xl mx-auto px-4 py-8">
   {#if loading}

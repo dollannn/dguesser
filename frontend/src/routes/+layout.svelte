@@ -17,6 +17,19 @@
 
     let { children } = $props();
 
+    // Organization schema for all pages
+    const organizationSchema = {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "DGuesser",
+        "url": "https://dguesser.lol",
+        "logo": "https://dguesser.lol/favicon.svg",
+        "sameAs": [
+            "https://github.com/dollannn/dguesser"
+        ],
+        "description": "A free geography guessing game where players identify locations from around the world."
+    };
+
     onMount(() => {
         authStore.initialize();
 
@@ -37,11 +50,7 @@
 </script>
 
 <svelte:head>
-    <title>DGuesser - Geography Guessing Game</title>
-    <meta
-        name="description"
-        content="Test your geography knowledge by guessing locations around the world. Play solo or compete with friends!"
-    />
+    {@html `<script type="application/ld+json">${JSON.stringify(organizationSchema)}</script>`}
 </svelte:head>
 
 <Tooltip.Provider>

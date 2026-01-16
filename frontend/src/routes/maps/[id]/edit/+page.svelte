@@ -27,6 +27,7 @@
   import SaveIcon from '@lucide/svelte/icons/save';
   import CheckIcon from '@lucide/svelte/icons/check';
   import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
+  import SEO from '$lib/components/SEO.svelte';
 
   const mapId = $derived($page.params.id ?? '');
 
@@ -263,9 +264,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>Edit {map?.name || 'Map'} - DGuesser</title>
-</svelte:head>
+<SEO title="Edit {map?.name || 'Map'}" noindex />
 
 <div class="max-w-5xl mx-auto px-4 py-8">
   <!-- Back link -->

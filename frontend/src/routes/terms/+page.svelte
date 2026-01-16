@@ -1,10 +1,13 @@
 <script lang="ts">
+  import SEO from '$lib/components/SEO.svelte';
+
   const lastUpdated = 'January 2026';
 </script>
 
-<svelte:head>
-  <title>Terms of Service - DGuesser</title>
-</svelte:head>
+<SEO
+  title="Terms of Service"
+  description="Read the terms and conditions for using DGuesser, including user responsibilities and service limitations."
+/>
 
 <div class="max-w-3xl mx-auto px-4 py-12">
   <h1 class="text-4xl font-bold text-gray-900 mb-2">Terms of Service</h1>

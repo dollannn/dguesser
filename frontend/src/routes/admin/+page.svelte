@@ -11,6 +11,7 @@
   import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
   import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
   import DatabaseIcon from '@lucide/svelte/icons/database';
+  import SEO from '$lib/components/SEO.svelte';
 
   let stats: AdminStats | null = $state(null);
   let loading = $state(true);
@@ -39,9 +40,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>Admin Dashboard - DGuesser</title>
-</svelte:head>
+<SEO title="Admin Dashboard" noindex />
 
 <div class="space-y-6">
   <!-- Header -->

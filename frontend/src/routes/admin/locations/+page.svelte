@@ -13,6 +13,7 @@
   import XIcon from '@lucide/svelte/icons/x';
   import EyeIcon from '@lucide/svelte/icons/eye';
   import MapPinIcon from '@lucide/svelte/icons/map-pin';
+  import SEO from '$lib/components/SEO.svelte';
 
   let data: ReviewQueueResponse | null = $state(null);
   let loading = $state(true);
@@ -71,9 +72,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>Review Queue - Admin - DGuesser</title>
-</svelte:head>
+<SEO title="Admin Review Queue" noindex />
 
 <div class="space-y-6">
   <!-- Header -->

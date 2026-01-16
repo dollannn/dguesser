@@ -11,6 +11,7 @@
   import GamePlay from '$lib/components/game/GamePlay.svelte';
   import GameRoundEnd from '$lib/components/game/GameRoundEnd.svelte';
   import GameFinished from '$lib/components/game/GameFinished.svelte';
+  import SEO from '$lib/components/SEO.svelte';
 
   let game: GameDetails | null = $state(null);
   let loading = $state(true);
@@ -165,9 +166,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Game - dguesser</title>
-</svelte:head>
+<SEO title="Game" noindex />
 
 {#if loading}
   <GameLoading />

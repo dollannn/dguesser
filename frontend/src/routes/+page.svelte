@@ -4,6 +4,7 @@
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import { Badge } from '$lib/components/ui/badge';
+  import SEO from '$lib/components/SEO.svelte';
   import UsersIcon from '@lucide/svelte/icons/users';
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import PlayIcon from '@lucide/svelte/icons/play';
@@ -14,6 +15,21 @@
   import ZapIcon from '@lucide/svelte/icons/zap';
   import Share2Icon from '@lucide/svelte/icons/share-2';
 </script>
+
+<SEO
+  description="Test your geography knowledge by guessing locations around the world. Play solo or compete with friends in this free geography guessing game."
+  jsonLd={{
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "DGuesser",
+    "url": "https://dguesser.lol",
+    "description": "A free geography guessing game",
+    "potentialAction": {
+      "@type": "PlayAction",
+      "target": "https://dguesser.lol/play"
+    }
+  }}
+/>
 
 <!-- Hero Section -->
 <section class="relative overflow-hidden bg-gradient-to-b from-background to-muted/30 py-20 md:py-32">

@@ -1,6 +1,9 @@
 <script lang="ts">
   import { authApi } from '$lib/api/auth';
+  import SEO from '$lib/components/SEO.svelte';
 </script>
+
+<SEO title="Sign In" noindex />
 
 <main class="min-h-[60vh] flex flex-col items-center justify-center">
   <div class="card max-w-sm w-full mx-4">

@@ -25,6 +25,7 @@
   import XIcon from '@lucide/svelte/icons/x';
   import LoaderIcon from '@lucide/svelte/icons/loader';
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+  import SEO from '$lib/components/SEO.svelte';
 
   // Profile editing state
   let username = $state($user?.username ?? '');
@@ -193,9 +194,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Account Settings - DGuesser</title>
-</svelte:head>
+<SEO title="Account Settings" noindex />
 
 {#if !$user}
   <div class="max-w-2xl mx-auto px-4 py-16 text-center">

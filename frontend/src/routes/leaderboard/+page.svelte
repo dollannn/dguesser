@@ -12,16 +12,21 @@
     getRankRowClass,
     formatScore,
   } from '$lib/utils.js';
+  import SEO from '$lib/components/SEO.svelte';
+  import type { PageData } from './$types';
 
-  let entries = $state<LeaderboardEntry[]>([]);
-  let loading = $state(true);
+  let { data }: { data: PageData } = $props();
+
+  // Initialize from server data
+  let entries = $state<LeaderboardEntry[]>(data.initialEntries as LeaderboardEntry[]);
+  let loading = $state(false);
   let loadingMore = $state(false);
   let error = $state('');
-  let totalPlayers = $state(0);
-  let currentUserRank = $state<number | null>(null);
-  let currentUserScore = $state<number | null>(null);
+  let totalPlayers = $state(data.totalPlayers);
+  let currentUserRank = $state<number | null>(data.currentUserRank);
+  let currentUserScore = $state<number | null>(data.currentUserScore);
   let offset = $state(0);
-  let hasMore = $state(false);
+  let hasMore = $state((data.initialEntries?.length ?? 0) < data.totalPlayers);
 
   let selectedType = $state<LeaderboardType>('total_score');
   let selectedPeriod = $state<TimePeriod>('all_time');
@@ -103,31 +108,32 @@
   }
 
   // Show skeleton only on initial load, not on filter changes
-  let hasLoadedOnce = $state(false);
+  let hasLoadedOnce = $state(true); // Already loaded via SSR
   let showSkeleton = $derived(loading && !hasLoadedOnce);
 
-  // Load on filter change
-  let isInitialMount = true;
+  // Track previous filter values to detect changes
+  let prevType = selectedType;
+  let prevPeriod = selectedPeriod;
+
+  // Load on filter change (skip initial since we have SSR data)
   $effect(() => {
     // Track dependencies
-    const _ = [selectedType, selectedPeriod];
-    
-    // Skip the initial mount since we'll load there
-    if (isInitialMount) {
-      isInitialMount = false;
-      loadLeaderboard().then(() => {
-        hasLoadedOnce = true;
-      });
-      return;
+    const currentType = selectedType;
+    const currentPeriod = selectedPeriod;
+
+    // Only reload if filters changed
+    if (currentType !== prevType || currentPeriod !== prevPeriod) {
+      prevType = currentType;
+      prevPeriod = currentPeriod;
+      loadLeaderboard();
     }
-    
-    loadLeaderboard();
   });
 </script>
 
-<svelte:head>
-  <title>Leaderboard - DGuesser</title>
-</svelte:head>
+<SEO
+  title="Leaderboard"
+  description="See how you rank against other DGuesser players. View top scores by total points, best game, games played, and average score."
+/>
 
 <div class="max-w-4xl mx-auto px-4 py-8">
   <!-- Header -->

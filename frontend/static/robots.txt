@@ -1,3 +1,28 @@
-# allow crawling everything by default
+# DGuesser robots.txt
+# https://dguesser.lol
+
 User-agent: *
-Disallow:
+
+# Block authentication flows
+Disallow: /auth/
+Disallow: /auth
+
+# Block active games (dynamic, no SEO value)
+Disallow: /game/
+
+# Block admin section
+Disallow: /admin/
+Disallow: /admin
+
+# Block user-specific pages
+Disallow: /account
+Disallow: /history
+
+# Block map editing (authenticated)
+Disallow: /maps/*/edit
+
+# Block map creation (authenticated)
+Disallow: /maps/new
+
+# Sitemap location
+Sitemap: https://dguesser.lol/sitemap.xml

@@ -3,7 +3,6 @@
   import { goto } from '$app/navigation';
   import { user } from '$lib/stores/auth';
   import { mapsApi, type MapDetails, type MapLocationItem } from '$lib/api/maps';
-  import { ApiClientError } from '$lib/api/client';
   import GlobeIcon from '@lucide/svelte/icons/globe';
   import LockIcon from '@lucide/svelte/icons/lock';
   import LinkIcon from '@lucide/svelte/icons/link';
@@ -15,40 +14,51 @@
   import PlayIcon from '@lucide/svelte/icons/play';
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import { Button } from '$lib/components/ui/button';
+  import SEO from '$lib/components/SEO.svelte';
+  import type { PageData } from './$types';
 
-  let map = $state<MapDetails | null>(null);
+  let { data }: { data: PageData } = $props();
+
+  // Initialize from server data
+  let map = $state<MapDetails | null>(data.map as MapDetails);
   let locations = $state<MapLocationItem[]>([]);
-  let loading = $state(true);
+  let loading = $state(false);
   let loadingLocations = $state(false);
   let error = $state('');
   let deleting = $state(false);
   let showDeleteDialog = $state(false);
   let currentPage = $state(1);
-  let totalLocations = $state(0);
+  let totalLocations = $state(data.map?.location_count ?? 0);
   const perPage = 50;
 
   const mapId = $derived($page.params.id ?? '');
   const totalPages = $derived(Math.ceil(totalLocations / perPage));
 
-  async function loadMap() {
-    if (!mapId) return;
-    loading = true;
-    error = '';
+  // SEO description from map data
+  let seoDescription = $derived(
+    map?.description || `Play ${map?.name || 'this map'} on DGuesser. ${map?.location_count || 0} locations to explore.`
+  );
 
-    try {
-      map = await mapsApi.get(mapId);
-      totalLocations = map.location_count;
-      await loadLocations();
-    } catch (e) {
-      if (e instanceof ApiClientError && e.status === 404) {
-        error = 'Map not found';
-      } else {
-        error = e instanceof Error ? e.message : 'Failed to load map';
-      }
-    } finally {
-      loading = false;
-    }
-  }
+  // VideoGame schema for rich results
+  let gameSchema = $derived(
+    map
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'VideoGame',
+          name: map.name,
+          description: map.description || `A geography guessing game map with ${map.location_count} locations.`,
+          url: `https://dguesser.lol/maps/${map.id}`,
+          genre: 'Geography',
+          numberOfPlayers: {
+            '@type': 'QuantitativeValue',
+            minValue: 1,
+            maxValue: 8
+          },
+          gamePlatform: 'Web Browser',
+          applicationCategory: 'Game'
+        }
+      : undefined
+  );
 
   async function loadLocations() {
     loadingLocations = true;
@@ -118,24 +128,31 @@
     }
   }
 
-  // Load map when component mounts or mapId changes
+  // Load locations on mount (map is already loaded via SSR)
   $effect(() => {
-    if (mapId) {
-      loadMap();
+    if (map && map.location_count > 0) {
+      loadLocations();
     }
   });
 
   // Reload locations when page changes
+  let prevPage = currentPage;
   $effect(() => {
-    if (map && currentPage > 0) {
+    if (map && currentPage !== prevPage) {
+      prevPage = currentPage;
       loadLocations();
     }
   });
 </script>
 
-<svelte:head>
-  <title>{map?.name || 'Map'} - DGuesser</title>
-</svelte:head>
+{#if map}
+  <SEO
+    title={map.name}
+    description={seoDescription}
+    canonical="/maps/{map.id}"
+    jsonLd={gameSchema}
+  />
+{/if}
 
 <div class="max-w-4xl mx-auto px-4 py-8">
   <!-- Back link -->

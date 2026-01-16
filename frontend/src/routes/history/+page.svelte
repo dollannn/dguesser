@@ -3,6 +3,7 @@
   import { user } from '$lib/stores/auth';
   import { gamesApi, type GameSummary } from '$lib/api/games';
   import { formatScore } from '$lib/utils.js';
+  import SEO from '$lib/components/SEO.svelte';
 
   type ModeFilter = 'all' | 'solo' | 'multiplayer';
 
@@ -118,9 +119,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>Game History - DGuesser</title>
-</svelte:head>
+<SEO title="Game History" noindex />
 
 <div class="max-w-4xl mx-auto px-4 py-8">
   <!-- Header -->

@@ -18,6 +18,7 @@
   import MapIcon from '@lucide/svelte/icons/map';
   import CalendarIcon from '@lucide/svelte/icons/calendar';
   import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
+  import SEO from '$lib/components/SEO.svelte';
 
   let location: LocationDetail | null = $state(null);
   let loading = $state(true);
@@ -104,9 +105,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>Location {locationId} - Admin - DGuesser</title>
-</svelte:head>
+<SEO title="Admin Location" noindex />
 
 <div class="space-y-6">
   <!-- Header -->

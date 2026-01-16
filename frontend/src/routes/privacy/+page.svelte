@@ -1,10 +1,13 @@
 <script lang="ts">
+  import SEO from '$lib/components/SEO.svelte';
+
   const lastUpdated = 'January 2026';
 </script>
 
-<svelte:head>
-  <title>Privacy Policy - DGuesser</title>
-</svelte:head>
+<SEO
+  title="Privacy Policy"
+  description="Learn how DGuesser collects, uses, and protects your personal information."
+/>
 
 <div class="max-w-3xl mx-auto px-4 py-12">
   <h1 class="text-4xl font-bold text-gray-900 mb-2">Privacy Policy</h1>

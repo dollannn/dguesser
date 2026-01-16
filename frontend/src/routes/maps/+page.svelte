@@ -9,12 +9,17 @@
   import LinkIcon from '@lucide/svelte/icons/link';
   import UsersIcon from '@lucide/svelte/icons/users';
   import EditIcon from '@lucide/svelte/icons/pencil';
+  import SEO from '$lib/components/SEO.svelte';
+  import type { PageData } from './$types';
+
+  let { data }: { data: PageData } = $props();
 
   type FilterType = 'all' | 'mine' | 'public';
 
-  let maps = $state<MapSummary[]>([]);
-  let loading = $state(true);
-  let error = $state('');
+  // Initialize from server data
+  let maps = $state<MapSummary[]>(data.maps as MapSummary[]);
+  let loading = $state(false);
+  let error = $state(data.error || '');
   let filter = $state<FilterType>('all');
 
   const filterOptions: { value: FilterType; label: string }[] = [
@@ -91,15 +96,12 @@
     }
   }
 
-  // Load maps on mount
-  $effect(() => {
-    loadMaps();
-  });
 </script>
 
-<svelte:head>
-  <title>Maps - DGuesser</title>
-</svelte:head>
+<SEO
+  title="Maps"
+  description="Browse custom geography maps created by the community. Play maps focused on specific countries, cities, landmarks, or themes."
+/>
 
 <div class="max-w-6xl mx-auto px-4 py-8">
   <!-- Header -->

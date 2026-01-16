@@ -28,6 +28,7 @@
   import XIcon from '@lucide/svelte/icons/x';
   import CheckIcon from '@lucide/svelte/icons/check';
   import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
+  import SEO from '$lib/components/SEO.svelte';
 
   // State
   let name = $state('');
@@ -226,9 +227,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>Create Map - DGuesser</title>
-</svelte:head>
+<SEO title="Create Map" noindex />
 
 <div class="max-w-4xl mx-auto px-4 py-8">
   <!-- Back link -->
