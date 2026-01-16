@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rounds SET ended_at = NOW() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48a2f5d70f2d0b4ca86bd7cf21774d350d8066a09c2beafa9e1c3293a6b4c3df"
+}

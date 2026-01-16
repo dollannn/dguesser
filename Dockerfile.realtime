@@ -44,6 +44,10 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
+# Copy sqlx offline cache for compile-time query verification
+COPY .sqlx .sqlx
+ENV SQLX_OFFLINE=true
+
 RUN cargo build --release -p dguesser-realtime \
     && strip /app/target/release/realtime
 

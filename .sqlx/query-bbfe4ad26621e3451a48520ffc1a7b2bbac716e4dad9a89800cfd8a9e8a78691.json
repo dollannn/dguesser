@@ -1,0 +1,99 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, mode as \"mode: GameMode\", status as \"status: GameStatus\",\n               join_code, created_by, created_at, started_at, ended_at, settings, total_score\n        FROM games\n        WHERE status = 'lobby' AND join_code IS NOT NULL\n        ORDER BY created_at DESC\n        LIMIT $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "mode: GameMode",
+        "type_info": {
+          "Custom": {
+            "name": "game_mode",
+            "kind": {
+              "Enum": [
+                "solo",
+                "multiplayer",
+                "challenge"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "status: GameStatus",
+        "type_info": {
+          "Custom": {
+            "name": "game_status",
+            "kind": {
+              "Enum": [
+                "lobby",
+                "active",
+                "finished",
+                "abandoned"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "join_code",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_by",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "settings",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "total_score",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "bbfe4ad26621e3451a48520ffc1a7b2bbac716e4dad9a89800cfd8a9e8a78691"
+}

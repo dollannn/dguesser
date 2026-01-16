@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE users\n        SET kind = 'authenticated',\n            email = $2,\n            email_verified = TRUE,\n            display_name = COALESCE($3, display_name),\n            avatar_url = COALESCE($4, avatar_url)\n        WHERE id = $1\n        RETURNING id, kind as \"kind: UserKind\", email, email_verified, display_name, avatar_url,\n                  created_at, updated_at, last_seen_at, games_played, total_score, best_score\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind: UserKind",
+        "type_info": {
+          "Custom": {
+            "name": "user_kind",
+            "kind": {
+              "Enum": [
+                "guest",
+                "authenticated"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "display_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "avatar_url",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "games_played",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "total_score",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "best_score",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5ac9ac5e5a4b3c20bcb86a43c4aa4c50300fec11c83256176695f43ed2d15f7e"
+}

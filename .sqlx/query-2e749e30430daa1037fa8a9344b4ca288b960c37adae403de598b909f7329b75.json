@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO game_players (game_id, user_id, is_host)\n        VALUES ($1, $2, $3)\n        RETURNING game_id, user_id, joined_at, left_at, is_host, score_total, final_rank\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "game_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "left_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_host",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "score_total",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "final_rank",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "2e749e30430daa1037fa8a9344b4ca288b960c37adae403de598b909f7329b75"
+}

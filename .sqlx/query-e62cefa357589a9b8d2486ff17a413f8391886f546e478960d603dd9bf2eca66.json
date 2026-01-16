@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT game_id, user_id, joined_at, left_at, is_host, score_total, final_rank\n        FROM game_players\n        WHERE game_id = $1 AND left_at IS NULL\n        ORDER BY joined_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "game_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "left_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_host",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "score_total",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "final_rank",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "e62cefa357589a9b8d2486ff17a413f8391886f546e478960d603dd9bf2eca66"
+}

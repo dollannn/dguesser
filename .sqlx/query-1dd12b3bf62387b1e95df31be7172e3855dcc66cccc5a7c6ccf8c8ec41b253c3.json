@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE game_players gp\n        SET final_rank = ranked.rank\n        FROM (\n            SELECT user_id, RANK() OVER (ORDER BY score_total DESC)::int as rank\n            FROM game_players\n            WHERE game_id = $1 AND left_at IS NULL\n        ) ranked\n        WHERE gp.game_id = $1 AND gp.user_id = ranked.user_id\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1dd12b3bf62387b1e95df31be7172e3855dcc66cccc5a7c6ccf8c8ec41b253c3"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE game_players SET left_at = NOW() WHERE game_id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "052184250467d2b4189876cce574e1bd769f5700b214f20d1e8cab1edbfb9495"
+}

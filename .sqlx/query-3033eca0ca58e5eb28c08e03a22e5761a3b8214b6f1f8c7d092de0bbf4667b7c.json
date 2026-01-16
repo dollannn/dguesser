@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE games SET status = $2 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        {
+          "Custom": {
+            "name": "game_status",
+            "kind": {
+              "Enum": [
+                "lobby",
+                "active",
+                "finished",
+                "abandoned"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3033eca0ca58e5eb28c08e03a22e5761a3b8214b6f1f8c7d092de0bbf4667b7c"
+}

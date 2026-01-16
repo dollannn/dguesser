@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, round_id, user_id, guess_lat, guess_lng, distance_meters, score, submitted_at, time_taken_ms\n        FROM guesses WHERE user_id = $1\n        ORDER BY submitted_at DESC\n        LIMIT $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "round_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "guess_lat",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 4,
+        "name": "guess_lng",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "distance_meters",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "score",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "submitted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "time_taken_ms",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "b595a851ca577ab6023200049cbf63e7149cdcd0572ef90ad2dd060ae8f56341"
+}

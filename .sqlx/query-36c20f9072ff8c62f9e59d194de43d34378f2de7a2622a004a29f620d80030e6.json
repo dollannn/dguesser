@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT g.id, g.mode as \"mode: GameMode\", g.status as \"status: GameStatus\",\n               g.join_code, g.created_by, g.created_at, g.started_at, g.ended_at, g.settings, g.total_score\n        FROM games g\n        JOIN game_players gp ON g.id = gp.game_id\n        WHERE gp.user_id = $1\n        ORDER BY g.created_at DESC\n        LIMIT $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "mode: GameMode",
+        "type_info": {
+          "Custom": {
+            "name": "game_mode",
+            "kind": {
+              "Enum": [
+                "solo",
+                "multiplayer",
+                "challenge"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "status: GameStatus",
+        "type_info": {
+          "Custom": {
+            "name": "game_status",
+            "kind": {
+              "Enum": [
+                "lobby",
+                "active",
+                "finished",
+                "abandoned"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "join_code",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_by",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "settings",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "total_score",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "36c20f9072ff8c62f9e59d194de43d34378f2de7a2622a004a29f620d80030e6"
+}

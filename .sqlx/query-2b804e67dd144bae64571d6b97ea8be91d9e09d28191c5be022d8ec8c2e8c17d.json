@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oauth_accounts SET provider_email = $3 WHERE provider = $1 AND provider_subject = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2b804e67dd144bae64571d6b97ea8be91d9e09d28191c5be022d8ec8c2e8c17d"
+}
