@@ -230,6 +230,11 @@ impl AppState {
         self.inner.socket_users.read().await.get(socket_id).cloned()
     }
 
+    /// Check if a socket is authenticated
+    pub async fn is_socket_authenticated(&self, socket_id: &str) -> bool {
+        self.inner.socket_users.read().await.contains_key(socket_id)
+    }
+
     /// Get socket ID for a user
     #[allow(dead_code)]
     pub async fn get_socket_for_user(&self, user_id: &str) -> Option<String> {

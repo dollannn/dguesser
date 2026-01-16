@@ -38,7 +38,6 @@ impl Default for RateLimitConfig {
     }
 }
 
-#[allow(dead_code)]
 impl RateLimitConfig {
     /// Rate limit for authentication endpoints (stricter)
     pub fn auth() -> Self {
@@ -79,7 +78,6 @@ pub async fn rate_limit(
 }
 
 /// Rate limiting middleware with custom config
-#[allow(dead_code)]
 pub async fn rate_limit_with_config(
     State(state): State<AppState>,
     config: RateLimitConfig,
@@ -89,8 +87,14 @@ pub async fn rate_limit_with_config(
     // Extract client IP using secure method
     let ip_config = state.client_ip_config();
     let ip = extract_client_ip(&request, ip_config);
-    let path = request.uri().path().to_string();
-    let key = format!("{}:{}:{}", config.prefix, path, ip);
+
+    // Use route-group key (prefix:ip) instead of per-path key
+    // This prevents attackers from bypassing rate limits by hitting different paths
+    // within the same route group (e.g., /auth/google vs /auth/microsoft)
+    let key = format!("{}:{}", config.prefix, ip);
+
+    // Keep path for logging only
+    let path = request.uri().path();
 
     // Try Redis-based rate limiting first
     match check_redis_rate_limit(&state, &key, &config).await {
@@ -104,6 +108,7 @@ pub async fn rate_limit_with_config(
             tracing::warn!(
                 ip = %ip,
                 path = %path,
+                route_group = %config.prefix,
                 limit = config.max_requests,
                 "Rate limit exceeded"
             );
@@ -114,6 +119,7 @@ pub async fn rate_limit_with_config(
             tracing::warn!(
                 ip = %ip,
                 path = %path,
+                route_group = %config.prefix,
                 "Redis unavailable, using fallback rate limiter"
             );
 
@@ -128,6 +134,7 @@ pub async fn rate_limit_with_config(
                     tracing::warn!(
                         ip = %ip,
                         path = %path,
+                        route_group = %config.prefix,
                         "Fallback rate limit exceeded"
                     );
                     rate_limit_response(config.window_secs)
@@ -227,6 +234,24 @@ fn rate_limit_response(retry_after: u64) -> Response {
     response.headers_mut().insert("retry-after", retry_after.to_string().parse().unwrap());
 
     response
+}
+
+/// Rate limiting middleware for authentication endpoints (10/min)
+pub async fn rate_limit_auth(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    rate_limit_with_config(State(state), RateLimitConfig::auth(), request, next).await
+}
+
+/// Rate limiting middleware for game endpoints (30/min)
+pub async fn rate_limit_game(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    rate_limit_with_config(State(state), RateLimitConfig::game(), request, next).await
 }
 
 /// Create a rate limiting layer for specific routes

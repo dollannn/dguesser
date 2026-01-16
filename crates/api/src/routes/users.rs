@@ -54,6 +54,17 @@ const RESERVED_USERNAMES: &[&str] = &[
 static USERNAME_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-z0-9][a-z0-9_]*[a-z0-9]$|^[a-z0-9]{1,2}$").unwrap());
 
+/// Allowed avatar URL domains (OAuth providers and common avatar services)
+const ALLOWED_AVATAR_DOMAINS: &[&str] = &[
+    "lh3.googleusercontent.com",     // Google
+    "graph.microsoft.com",           // Microsoft
+    "avatars.githubusercontent.com", // GitHub
+    "gravatar.com",                  // Gravatar
+    "www.gravatar.com",              // Gravatar (www)
+    "cdn.discordapp.com",            // Discord
+    "i.imgur.com",                   // Imgur
+];
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/me", get(get_profile))
@@ -181,6 +192,50 @@ fn validate_username(username: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Validate an avatar URL for security
+///
+/// Only allows HTTPS URLs from trusted domains to prevent:
+/// - SSRF attacks (arbitrary internal URLs)
+/// - Stored XSS (javascript: URLs)
+/// - Privacy leaks (tracking pixels from untrusted domains)
+fn validate_avatar_url(url: &str) -> Result<(), ApiError> {
+    // Empty string is allowed (clears avatar)
+    if url.is_empty() {
+        return Ok(());
+    }
+
+    // Must be HTTPS
+    if !url.starts_with("https://") {
+        return Err(ApiError::bad_request("INVALID_AVATAR_URL", "Avatar URL must use HTTPS"));
+    }
+
+    // Reasonable length limit
+    if url.len() > 2048 {
+        return Err(ApiError::bad_request(
+            "INVALID_AVATAR_URL",
+            "Avatar URL is too long (max 2048 characters)",
+        ));
+    }
+
+    // Extract domain from URL
+    let domain = url
+        .strip_prefix("https://")
+        .and_then(|s| s.split('/').next())
+        .and_then(|s| s.split('?').next())
+        .and_then(|s| s.split('#').next())
+        .unwrap_or("");
+
+    // Check against allowlist
+    if !ALLOWED_AVATAR_DOMAINS.contains(&domain) {
+        return Err(ApiError::bad_request(
+            "INVALID_AVATAR_URL",
+            "Avatar URL must be from a trusted provider (Google, Microsoft, GitHub, Gravatar, Discord, or Imgur)",
+        ));
+    }
+
+    Ok(())
+}
+
 /// Update current user's profile
 #[utoipa::path(
     put,
@@ -230,8 +285,9 @@ pub async fn update_profile(
         dguesser_db::users::update_display_name(state.db(), &auth.user_id, name).await?;
     }
 
-    // Update avatar if provided
+    // Validate and update avatar if provided
     if let Some(ref avatar) = req.avatar_url {
+        validate_avatar_url(avatar)?;
         let avatar_option = if avatar.is_empty() { None } else { Some(avatar.as_str()) };
         dguesser_db::users::update_avatar(state.db(), &auth.user_id, avatar_option).await?;
     }

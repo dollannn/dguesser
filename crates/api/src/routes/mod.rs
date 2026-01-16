@@ -5,7 +5,7 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::middleware::rate_limit;
+use crate::middleware::{rate_limit, rate_limit_auth, rate_limit_game, security_headers};
 use crate::state::AppState;
 
 pub mod admin;
@@ -153,18 +153,33 @@ pub mod users;
 pub struct ApiDoc;
 
 /// Create the main router with all API routes
-pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
-    let api_routes = Router::new()
-        .nest("/auth", auth::router())
+///
+/// # Arguments
+/// * `state` - Application state
+/// * `cors` - CORS layer configuration
+/// * `is_production` - If true, Swagger UI is disabled for security
+pub fn create_router(state: AppState, cors: CorsLayer, is_production: bool) -> Router {
+    // Auth routes with stricter rate limiting (10/min)
+    let auth_routes =
+        auth::router().layer(middleware::from_fn_with_state(state.clone(), rate_limit_auth));
+
+    // Game routes with game-specific rate limiting (30/min)
+    let game_routes =
+        games::router().layer(middleware::from_fn_with_state(state.clone(), rate_limit_game));
+
+    // Other API routes with default rate limiting (100/min)
+    let other_routes = Router::new()
         .nest("/users", users::router())
         .nest("/sessions", sessions::router())
-        .nest("/games", games::router())
         .nest("/leaderboard", leaderboard::router())
         .nest("/locations", locations::router())
         .nest("/maps", maps::router())
         .nest("/admin", admin::router())
-        // Apply rate limiting to API routes
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit));
+
+    // Combine all API routes
+    let api_routes =
+        Router::new().nest("/auth", auth_routes).nest("/games", game_routes).merge(other_routes);
 
     // Create the main application router with state
     let app = Router::new()
@@ -178,9 +193,17 @@ pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
         .nest("/api/v1", api_routes)
         .with_state(state);
 
-    // Create Swagger UI router (stateless)
-    let swagger_ui = SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi());
+    // Conditionally add Swagger UI (disabled in production for security)
+    let app = if is_production {
+        tracing::info!("Swagger UI disabled in production");
+        app
+    } else {
+        let swagger_ui = SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi());
+        tracing::info!("Swagger UI enabled at /docs");
+        app.merge(swagger_ui)
+    };
 
-    // Merge stateless routers and add layers
-    app.merge(swagger_ui).layer(TraceLayer::new_for_http()).layer(cors)
+    // Add global layers
+    // Note: Layers are applied in reverse order - first listed is outermost
+    app.layer(middleware::from_fn(security_headers)).layer(TraceLayer::new_for_http()).layer(cors)
 }

@@ -67,6 +67,8 @@ pub struct Config {
     pub port: u16,
     pub database_url: String,
     pub redis_url: String,
+    /// Frontend URL for CORS
+    pub frontend_url: String,
     /// Location provider type
     pub location_provider_type: LocationProviderType,
     /// R2 location config (if using R2 provider)
@@ -96,6 +98,8 @@ impl Config {
             database_url: env::var("DATABASE_URL").context("DATABASE_URL not set")?,
             redis_url: env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+            frontend_url: env::var("FRONTEND_URL")
+                .unwrap_or_else(|_| "http://localhost:5173".to_string()),
             location_provider_type,
             r2_location_config,
         })

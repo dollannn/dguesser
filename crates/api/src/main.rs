@@ -1,6 +1,7 @@
 //! DGuesser REST API server
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use tokio::signal;
 use tower_http::cors::CorsLayer;
@@ -38,11 +39,14 @@ async fn main() -> anyhow::Result<()> {
     // Create application state
     let state = AppState::new(&config).await?;
 
+    // Spawn background task for session cleanup (runs every hour)
+    spawn_session_cleanup_task(state.db().clone());
+
     // Build CORS layer
     let cors = build_cors_layer(&config);
 
-    // Build router
-    let app = routes::create_router(state, cors);
+    // Build router (disable Swagger UI in production)
+    let app = routes::create_router(state, cors, is_production);
 
     // Start server with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
@@ -81,6 +85,40 @@ fn build_cors_layer(config: &Config) -> CorsLayer {
         ])
         .allow_credentials(true)
         .max_age(Duration::from_secs(3600))
+}
+
+/// Spawn a background task that periodically cleans up expired sessions
+///
+/// This prevents database bloat from accumulated expired sessions.
+/// Runs every hour and deletes sessions where expires_at < NOW().
+fn spawn_session_cleanup_task(db: sqlx::PgPool) {
+    const CLEANUP_INTERVAL: Duration = Duration::from_secs(60 * 60); // 1 hour
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
+
+        // Skip the first immediate tick
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+
+            match dguesser_db::sessions::cleanup_expired(&db).await {
+                Ok(deleted) => {
+                    if deleted > 0 {
+                        tracing::info!(deleted_count = deleted, "Cleaned up expired sessions");
+                    } else {
+                        tracing::debug!("Session cleanup: no expired sessions to delete");
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to cleanup expired sessions");
+                }
+            }
+        }
+    });
+
+    tracing::info!("Session cleanup task started (runs hourly)");
 }
 
 /// Wait for shutdown signal (SIGTERM or SIGINT)

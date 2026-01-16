@@ -10,7 +10,7 @@ use serde::Serialize;
 use socketioxide::SocketIo;
 use tokio::signal;
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{
     EnvFilter,
@@ -72,6 +72,15 @@ async fn main() -> anyhow::Result<()> {
     let http_state =
         HttpState { db: state.db().clone(), redis, started_at: Instant::now(), is_production };
 
+    // Configure CORS - restrict to frontend origin only
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::exact(
+            config.frontend_url.parse().expect("Invalid FRONTEND_URL for CORS"),
+        ))
+        .allow_methods(Any)
+        .allow_headers(Any)
+        .allow_credentials(true);
+
     let app = Router::new()
         .route("/", get(service_info))
         .route("/health", get(health_check))
@@ -79,10 +88,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/readyz", get(readiness))
         .with_state(http_state)
         .layer(
-            ServiceBuilder::new()
-                .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
-                .layer(socket_layer)
-                .layer(TraceLayer::new_for_http()),
+            ServiceBuilder::new().layer(cors).layer(socket_layer).layer(TraceLayer::new_for_http()),
         );
 
     // Start server with graceful shutdown

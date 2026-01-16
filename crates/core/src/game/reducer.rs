@@ -18,6 +18,9 @@ use crate::geo::distance::haversine_distance;
 /// Grace period for reconnection in milliseconds (30 seconds).
 pub const RECONNECTION_GRACE_PERIOD_MS: u32 = 30_000;
 
+/// Maximum players allowed per game (prevents resource exhaustion).
+pub const MAX_PLAYERS_PER_GAME: usize = 50;
+
 /// Result of applying a command to the game state.
 #[derive(Debug)]
 pub struct ReducerResult {
@@ -129,6 +132,15 @@ fn handle_join(
     // Check if already in game
     if state.players.contains_key(&user_id) {
         return ReducerResult::error(state, "ALREADY_JOINED", "Already in this game");
+    }
+
+    // Check player limit
+    if state.players.len() >= MAX_PLAYERS_PER_GAME {
+        return ReducerResult::error(
+            state,
+            "GAME_FULL",
+            &format!("Game is full (max {} players)", MAX_PLAYERS_PER_GAME),
+        );
     }
 
     // Add player
@@ -676,6 +688,36 @@ mod tests {
         assert!(!result.changed);
         assert!(result.has_error());
         assert_eq!(result.get_error().unwrap().error_code(), Some("GAME_STARTED"));
+    }
+
+    #[test]
+    fn test_join_game_full() {
+        let mut state = test_state();
+        let now = Utc::now();
+
+        // Fill the game to max capacity
+        for i in 0..MAX_PLAYERS_PER_GAME {
+            state.players.insert(
+                format!("usr_{}", i),
+                PlayerState::new(format!("usr_{}", i), format!("Player {}", i), None, i == 0),
+            );
+        }
+
+        // Try to add one more player
+        let result = reduce(
+            &state,
+            GameCommand::Join {
+                user_id: "usr_overflow".to_string(),
+                display_name: "Overflow".to_string(),
+                avatar_url: None,
+                is_host: false,
+            },
+            now,
+        );
+
+        assert!(!result.changed);
+        assert!(result.has_error());
+        assert_eq!(result.get_error().unwrap().error_code(), Some("GAME_FULL"));
     }
 
     // -------------------------------------------------------------------------

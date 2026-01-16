@@ -175,7 +175,11 @@ impl From<dguesser_auth::AuthError> for ApiError {
             dguesser_auth::AuthError::SessionNotFound => {
                 Self::unauthorized_with_message("Session not found or expired")
             }
-            dguesser_auth::AuthError::OAuth(e) => Self::bad_request("OAUTH_ERROR", e.to_string()),
+            dguesser_auth::AuthError::OAuth(e) => {
+                // Log the actual error for debugging, but don't expose details to client
+                tracing::warn!(error = %e, "OAuth error");
+                Self::bad_request("OAUTH_ERROR", "Authentication failed")
+            }
             dguesser_auth::AuthError::Database(e) => Self::from(e),
         }
     }
@@ -183,7 +187,9 @@ impl From<dguesser_auth::AuthError> for ApiError {
 
 impl From<dguesser_auth::OAuthError> for ApiError {
     fn from(err: dguesser_auth::OAuthError) -> Self {
-        Self::bad_request("OAUTH_ERROR", err.to_string())
+        // Log the actual error for debugging, but don't expose provider details to client
+        tracing::warn!(error = %err, "OAuth error");
+        Self::bad_request("OAUTH_ERROR", "Authentication failed")
     }
 }
 

@@ -16,6 +16,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use validator::Validate;
 
 use axum::http::{HeaderMap, header::SET_COOKIE};
 
@@ -46,18 +47,21 @@ pub fn router() -> Router<AppState> {
 // =============================================================================
 
 /// Create game request
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct CreateGameRequest {
     /// Game mode: "solo" or "multiplayer"
     #[schema(example = "solo")]
     pub mode: String,
     /// Number of rounds (1-20)
+    #[validate(range(min = 1, max = 20))]
     #[schema(example = 5)]
     pub rounds: Option<u8>,
-    /// Time limit per round in seconds (0 = unlimited)
+    /// Time limit per round in seconds (0 = unlimited, max 600)
+    #[validate(range(max = 600))]
     #[schema(example = 120)]
     pub time_limit_seconds: Option<u32>,
     /// Map/region identifier
+    #[validate(length(max = 100))]
     #[schema(example = "world")]
     pub map_id: Option<String>,
     /// Allow movement in Street View
@@ -111,9 +115,10 @@ pub struct GameDetails {
 }
 
 /// Join game by code request
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct JoinGameRequest {
     /// The 6-character join code
+    #[validate(length(min = 4, max = 8))]
     #[schema(example = "ABC123")]
     pub code: String,
 }
@@ -196,11 +201,13 @@ pub struct LocationInfo {
 }
 
 /// Submit guess request
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct SubmitGuessRequest {
     /// Guessed latitude
+    #[validate(range(min = -90.0, max = 90.0))]
     pub lat: f64,
     /// Guessed longitude
+    #[validate(range(min = -180.0, max = 180.0))]
     pub lng: f64,
     /// Time taken in milliseconds
     pub time_taken_ms: Option<u32>,
@@ -236,15 +243,18 @@ pub struct GameSummary {
 }
 
 /// Update game settings request (all fields optional for partial updates)
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct UpdateSettingsRequest {
     /// Number of rounds (1-20)
+    #[validate(range(min = 1, max = 20))]
     #[schema(example = 5)]
     pub rounds: Option<u8>,
-    /// Time limit per round in seconds (0 = unlimited)
+    /// Time limit per round in seconds (0 = unlimited, max 600)
+    #[validate(range(max = 600))]
     #[schema(example = 120)]
     pub time_limit_seconds: Option<u32>,
     /// Map/region identifier
+    #[validate(length(max = 100))]
     #[schema(example = "world")]
     pub map_id: Option<String>,
     /// Allow movement in Street View
@@ -439,6 +449,9 @@ pub async fn create_game(
     auth: AuthUser,
     Json(req): Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, ApiError> {
+    // Validate request
+    req.validate()?;
+
     // Parse game mode
     let mode = match req.mode.as_str() {
         "solo" => GameMode::Solo,
@@ -501,6 +514,9 @@ pub async fn join_game_by_code(
     MaybeAuthUser(maybe_auth): MaybeAuthUser,
     Json(req): Json<JoinGameRequest>,
 ) -> Result<(axum::http::StatusCode, HeaderMap, Json<GameDetails>), ApiError> {
+    // Validate request
+    req.validate()?;
+
     // Auto-create guest session if not authenticated
     let (is_new_session, session_id) = match maybe_auth {
         Some(auth) => (false, Some(auth.session_id)),
@@ -962,10 +978,8 @@ pub async fn submit_guess(
 ) -> Result<Json<GuessResultResponse>, ApiError> {
     let now = Utc::now();
 
-    // Validate coordinates
-    if !(-90.0..=90.0).contains(&req.lat) || !(-180.0..=180.0).contains(&req.lng) {
-        return Err(ApiError::bad_request("INVALID_COORDS", "Invalid coordinates"));
-    }
+    // Validate request (coordinates range checked by validator)
+    req.validate()?;
 
     // Load game state
     let (game_state, current_round_db_id) = load_game_state(state.db(), &game_id).await?;
@@ -1100,6 +1114,9 @@ pub async fn update_settings(
     Json(req): Json<UpdateSettingsRequest>,
 ) -> Result<Json<UpdateSettingsResponse>, ApiError> {
     let now = Utc::now();
+
+    // Validate request
+    req.validate()?;
 
     // Load current game state
     let (game_state, _) = load_game_state(state.db(), &id).await?;

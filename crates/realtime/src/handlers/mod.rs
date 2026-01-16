@@ -3,14 +3,20 @@
 pub mod auth;
 pub mod game;
 
+use std::time::Duration;
+
 use socketioxide::extract::{SocketRef, State};
 use socketioxide::socket::DisconnectReason;
 use tracing::info;
 
 use crate::state::{AppState, GameCommand};
 
+/// Timeout for unauthenticated socket connections (in seconds)
+/// Sockets that don't authenticate within this time will be disconnected
+const AUTH_TIMEOUT_SECS: u64 = 30;
+
 /// Main connection handler - called when a socket connects
-pub async fn on_connect(socket: SocketRef, State(_state): State<AppState>) {
+pub async fn on_connect(socket: SocketRef, State(state): State<AppState>) {
     let socket_id = socket.id.to_string();
     info!("Socket connected: {}", socket_id);
 
@@ -24,6 +30,25 @@ pub async fn on_connect(socket: SocketRef, State(_state): State<AppState>) {
 
     // Handle disconnect
     socket.on_disconnect(handle_disconnect);
+
+    // Spawn auth timeout task - disconnect if not authenticated within timeout
+    let timeout_socket = socket.clone();
+    let timeout_state = state.clone();
+    let timeout_socket_id = socket_id.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(AUTH_TIMEOUT_SECS)).await;
+
+        // Check if socket is still connected and not authenticated
+        if !timeout_state.is_socket_authenticated(&timeout_socket_id).await {
+            tracing::warn!(
+                socket_id = %timeout_socket_id,
+                timeout_secs = AUTH_TIMEOUT_SECS,
+                "Disconnecting unauthenticated socket after timeout"
+            );
+            // Disconnect the socket
+            timeout_socket.disconnect().ok();
+        }
+    });
 }
 
 /// Handle socket disconnect
