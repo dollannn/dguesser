@@ -761,6 +761,7 @@ dependencies = [
  "dguesser-auth",
  "dguesser-core",
  "dguesser-db",
+ "dguesser-locations",
  "dguesser-protocol",
  "dotenvy",
  "rand 0.8.5",

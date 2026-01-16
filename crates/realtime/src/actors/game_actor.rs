@@ -776,12 +776,40 @@ impl GameActor {
     // Round Management
     // =========================================================================
 
-    /// Select a location for the next round
+    /// Select a location for a round with distance-based spread.
+    ///
+    /// Uses `SelectionConstraints` to ensure new locations are at least
+    /// the map's `min_spread_distance_km` from all previous round locations.
     async fn select_location(&self) -> Result<LocationData, String> {
+        use dguesser_core::location::{DEFAULT_MIN_SPREAD_DISTANCE_KM, SelectionConstraints};
+
         let state = self.state.as_ref().ok_or("Game not initialized")?;
         let map_id = &state.settings.map_id;
 
-        match self.location_provider.select_location(map_id, &[]).await {
+        // Get previous round locations for distance constraints
+        let previous_locations: Vec<(f64, f64)> =
+            state.completed_rounds.iter().map(|r| (r.location_lat, r.location_lng)).collect();
+
+        // Get minimum spread distance from the map's rules (or use default)
+        let min_distance_km = self
+            .location_provider
+            .get_map(map_id)
+            .await
+            .map(|m| m.rules.min_spread_distance_km())
+            .unwrap_or(DEFAULT_MIN_SPREAD_DISTANCE_KM);
+
+        // Build constraints from previous locations
+        let constraints = if previous_locations.is_empty() || min_distance_km <= 0.0 {
+            SelectionConstraints::none()
+        } else {
+            SelectionConstraints::with_min_distance(previous_locations, min_distance_km)
+        };
+
+        match self
+            .location_provider
+            .select_location_with_constraints(map_id, &[], &constraints)
+            .await
+        {
             Ok(loc) => Ok(LocationData::with_location_id(
                 loc.lat,
                 loc.lng,

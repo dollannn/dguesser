@@ -51,8 +51,8 @@ async fn main() -> anyhow::Result<()> {
     // Create Redis state manager
     let redis_state = RedisStateManager::new(redis.clone());
 
-    // Create app state
-    let state = AppState::new(db, redis.clone(), redis_state, config.clone());
+    // Create app state (async to load maps for R2 provider)
+    let state = AppState::new(db, redis.clone(), redis_state, config.clone()).await;
 
     // Create Socket.IO layer with state
     let (socket_layer, io) = SocketIo::builder().with_state(state.clone()).build_layer();

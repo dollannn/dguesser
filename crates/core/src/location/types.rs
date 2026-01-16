@@ -286,12 +286,13 @@ impl From<Location> for GameLocation {
 ///
 /// This controls how likely each country is to be selected when picking
 /// a random location from a multi-country map.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CountryDistribution {
     /// Each country weighted by total location count (default).
     /// Countries with more Street View coverage are selected more often.
     /// Good for: realistic representation of coverage.
+    #[default]
     Proportional,
 
     /// Each eligible country has equal probability.
@@ -307,11 +308,9 @@ pub enum CountryDistribution {
     },
 }
 
-impl Default for CountryDistribution {
-    fn default() -> Self {
-        CountryDistribution::Proportional
-    }
-}
+/// Default minimum spread distance between rounds in kilometers.
+/// 500km provides good geographic spread for world maps.
+pub const DEFAULT_MIN_SPREAD_DISTANCE_KM: f64 = 500.0;
 
 /// Rules for filtering locations within a map.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -329,6 +328,18 @@ pub struct MapRules {
     /// How to distribute selection across countries
     #[serde(default)]
     pub country_distribution: CountryDistribution,
+    /// Minimum distance (km) between round locations for geographic spread.
+    /// Defaults to 500km for world maps. Set to 0 to disable.
+    /// Smaller maps (countries/regions) should use smaller values (e.g., 50-100km).
+    #[serde(default)]
+    pub min_spread_distance_km: Option<f64>,
+}
+
+impl MapRules {
+    /// Get the minimum spread distance, using the default if not set.
+    pub fn min_spread_distance_km(&self) -> f64 {
+        self.min_spread_distance_km.unwrap_or(DEFAULT_MIN_SPREAD_DISTANCE_KM)
+    }
 }
 
 /// A map definition (playable region).
@@ -499,6 +510,20 @@ mod tests {
         assert!(rules.countries.is_empty());
         assert!(rules.min_year.is_none());
         assert!(!rules.outdoor_only);
+        assert!(rules.min_spread_distance_km.is_none());
+        // Default method should return the constant
+        assert_eq!(rules.min_spread_distance_km(), DEFAULT_MIN_SPREAD_DISTANCE_KM);
+    }
+
+    #[test]
+    fn test_map_rules_min_spread_distance() {
+        // Test custom spread distance
+        let rules = MapRules { min_spread_distance_km: Some(100.0), ..Default::default() };
+        assert_eq!(rules.min_spread_distance_km(), 100.0);
+
+        // Test zero disables spread
+        let rules = MapRules { min_spread_distance_km: Some(0.0), ..Default::default() };
+        assert_eq!(rules.min_spread_distance_km(), 0.0);
     }
 
     #[test]

@@ -9,10 +9,12 @@ use socketioxide::SocketIo;
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 use crate::actors::GameActor;
-use crate::config::Config;
+use crate::config::{Config, LocationProviderType};
 use crate::redis_state::RedisStateManager;
 use dguesser_core::location::LocationProvider;
 use dguesser_db::{DbPool, LocationRepository};
+use dguesser_locations::reader::{FileReader, HttpReader};
+use dguesser_locations::{PackProvider, PackProviderConfig};
 
 /// Application state shared across all socket connections
 #[derive(Clone)]
@@ -99,15 +101,62 @@ pub struct GuessResult {
 }
 
 impl AppState {
-    pub fn new(
+    pub async fn new(
         db: DbPool,
         redis: redis::Client,
         redis_state: RedisStateManager,
         config: Config,
     ) -> Self {
-        // Create location provider
-        let location_provider: Arc<dyn LocationProvider> =
-            Arc::new(LocationRepository::new(db.clone()));
+        // Create location provider based on config
+        let location_provider: Arc<dyn LocationProvider> = match config.location_provider_type {
+            LocationProviderType::Postgres => {
+                tracing::info!("Using PostgreSQL location provider");
+                Arc::new(LocationRepository::new(db.clone()))
+            }
+            LocationProviderType::R2 => {
+                let r2_config = config
+                    .r2_location_config
+                    .as_ref()
+                    .expect("R2 config required when LOCATION_PROVIDER=r2");
+
+                let pack_config = PackProviderConfig {
+                    cache_indexes: true,
+                    max_disabled_cache: r2_config.max_disabled_cache,
+                };
+
+                // Load maps from database to register with PackProvider
+                let maps = dguesser_db::locations::list_maps(&db).await.unwrap_or_default();
+                let map_count = maps.len();
+
+                if let Some(local_path) = r2_config.local_path() {
+                    tracing::info!(path = %local_path, version = %r2_config.version, "Using local file location provider");
+                    let reader = FileReader::new(local_path, &r2_config.version);
+                    let provider = PackProvider::new(reader, pack_config);
+
+                    // Register maps with provider
+                    for map in maps {
+                        tracing::debug!(map_id = %map.id, slug = %map.slug, "Registering map");
+                        provider.register_map(map).await;
+                    }
+                    tracing::info!("Registered {} maps with R2 location provider", map_count);
+
+                    Arc::new(provider)
+                } else {
+                    tracing::info!(url = %r2_config.base_url, version = %r2_config.version, "Using R2 HTTP location provider");
+                    let reader = HttpReader::new(&r2_config.base_url, &r2_config.version);
+                    let provider = PackProvider::new(reader, pack_config);
+
+                    // Register maps with provider
+                    for map in maps {
+                        tracing::debug!(map_id = %map.id, slug = %map.slug, "Registering map");
+                        provider.register_map(map).await;
+                    }
+                    tracing::info!("Registered {} maps with R2 location provider", map_count);
+
+                    Arc::new(provider)
+                }
+            }
+        };
 
         Self {
             inner: Arc::new(AppStateInner {

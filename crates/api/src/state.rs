@@ -89,14 +89,36 @@ impl AppState {
                     max_disabled_cache: r2_config.max_disabled_cache,
                 };
 
+                // Load maps from database to register with PackProvider
+                let maps = dguesser_db::locations::list_maps(&db).await.unwrap_or_default();
+                let map_count = maps.len();
+
                 if let Some(local_path) = r2_config.local_path() {
                     tracing::info!(path = %local_path, version = %r2_config.version, "Using local file location provider");
                     let reader = FileReader::new(local_path, &r2_config.version);
-                    Arc::new(PackProvider::new(reader, pack_config))
+                    let provider = PackProvider::new(reader, pack_config);
+
+                    // Register maps with provider
+                    for map in maps {
+                        tracing::debug!(map_id = %map.id, slug = %map.slug, "Registering map");
+                        provider.register_map(map).await;
+                    }
+                    tracing::info!("Registered {} maps with R2 location provider", map_count);
+
+                    Arc::new(provider)
                 } else {
                     tracing::info!(url = %r2_config.base_url, version = %r2_config.version, "Using R2 HTTP location provider");
                     let reader = HttpReader::new(&r2_config.base_url, &r2_config.version);
-                    Arc::new(PackProvider::new(reader, pack_config))
+                    let provider = PackProvider::new(reader, pack_config);
+
+                    // Register maps with provider
+                    for map in maps {
+                        tracing::debug!(map_id = %map.id, slug = %map.slug, "Registering map");
+                        provider.register_map(map).await;
+                    }
+                    tracing::info!("Registered {} maps with R2 location provider", map_count);
+
+                    Arc::new(provider)
                 }
             }
         };

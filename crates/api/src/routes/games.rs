@@ -689,9 +689,9 @@ pub async fn start_game(
     // Load current game state
     let (game_state, _) = load_game_state(state.db(), &id).await?;
 
-    // Select location for first round
+    // Select location for first round (no previous locations)
     let map_id = &game_state.settings.map_id;
-    let location = select_location(state.location_provider(), map_id, &[]).await;
+    let location = select_location(state.location_provider(), map_id, &[], &[]).await;
 
     // Use reducer for validation
     let result = reduce(
@@ -879,11 +879,14 @@ pub async fn next_round(
         return Err(ApiError::bad_request("GAME_COMPLETE", "All rounds completed"));
     }
 
-    // Select location for next round
+    // Select location for next round with distance constraints
     let map_id = &game_state.settings.map_id;
     let db_rounds = dguesser_db::games::get_rounds_for_game(state.db(), &id).await?;
     let exclude_ids: Vec<String> = db_rounds.iter().filter_map(|r| r.panorama_id.clone()).collect();
-    let location = select_location(state.location_provider(), map_id, &exclude_ids).await;
+    let previous_locations: Vec<(f64, f64)> =
+        db_rounds.iter().map(|r| (r.location_lat, r.location_lng)).collect();
+    let location =
+        select_location(state.location_provider(), map_id, &exclude_ids, &previous_locations).await;
 
     // Use reducer for validation
     let result =
@@ -1206,13 +1209,33 @@ fn generate_join_code() -> String {
         .collect()
 }
 
-/// Select a location for a round
+/// Select a location for a round with distance-based spread.
+///
+/// Uses `SelectionConstraints` to ensure new locations are at least
+/// the map's `min_spread_distance_km` from all previous round locations.
 async fn select_location(
     provider: &dyn dguesser_core::location::LocationProvider,
     map_id: &str,
     exclude_ids: &[String],
+    previous_locations: &[(f64, f64)],
 ) -> LocationData {
-    match provider.select_location(map_id, exclude_ids).await {
+    use dguesser_core::location::{DEFAULT_MIN_SPREAD_DISTANCE_KM, SelectionConstraints};
+
+    // Get minimum spread distance from the map's rules (or use default)
+    let min_distance_km = provider
+        .get_map(map_id)
+        .await
+        .map(|m| m.rules.min_spread_distance_km())
+        .unwrap_or(DEFAULT_MIN_SPREAD_DISTANCE_KM);
+
+    // Build constraints from previous locations
+    let constraints = if previous_locations.is_empty() || min_distance_km <= 0.0 {
+        SelectionConstraints::none()
+    } else {
+        SelectionConstraints::with_min_distance(previous_locations.to_vec(), min_distance_km)
+    };
+
+    match provider.select_location_with_constraints(map_id, exclude_ids, &constraints).await {
         Ok(loc) => LocationData::with_location_id(
             loc.lat,
             loc.lng,
