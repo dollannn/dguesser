@@ -10,6 +10,8 @@ use dguesser_locations::reader::{FileReader, HttpReader};
 use dguesser_locations::{PackProvider, PackProviderConfig};
 
 use crate::config::{Config, LocationProviderType};
+use crate::middleware::client_ip::ClientIpConfig;
+use crate::middleware::rate_limit::{FallbackRateLimiter, create_fallback_limiter};
 
 /// Shared application state
 #[derive(Clone)]
@@ -28,6 +30,10 @@ struct AppStateInner {
     location_provider: Arc<dyn LocationProvider>,
     started_at: Instant,
     is_production: bool,
+    /// Configuration for secure client IP extraction
+    client_ip_config: ClientIpConfig,
+    /// In-memory fallback rate limiter for when Redis is unavailable
+    fallback_rate_limiter: Arc<FallbackRateLimiter>,
 }
 
 impl AppState {
@@ -127,6 +133,18 @@ impl AppState {
             }
         };
 
+        // Create client IP config for secure IP extraction
+        let client_ip_config = ClientIpConfig::from_config(config);
+        tracing::info!(
+            trusted_proxy_count = client_ip_config.trusted_proxy_count,
+            trust_cloudflare = client_ip_config.trust_cloudflare,
+            "Configured client IP extraction"
+        );
+
+        // Create fallback rate limiter (50 req/min per IP, per instance)
+        let fallback_rate_limiter = create_fallback_limiter(100);
+        tracing::info!("Created fallback rate limiter");
+
         Ok(Self {
             inner: Arc::new(AppStateInner {
                 db,
@@ -139,6 +157,8 @@ impl AppState {
                 location_provider,
                 started_at: Instant::now(),
                 is_production: config.is_production,
+                client_ip_config,
+                fallback_rate_limiter,
             }),
         })
     }
@@ -191,6 +211,16 @@ impl AppState {
     /// Check if running in production mode
     pub fn is_production(&self) -> bool {
         self.inner.is_production
+    }
+
+    /// Get the client IP extraction configuration
+    pub fn client_ip_config(&self) -> &ClientIpConfig {
+        &self.inner.client_ip_config
+    }
+
+    /// Get the fallback rate limiter for when Redis is unavailable
+    pub fn fallback_rate_limiter(&self) -> &Arc<FallbackRateLimiter> {
+        &self.inner.fallback_rate_limiter
     }
 }
 

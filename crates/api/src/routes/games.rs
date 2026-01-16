@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 
 use axum::http::{HeaderMap, header::SET_COOKIE};
 
-use crate::{error::ApiError, state::AppState};
+use crate::{error::ApiError, middleware::extract_ip_from_headers, state::AppState};
 use dguesser_auth::{AuthUser, MaybeAuthUser, build_cookie_header, create_guest_session};
 use dguesser_core::game::{
     GameCommand, GameEvent, GamePhase, GameSettings, GameState, LocationData, PlayerState,
@@ -505,15 +505,13 @@ pub async fn join_game_by_code(
     let (is_new_session, session_id) = match maybe_auth {
         Some(auth) => (false, Some(auth.session_id)),
         None => {
-            // Extract IP and user agent for guest creation
-            let ip = headers
-                .get("x-forwarded-for")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.split(',').next().unwrap_or(s).trim());
+            // Extract IP (using secure method) and user agent for guest creation
+            let ip = extract_ip_from_headers(&headers, state.client_ip_config());
             let user_agent = headers.get("user-agent").and_then(|v| v.to_str().ok());
 
             let result =
-                create_guest_session(state.db(), state.session_config(), ip, user_agent).await?;
+                create_guest_session(state.db(), state.session_config(), ip.as_deref(), user_agent)
+                    .await?;
             (true, Some(result.session_id))
         }
     };

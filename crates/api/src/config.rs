@@ -89,6 +89,11 @@ pub struct Config {
     pub location_provider_type: LocationProviderType,
     /// R2 location config (if using R2 provider)
     pub r2_location_config: Option<R2LocationConfig>,
+    /// Number of trusted reverse proxies in front of the API
+    /// Used to correctly extract client IP from X-Forwarded-For header
+    pub trusted_proxy_count: u8,
+    /// Whether to trust Cloudflare headers (CF-Connecting-IP)
+    pub trust_cloudflare: bool,
 }
 
 impl Config {
@@ -134,6 +139,13 @@ impl Config {
             is_production: env::var("RUST_ENV").map(|v| v == "production").unwrap_or(false),
             location_provider_type,
             r2_location_config,
+            trusted_proxy_count: env::var("TRUSTED_PROXY_COUNT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(2), // Default: 2 proxies (Cloudflare + Railway)
+            trust_cloudflare: env::var("TRUST_CLOUDFLARE")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(true), // Default: trust Cloudflare headers
         })
     }
 

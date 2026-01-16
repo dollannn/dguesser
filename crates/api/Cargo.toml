@@ -33,6 +33,7 @@ dotenvy.workspace = true
 config.workspace = true
 redis.workspace = true
 rand.workspace = true
+governor.workspace = true
 validator.workspace = true
 utoipa.workspace = true
 utoipa-swagger-ui.workspace = true

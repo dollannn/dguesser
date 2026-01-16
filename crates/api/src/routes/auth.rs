@@ -10,7 +10,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{error::ApiError, state::AppState};
+use crate::{error::ApiError, middleware::extract_ip_from_headers, state::AppState};
 use dguesser_auth::{
     AuthUser, MaybeAuthUser, OAuthProvider, OAuthState, build_cookie_header,
     build_delete_cookie_header, create_guest_session, handle_oauth_callback,
@@ -92,15 +92,13 @@ pub async fn create_guest(
         return Ok((StatusCode::OK, Json(CurrentUserResponse::from_user(&user))).into_response());
     }
 
-    // Extract IP and user agent
-    let ip = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim());
+    // Extract IP (using secure method) and user agent
+    let ip = extract_ip_from_headers(&headers, state.client_ip_config());
     let user_agent = headers.get("user-agent").and_then(|v| v.to_str().ok());
 
     // Create guest session
-    let result = create_guest_session(state.db(), state.session_config(), ip, user_agent).await?;
+    let result =
+        create_guest_session(state.db(), state.session_config(), ip.as_deref(), user_agent).await?;
 
     // Get the created user
     let user = dguesser_db::users::get_by_id(state.db(), &result.user_id)
@@ -225,11 +223,8 @@ async fn google_callback(
     // Exchange code for identity
     let identity = google_oauth.exchange_code(&query.code).await?;
 
-    // Extract request metadata
-    let ip = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim());
+    // Extract request metadata (using secure IP extraction)
+    let ip = extract_ip_from_headers(&headers, state.client_ip_config());
     let user_agent = headers.get("user-agent").and_then(|v| v.to_str().ok());
 
     // Handle OAuth callback
@@ -239,7 +234,7 @@ async fn google_callback(
         identity,
         current_session,
         state.session_config(),
-        ip,
+        ip.as_deref(),
         user_agent,
     )
     .await?;
@@ -381,10 +376,8 @@ async fn microsoft_callback(
 
     let identity = microsoft_oauth.exchange_code(&query.code).await?;
 
-    let ip = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim());
+    // Extract request metadata (using secure IP extraction)
+    let ip = extract_ip_from_headers(&headers, state.client_ip_config());
     let user_agent = headers.get("user-agent").and_then(|v| v.to_str().ok());
 
     let current_session = existing.as_ref().map(|a| a.session_id.as_str());
@@ -393,7 +386,7 @@ async fn microsoft_callback(
         identity,
         current_session,
         state.session_config(),
-        ip,
+        ip.as_deref(),
         user_agent,
     )
     .await?;

@@ -74,5 +74,8 @@ config = "0.14"
 # Validation
 validator = { version = "0.18", features = ["derive"] }
 
+# Rate limiting
+governor = "0.8"
+
 # Dev dependencies
 tokio-test = "0.4"
