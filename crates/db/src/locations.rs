@@ -1383,6 +1383,15 @@ pub async fn remove_location_from_map(
     Ok(result.rows_affected() > 0)
 }
 
+/// All columns to select for a full Location row, qualified with table alias 'l'.
+/// Use this when JOINing with other tables that have overlapping column names.
+const LOCATION_COLUMNS_ALIASED: &str = r#"
+    l.id, l.panorama_id, l.lat, l.lng, l.country_code, l.subdivision_code, l.capture_date, l.provider,
+    l.active, l.last_validated_at, l.validation_status, l.created_at,
+    l.source, l.surface, l.arrow_count, l.is_scout, l.buildings_100, l.roads_100, l.elevation, l.heading,
+    l.failure_count, l.last_failure_reason, l.review_status, l.reviewed_at, l.reviewed_by
+"#;
+
 /// Get paginated locations for a map.
 pub async fn get_map_locations(
     pool: &DbPool,
@@ -1392,7 +1401,7 @@ pub async fn get_map_locations(
 ) -> Result<Vec<Location>, LocationError> {
     let rows = sqlx::query_as::<_, LocationRow>(&format!(
         r#"
-        SELECT {LOCATION_COLUMNS}
+        SELECT {LOCATION_COLUMNS_ALIASED}
         FROM locations l
         JOIN map_locations ml ON l.id = ml.location_id
         WHERE ml.map_id = $1 AND l.active = TRUE
