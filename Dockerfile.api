@@ -1,5 +1,5 @@
 # Build stage (cargo-chef, Debian)
-FROM rust:1.85-bookworm AS chef
+FROM rust:1.88-bookworm AS chef
 
 WORKDIR /app
 
