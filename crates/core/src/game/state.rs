@@ -109,6 +109,8 @@ pub struct RoundState {
     pub panorama_id: Option<String>,
     /// Location ID from database (for reporting)
     pub location_id: Option<String>,
+    /// Default heading/direction for panorama (degrees, 0-360)
+    pub heading: Option<f64>,
     /// When the round started
     pub started_at: DateTime<Utc>,
     /// Time limit in milliseconds (None = unlimited)
@@ -126,6 +128,7 @@ impl RoundState {
         location_lng: f64,
         panorama_id: Option<String>,
         location_id: Option<String>,
+        heading: Option<f64>,
         time_limit_ms: Option<u32>,
         started_at: DateTime<Utc>,
     ) -> Self {
@@ -135,6 +138,7 @@ impl RoundState {
             location_lng,
             panorama_id,
             location_id,
+            heading,
             started_at,
             time_limit_ms,
             guesses: HashMap::new(),
@@ -283,7 +287,7 @@ mod tests {
     #[test]
     fn test_round_timeout() {
         let now = Utc::now();
-        let round = RoundState::new(1, 0.0, 0.0, None, None, Some(60_000), now);
+        let round = RoundState::new(1, 0.0, 0.0, None, None, None, Some(60_000), now);
 
         // Not timed out immediately
         assert!(!round.is_timed_out(now));
@@ -300,7 +304,7 @@ mod tests {
     #[test]
     fn test_round_no_timeout_when_unlimited() {
         let now = Utc::now();
-        let round = RoundState::new(1, 0.0, 0.0, None, None, None, now);
+        let round = RoundState::new(1, 0.0, 0.0, None, None, None, None, now);
 
         // Never times out
         let far_future = now + chrono::Duration::hours(24);
@@ -310,7 +314,7 @@ mod tests {
     #[test]
     fn test_time_remaining() {
         let now = Utc::now();
-        let round = RoundState::new(1, 0.0, 0.0, None, None, Some(60_000), now);
+        let round = RoundState::new(1, 0.0, 0.0, None, None, None, Some(60_000), now);
 
         // Full time at start
         assert_eq!(round.time_remaining_ms(now), Some(60_000));
@@ -327,7 +331,7 @@ mod tests {
     #[test]
     fn test_all_guessed() {
         let now = Utc::now();
-        let mut round = RoundState::new(1, 0.0, 0.0, None, None, None, now);
+        let mut round = RoundState::new(1, 0.0, 0.0, None, None, None, None, now);
 
         let player_ids = vec!["usr_1", "usr_2"];
 

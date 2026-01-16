@@ -138,6 +138,7 @@ impl PackRecord {
             lat: self.lat,
             lng: self.lng,
             country_code: Some(country_code.to_string()),
+            heading: self.heading,
         }
     }
 

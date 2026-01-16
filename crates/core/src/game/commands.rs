@@ -21,12 +21,14 @@ pub struct LocationData {
     pub panorama_id: Option<String>,
     /// Location ID from the database (for reporting)
     pub location_id: Option<String>,
+    /// Default heading/direction for the panorama (degrees, 0-360)
+    pub heading: Option<f64>,
 }
 
 impl LocationData {
     /// Create a new location data instance.
     pub fn new(lat: f64, lng: f64, panorama_id: Option<String>) -> Self {
-        Self { lat, lng, panorama_id, location_id: None }
+        Self { lat, lng, panorama_id, location_id: None, heading: None }
     }
 
     /// Create a new location data instance with location ID.
@@ -36,7 +38,18 @@ impl LocationData {
         panorama_id: Option<String>,
         location_id: String,
     ) -> Self {
-        Self { lat, lng, panorama_id, location_id: Some(location_id) }
+        Self { lat, lng, panorama_id, location_id: Some(location_id), heading: None }
+    }
+
+    /// Create a new location data with all optional fields.
+    pub fn full(
+        lat: f64,
+        lng: f64,
+        panorama_id: Option<String>,
+        location_id: Option<String>,
+        heading: Option<f64>,
+    ) -> Self {
+        Self { lat, lng, panorama_id, location_id, heading }
     }
 }
 

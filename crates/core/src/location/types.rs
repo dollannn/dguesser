@@ -268,6 +268,8 @@ pub struct GameLocation {
     pub lng: f64,
     /// Country code for display
     pub country_code: Option<String>,
+    /// Default heading/direction for the panorama (degrees, 0-360)
+    pub heading: Option<f64>,
 }
 
 impl From<Location> for GameLocation {
@@ -278,6 +280,7 @@ impl From<Location> for GameLocation {
             lat: loc.lat,
             lng: loc.lng,
             country_code: loc.country_code,
+            heading: loc.heading,
         }
     }
 }

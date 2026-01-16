@@ -9,6 +9,7 @@
     lng: number;
     panoramaId?: string | null;
     locationId?: string | null;
+    heading?: number | null;
     movementAllowed?: boolean;
     zoomAllowed?: boolean;
     rotationAllowed?: boolean;
@@ -20,6 +21,7 @@
     lng,
     panoramaId = null,
     locationId = null,
+    heading = null,
     movementAllowed = true,
     zoomAllowed = true,
     rotationAllowed = true,
@@ -30,6 +32,7 @@
   let panorama: google.maps.StreetViewPanorama | null = null;
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let noCoverage = $state(false);
   let showReportMenu = $state(false);
   let reportSubmitting = $state(false);
   let reportSuccess = $state(false);
@@ -63,6 +66,17 @@
     }
   }
 
+  /** Auto-report location as broken when coverage is missing */
+  async function autoReportNoCoverage() {
+    if (!locationId) return;
+    try {
+      await api.post(`/locations/${locationId}/report`, { reason: 'no_coverage' });
+      console.log('[StreetView] Auto-reported location as no coverage');
+    } catch (e) {
+      console.error('[StreetView] Failed to auto-report:', e);
+    }
+  }
+
   onMount(async () => {
     if (!browser) return;
 
@@ -70,14 +84,15 @@
       // Load Google Maps API first
       await loadGoogleMaps();
 
-      console.log('[StreetView] Initializing with:', { lat, lng, panoramaId });
+      console.log('[StreetView] Initializing with:', { lat, lng, panoramaId, heading });
 
-      // Initialize Street View
+      // Initialize Street View with optional heading
       const position = { lat, lng };
+      const initialHeading = heading ?? 0;
 
       panorama = new google.maps.StreetViewPanorama(container, {
         position,
-        pov: { heading: 0, pitch: 0 },
+        pov: { heading: initialHeading, pitch: 0 },
         zoom: 1,
         disableDefaultUI: true,
         showRoadLabels: false,
@@ -111,7 +126,10 @@
               console.log('[StreetView] Found nearby panorama:', data.location.pano);
               panorama?.setPano(data.location.pano);
             } else {
+              // No coverage found - show error to user (MAP-003)
               console.error('[StreetView] No Street View coverage within 1km');
+              noCoverage = true;
+              autoReportNoCoverage();
             }
           });
         }
@@ -130,7 +148,10 @@
             console.log('[StreetView] Found panorama:', data.location.pano);
             panorama?.setPano(data.location.pano);
           } else {
+            // No coverage found - show error to user (MAP-003)
             console.error('[StreetView] No Street View coverage at coordinates');
+            noCoverage = true;
+            autoReportNoCoverage();
           }
         });
       }
@@ -151,12 +172,24 @@
   });
 
   onDestroy(() => {
-    panorama = null;
+    // Clean up Google Maps listeners (MAP-008)
+    if (panorama) {
+      google.maps.event.clearInstanceListeners(panorama);
+      panorama = null;
+    }
   });
 
   // React to location changes
   $effect(() => {
     if (panorama && Number.isFinite(lat) && Number.isFinite(lng)) {
+      // Reset no coverage state when location changes
+      noCoverage = false;
+      
+      // Set heading if provided
+      if (heading !== null) {
+        panorama.setPov({ heading, pitch: 0 });
+      }
+      
       if (panoramaId) {
         console.log('[StreetView] Location changed, setting panorama:', panoramaId);
         panorama.setPano(panoramaId);
@@ -166,6 +199,8 @@
         sv.getPanorama({ location: { lat, lng }, radius: 1000 }, (data, status) => {
           if (status === google.maps.StreetViewStatus.OK && data?.location?.pano) {
             panorama?.setPano(data.location.pano);
+          } else {
+            noCoverage = true;
           }
         });
       }
@@ -181,6 +216,23 @@
       </svg>
       <p class="text-lg font-medium mb-2">Street View Error</p>
       <p class="text-sm text-gray-400">{error}</p>
+    </div>
+  </div>
+{:else if noCoverage}
+  <!-- MAP-003: User-visible error when Street View coverage is unavailable -->
+  <div class="w-full h-full min-h-screen bg-gray-900 flex items-center justify-center">
+    <div class="text-center text-white max-w-md px-4">
+      <svg class="w-16 h-16 mx-auto mb-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+      </svg>
+      <p class="text-lg font-medium mb-2">No Street View Coverage</p>
+      <p class="text-sm text-gray-400 mb-4">
+        Street View imagery is not available at this location. 
+        This has been automatically reported.
+      </p>
+      <p class="text-xs text-gray-500">
+        Location: {lat.toFixed(4)}, {lng.toFixed(4)}
+      </p>
     </div>
   </div>
 {:else}

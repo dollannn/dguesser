@@ -24,7 +24,7 @@ use crate::{error::ApiError, middleware::extract_ip_from_headers, state::AppStat
 use dguesser_auth::{AuthUser, MaybeAuthUser, build_cookie_header, create_guest_session};
 use dguesser_core::game::{
     GameCommand, GameEvent, GamePhase, GameSettings, GameState, LocationData, PlayerState,
-    RoundState, reduce,
+    RoundState, reduce, validate_location_count,
 };
 use dguesser_db::{GameMode, GameStatus};
 
@@ -366,6 +366,7 @@ async fn load_game_state(
             db_round.location_lng,
             db_round.panorama_id.clone(),
             db_round.location_id.clone(),
+            db_round.heading,
             db_round.time_limit_ms.map(|t| t as u32),
             db_round.started_at.unwrap_or_else(Utc::now),
         );
@@ -703,8 +704,15 @@ pub async fn start_game(
     // Load current game state
     let (game_state, _) = load_game_state(state.db(), &id).await?;
 
-    // Select location for first round (no previous locations)
+    // MAP-004: Validate that the map has enough locations for the requested rounds
     let map_id = &game_state.settings.map_id;
+    let location_count = state.location_provider().get_location_count(map_id).await.unwrap_or(0);
+    let validation = validate_location_count(game_state.settings.rounds, location_count);
+    if let Some(error_msg) = validation.error_message() {
+        return Err(ApiError::bad_request("INSUFFICIENT_LOCATIONS", &error_msg));
+    }
+
+    // Select location for first round (no previous locations)
     let location = select_location(state.location_provider(), map_id, &[], &[]).await;
 
     // Use reducer for validation
@@ -735,6 +743,7 @@ pub async fn start_game(
         location.lng,
         location.panorama_id.as_deref(),
         location.location_id.as_deref(),
+        location.heading,
         time_limit_ms.map(|t| t as i32),
     )
     .await?;
@@ -934,6 +943,7 @@ pub async fn next_round(
         location.lng,
         location.panorama_id.as_deref(),
         location.location_id.as_deref(),
+        location.heading,
         time_limit_ms.map(|t| t as i32),
     )
     .await?;
@@ -1251,11 +1261,12 @@ async fn select_location(
     };
 
     match provider.select_location_with_constraints(map_id, exclude_ids, &constraints).await {
-        Ok(loc) => LocationData::with_location_id(
+        Ok(loc) => LocationData::full(
             loc.lat,
             loc.lng,
             if loc.panorama_id.is_empty() { None } else { Some(loc.panorama_id) },
-            loc.id,
+            Some(loc.id),
+            loc.heading,
         ),
         Err(e) => {
             tracing::warn!(error = %e, map_id = %map_id, "Failed to select location, using random");

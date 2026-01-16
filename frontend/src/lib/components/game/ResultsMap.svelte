@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import type L from 'leaflet';
+  import { MAP_TILES, MAP_DEFAULTS } from '$lib/config/map';
 
   interface Guess {
     lat: number;
@@ -30,17 +31,17 @@
     // Dynamically import Leaflet only on client side
     leaflet = (await import('leaflet')).default;
 
-    // Initialize map centered on correct location
+    // MAP-006: Initialize map using centralized config
     map = leaflet.map(container, {
       center: [correctLat, correctLng],
-      zoom: 4,
+      zoom: MAP_DEFAULTS.resultZoom,
       zoomControl: false,
       attributionControl: false,
     });
 
-    // Add OpenStreetMap tiles with a clean style
-    leaflet.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
+    // Add map tiles using centralized config
+    leaflet.tileLayer(MAP_TILES.url, {
+      maxZoom: MAP_TILES.maxZoom,
     }).addTo(map);
 
     // Add zoom control to bottom right
@@ -110,9 +111,9 @@
       bounds.extend([guess.lat, guess.lng]);
     });
 
-    // Fit map to show all markers with padding
+    // Fit map to show all markers with padding from centralized config
     if (guesses.length > 0) {
-      map.fitBounds(bounds, { padding: [50, 50] });
+      map.fitBounds(bounds, { padding: MAP_DEFAULTS.padding });
     }
 
     // Invalidate size after a brief delay to fix initial rendering

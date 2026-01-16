@@ -75,6 +75,9 @@ pub struct RoundLocation {
     pub lng: f64,
     /// Optional Street View panorama ID
     pub panorama_id: Option<String>,
+    /// Optional heading/direction for Street View panorama (degrees, 0-360)
+    #[schema(example = 180.0)]
+    pub heading: Option<f64>,
 }
 
 /// Server broadcast: player guessed (without revealing location)

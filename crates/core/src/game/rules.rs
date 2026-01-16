@@ -153,6 +153,53 @@ pub fn validate_settings(settings: &GameSettings) -> Result<(), Vec<&'static str
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
+/// Result of validating that a map has enough locations for a game.
+#[derive(Debug)]
+pub enum LocationCountValidation {
+    /// Map has enough locations
+    Ok,
+    /// Map doesn't have enough locations
+    InsufficientLocations {
+        /// Number of rounds requested
+        rounds_needed: u8,
+        /// Number of locations available
+        locations_available: i64,
+    },
+}
+
+impl LocationCountValidation {
+    /// Check if validation passed.
+    pub fn is_ok(&self) -> bool {
+        matches!(self, LocationCountValidation::Ok)
+    }
+
+    /// Get error message if validation failed.
+    pub fn error_message(&self) -> Option<String> {
+        match self {
+            LocationCountValidation::Ok => None,
+            LocationCountValidation::InsufficientLocations {
+                rounds_needed,
+                locations_available,
+            } => Some(format!(
+                "Map has {} locations, but {} rounds require at least {} unique locations",
+                locations_available, rounds_needed, rounds_needed
+            )),
+        }
+    }
+}
+
+/// Validate that a map has enough locations for the requested number of rounds.
+pub fn validate_location_count(rounds: u8, location_count: i64) -> LocationCountValidation {
+    if location_count >= rounds as i64 {
+        LocationCountValidation::Ok
+    } else {
+        LocationCountValidation::InsufficientLocations {
+            rounds_needed: rounds,
+            locations_available: location_count,
+        }
+    }
+}
+
 /// Check if a player can still submit a guess for a round
 pub fn can_submit_guess(
     round_started_at: chrono::DateTime<chrono::Utc>,

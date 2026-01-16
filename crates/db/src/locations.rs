@@ -155,6 +155,7 @@ struct GameLocationRow {
     lat: f64,
     lng: f64,
     country_code: Option<String>,
+    heading: Option<f64>,
 }
 
 impl From<GameLocationRow> for GameLocation {
@@ -165,6 +166,7 @@ impl From<GameLocationRow> for GameLocation {
             lat: row.lat,
             lng: row.lng,
             country_code: row.country_code,
+            heading: row.heading,
         }
     }
 }
@@ -330,30 +332,25 @@ async fn select_random_location(
         }
     };
 
-    // Build country filter if needed
-    let country_filter = selected_country
-        .as_ref()
-        .map(|c| format!(" AND l.country_code = '{}'", c.replace('\'', "''")))
-        .unwrap_or_default();
-
     // Generate a random key
     let random_key: f64 = rand::random();
 
-    // Build the query with dynamic filters
+    // Build the query with dynamic filters - country filter uses parameterized query ($4)
     let query = format!(
         r#"
-        SELECT l.id, l.panorama_id, l.lat, l.lng, l.country_code
+        SELECT l.id, l.panorama_id, l.lat, l.lng, l.country_code, l.heading
         FROM locations l
         JOIN map_locations ml ON l.id = ml.location_id
         WHERE ml.map_id = $1
           AND l.active = TRUE
           AND ml.random_key >= $2
           AND l.id != ALL($3)
-          {}{}
+          AND ($4::text IS NULL OR l.country_code = $4)
+          {}
         ORDER BY ml.random_key
         LIMIT 1
         "#,
-        filter_clause, country_filter
+        filter_clause
     );
 
     // Try to find a location with random_key >= our random value
@@ -361,6 +358,7 @@ async fn select_random_location(
         .bind(map_id)
         .bind(random_key)
         .bind(exclude_ids)
+        .bind(selected_country.as_deref())
         .fetch_optional(pool)
         .await
         .map_err(|e| LocationError::Database(e.to_string()))?;
@@ -371,22 +369,24 @@ async fn select_random_location(
         None => {
             let wrap_query = format!(
                 r#"
-                SELECT l.id, l.panorama_id, l.lat, l.lng, l.country_code
+                SELECT l.id, l.panorama_id, l.lat, l.lng, l.country_code, l.heading
                 FROM locations l
                 JOIN map_locations ml ON l.id = ml.location_id
                 WHERE ml.map_id = $1
                   AND l.active = TRUE
                   AND l.id != ALL($2)
-                  {}{}
+                  AND ($3::text IS NULL OR l.country_code = $3)
+                  {}
                 ORDER BY ml.random_key
                 LIMIT 1
                 "#,
-                filter_clause, country_filter
+                filter_clause
             );
 
             sqlx::query_as::<_, GameLocationRow>(&wrap_query)
                 .bind(map_id)
                 .bind(exclude_ids)
+                .bind(selected_country.as_deref())
                 .fetch_optional(pool)
                 .await
                 .map_err(|e| LocationError::Database(e.to_string()))?
@@ -449,16 +449,16 @@ async fn select_random_location_with_constraints(
     let map_id = &map.id;
     let filter_clause = build_location_filter_clause(&map.rules);
 
-    // Build country filter based on distribution strategy
-    let country_filter = match &map.rules.country_distribution {
-        CountryDistribution::Proportional => String::new(),
+    // Determine selected country based on distribution strategy (parameterized, not interpolated)
+    let selected_country: Option<String> = match &map.rules.country_distribution {
+        CountryDistribution::Proportional => None,
         CountryDistribution::Equal => {
             let countries = get_map_countries(pool, map_id, &filter_clause).await?;
             if countries.is_empty() {
                 return Err(LocationError::NoLocationsAvailable(map_id_or_slug.to_string()));
             }
             let idx = rand::random::<usize>() % countries.len();
-            format!(" AND l.country_code = '{}'", countries[idx].replace('\'', "''"))
+            Some(countries[idx].clone())
         }
         CountryDistribution::Weighted { weights } => {
             let countries = get_map_countries(pool, map_id, &filter_clause).await?;
@@ -470,7 +470,7 @@ async fn select_random_location_with_constraints(
 
             if weighted.is_empty() {
                 let idx = rand::random::<usize>() % countries.len();
-                format!(" AND l.country_code = '{}'", countries[idx].replace('\'', "''"))
+                Some(countries[idx].clone())
             } else {
                 let total: u64 = weighted.iter().map(|(_, w)| *w as u64).sum();
                 let target = rand::random::<u64>() % total;
@@ -483,31 +483,33 @@ async fn select_random_location_with_constraints(
                         break;
                     }
                 }
-                format!(" AND l.country_code = '{}'", selected.replace('\'', "''"))
+                Some(selected.to_string())
             }
         }
     };
 
     for attempt in 0..MAX_ATTEMPTS {
-        // Fetch multiple candidates
+        // Fetch multiple candidates - uses parameterized query for country filter
         let query = format!(
             r#"
-            SELECT l.id, l.panorama_id, l.lat, l.lng, l.country_code
+            SELECT l.id, l.panorama_id, l.lat, l.lng, l.country_code, l.heading
             FROM locations l
             JOIN map_locations ml ON l.id = ml.location_id
             WHERE ml.map_id = $1
               AND l.active = TRUE
               AND l.id != ALL($2)
-              {}{}
+              AND ($3::text IS NULL OR l.country_code = $3)
+              {}
             ORDER BY random()
             LIMIT {}
             "#,
-            filter_clause, country_filter, CANDIDATES_PER_ATTEMPT
+            filter_clause, CANDIDATES_PER_ATTEMPT
         );
 
         let candidates: Vec<GameLocationRow> = sqlx::query_as(&query)
             .bind(map_id)
             .bind(exclude_ids)
+            .bind(selected_country.as_deref())
             .fetch_all(pool)
             .await
             .map_err(|e| LocationError::Database(e.to_string()))?;
@@ -1213,33 +1215,24 @@ pub async fn get_reports_paginated(
 ) -> Result<(Vec<LocationReportWithLocationRow>, i64), LocationError> {
     let offset = (page - 1) * per_page;
 
-    // Build WHERE clauses
-    let mut conditions = vec!["1=1".to_string()];
-    if let Some(reason) = reason_filter {
-        conditions.push(format!("r.reason = '{}'", reason));
-    }
-    if let Some(status) = location_status_filter {
-        conditions.push(format!("COALESCE(l.review_status, 'approved') = '{}'", status));
-    }
-    let where_clause = conditions.join(" AND ");
-
-    // Get total count
-    let count_query = format!(
+    // Get total count - uses parameterized queries to prevent SQL injection
+    let total: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)::bigint
         FROM location_reports r
         JOIN locations l ON r.location_id = l.id
-        WHERE {}
+        WHERE ($1::text IS NULL OR r.reason = $1)
+          AND ($2::text IS NULL OR COALESCE(l.review_status, 'approved') = $2)
         "#,
-        where_clause
-    );
-    let total: i64 = sqlx::query_scalar::<_, i64>(&count_query)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| LocationError::Database(e.to_string()))?;
+    )
+    .bind(reason_filter)
+    .bind(location_status_filter)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
 
-    // Get paginated results
-    let query = format!(
+    // Get paginated results - uses parameterized queries
+    let rows = sqlx::query_as::<_, LocationReportWithLocationRow>(
         r#"
         SELECT 
             r.id,
@@ -1255,19 +1248,19 @@ pub async fn get_reports_paginated(
             l.review_status as location_review_status
         FROM location_reports r
         JOIN locations l ON r.location_id = l.id
-        WHERE {}
+        WHERE ($1::text IS NULL OR r.reason = $1)
+          AND ($2::text IS NULL OR COALESCE(l.review_status, 'approved') = $2)
         ORDER BY r.created_at DESC
-        LIMIT $1 OFFSET $2
+        LIMIT $3 OFFSET $4
         "#,
-        where_clause
-    );
-
-    let rows = sqlx::query_as::<_, LocationReportWithLocationRow>(&query)
-        .bind(per_page)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| LocationError::Database(e.to_string()))?;
+    )
+    .bind(reason_filter)
+    .bind(location_status_filter)
+    .bind(per_page)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| LocationError::Database(e.to_string()))?;
 
     Ok((rows, total))
 }

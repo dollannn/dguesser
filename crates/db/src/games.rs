@@ -79,6 +79,7 @@ pub struct Round {
     pub location_lng: f64,
     pub panorama_id: Option<String>,
     pub location_id: Option<String>, // loc_XXXXXXXXXXXX (for reporting)
+    pub heading: Option<f64>,        // Default heading for panorama
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
     pub time_limit_ms: Option<i32>,
@@ -381,6 +382,7 @@ pub async fn create_round(
     location_lng: f64,
     panorama_id: Option<&str>,
     location_id: Option<&str>,
+    heading: Option<f64>,
     time_limit_ms: Option<i32>,
 ) -> Result<Round, sqlx::Error> {
     let id = dguesser_core::generate_round_id();
@@ -388,10 +390,10 @@ pub async fn create_round(
     sqlx::query_as!(
         Round,
         r#"
-        INSERT INTO rounds (id, game_id, round_number, location_lat, location_lng, panorama_id, location_id, time_limit_ms)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO rounds (id, game_id, round_number, location_lat, location_lng, panorama_id, location_id, heading, time_limit_ms)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,
-                  started_at, ended_at, time_limit_ms
+                  heading, started_at, ended_at, time_limit_ms
         "#,
         id,
         game_id,
@@ -400,6 +402,7 @@ pub async fn create_round(
         location_lng,
         panorama_id,
         location_id,
+        heading,
         time_limit_ms
     )
     .fetch_one(pool)
@@ -412,7 +415,7 @@ pub async fn get_round_by_id(pool: &DbPool, id: &str) -> Result<Option<Round>, s
         Round,
         r#"
         SELECT id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,
-               started_at, ended_at, time_limit_ms
+               heading, started_at, ended_at, time_limit_ms
         FROM rounds WHERE id = $1
         "#,
         id
@@ -427,7 +430,7 @@ pub async fn get_rounds_for_game(pool: &DbPool, game_id: &str) -> Result<Vec<Rou
         Round,
         r#"
         SELECT id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,
-               started_at, ended_at, time_limit_ms
+               heading, started_at, ended_at, time_limit_ms
         FROM rounds WHERE game_id = $1
         ORDER BY round_number ASC
         "#,
@@ -443,7 +446,7 @@ pub async fn get_current_round(pool: &DbPool, game_id: &str) -> Result<Option<Ro
         Round,
         r#"
         SELECT id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,
-               started_at, ended_at, time_limit_ms
+               heading, started_at, ended_at, time_limit_ms
         FROM rounds WHERE game_id = $1
         ORDER BY round_number DESC
         LIMIT 1
