@@ -3,9 +3,10 @@ FROM oven/bun:1 AS builder
 
 WORKDIR /app
 
-# Build arguments for Vite environment variables (baked in at build time)
-ARG VITE_API_URL
-ARG VITE_REALTIME_URL
+# Production URLs for Vite (baked in at build time)
+# These can be overridden via build args: --build-arg VITE_API_URL=...
+ARG VITE_API_URL=https://api.dguesser.lol
+ARG VITE_REALTIME_URL=https://ws.dguesser.lol
 ARG VITE_GOOGLE_MAPS_API_KEY
 
 # Set as environment variables for the build
