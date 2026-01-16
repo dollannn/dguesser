@@ -28,6 +28,8 @@ export interface Player {
   /** User ID (prefixed nanoid: usr_xxxxxxxxxxxx) */
   user_id: string;
   display_name: string;
+  /** Avatar URL from OAuth provider */
+  avatar_url: string | null;
   is_host: boolean;
   score: number;
 }

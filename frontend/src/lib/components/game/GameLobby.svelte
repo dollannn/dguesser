@@ -163,6 +163,9 @@
               >
                 <div class="flex items-center gap-3">
                   <Avatar.Root class="size-8">
+                    {#if player.avatar_url}
+                      <Avatar.Image src={player.avatar_url} alt={player.display_name} />
+                    {/if}
                     <Avatar.Fallback class="text-xs">
                       {getInitials(player.display_name)}
                     </Avatar.Fallback>

@@ -122,6 +122,8 @@ pub struct PlayerInfo {
     pub user_id: String,
     /// Display name
     pub display_name: String,
+    /// Avatar URL (from OAuth provider)
+    pub avatar_url: Option<String>,
     /// Whether this player is the host
     pub is_host: bool,
     /// Total score in this game
@@ -464,9 +466,13 @@ pub async fn join_game_by_code(
     let mut player_infos = Vec::new();
     for p in players {
         let user = dguesser_db::users::get_by_id(state.db(), &p.user_id).await?;
+        let (display_name, avatar_url) = user
+            .map(|u| (u.display_name, u.avatar_url))
+            .unwrap_or_else(|| ("Unknown".to_string(), None));
         player_infos.push(PlayerInfo {
             user_id: p.user_id,
-            display_name: user.map(|u| u.display_name).unwrap_or_else(|| "Unknown".to_string()),
+            display_name,
+            avatar_url,
             is_host: p.is_host,
             score: p.score_total,
         });
@@ -521,13 +527,17 @@ pub async fn get_game(
         return Err(ApiError::forbidden("Not a player in this game"));
     }
 
-    // Get display names for players
+    // Get display names and avatars for players
     let mut player_infos = Vec::new();
     for p in players {
         let user = dguesser_db::users::get_by_id(state.db(), &p.user_id).await?;
+        let (display_name, avatar_url) = user
+            .map(|u| (u.display_name, u.avatar_url))
+            .unwrap_or_else(|| ("Unknown".to_string(), None));
         player_infos.push(PlayerInfo {
             user_id: p.user_id,
-            display_name: user.map(|u| u.display_name).unwrap_or_else(|| "Unknown".to_string()),
+            display_name,
+            avatar_url,
             is_host: p.is_host,
             score: p.score_total,
         });
