@@ -1,5 +1,5 @@
 # Build stage (cargo-chef, Debian)
-FROM rust:1.83-bookworm AS chef
+FROM rust:1.85-bookworm AS chef
 
 WORKDIR /app
 
@@ -13,8 +13,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 FROM chef AS planner
 
+# Copy workspace manifest files - must preserve directory structure
 COPY Cargo.toml Cargo.lock ./
-COPY crates/*/Cargo.toml crates/*/Cargo.toml
+RUN mkdir -p crates/api crates/auth crates/core crates/db crates/locations crates/protocol crates/realtime crates/seeder
+COPY crates/api/Cargo.toml crates/api/
+COPY crates/auth/Cargo.toml crates/auth/
+COPY crates/core/Cargo.toml crates/core/
+COPY crates/db/Cargo.toml crates/db/
+COPY crates/locations/Cargo.toml crates/locations/
+COPY crates/protocol/Cargo.toml crates/protocol/
+COPY crates/realtime/Cargo.toml crates/realtime/
+COPY crates/seeder/Cargo.toml crates/seeder/
+
+# Create dummy lib.rs/main.rs for each crate so cargo can resolve the workspace
+RUN for crate in api auth core db locations protocol realtime seeder; do \
+      if [ "$crate" = "api" ] || [ "$crate" = "realtime" ] || [ "$crate" = "seeder" ]; then \
+        mkdir -p crates/$crate/src && touch crates/$crate/src/main.rs; \
+      else \
+        mkdir -p crates/$crate/src && touch crates/$crate/src/lib.rs; \
+      fi \
+    done
 
 RUN cargo chef prepare --recipe-path recipe.json
 
