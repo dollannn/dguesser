@@ -130,7 +130,7 @@ async fn check_database(pool: &sqlx::PgPool) -> CheckResult {
         Ok(_) => CheckResult::healthy(start.elapsed().as_millis() as u64),
         Err(e) => {
             tracing::error!(error = %e, "Database health check failed");
-            CheckResult::unhealthy(e.to_string())
+            CheckResult::unhealthy("Database connection failed".to_string())
         }
     }
 }
@@ -144,12 +144,12 @@ async fn check_redis(client: &redis::Client) -> CheckResult {
             Ok(_) => CheckResult::healthy(start.elapsed().as_millis() as u64),
             Err(e) => {
                 tracing::error!(error = %e, "Redis PING failed");
-                CheckResult::unhealthy(e.to_string())
+                CheckResult::unhealthy("Redis ping failed".to_string())
             }
         },
         Err(e) => {
             tracing::error!(error = %e, "Redis connection failed");
-            CheckResult::unhealthy(e.to_string())
+            CheckResult::unhealthy("Redis connection failed".to_string())
         }
     }
 }
