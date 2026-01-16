@@ -1,6 +1,7 @@
 //! Application state
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use dguesser_auth::{GoogleOAuth, MicrosoftOAuth, SessionConfig};
 use dguesser_core::location::LocationProvider;
@@ -25,6 +26,8 @@ struct AppStateInner {
     microsoft_oauth: Option<MicrosoftOAuth>,
     frontend_url: String,
     location_provider: Arc<dyn LocationProvider>,
+    started_at: Instant,
+    is_production: bool,
 }
 
 impl AppState {
@@ -132,6 +135,8 @@ impl AppState {
                 microsoft_oauth,
                 frontend_url: config.frontend_url.clone(),
                 location_provider,
+                started_at: Instant::now(),
+                is_production: config.is_production,
             }),
         })
     }
@@ -170,6 +175,16 @@ impl AppState {
     /// Get the location provider
     pub fn location_provider(&self) -> &dyn LocationProvider {
         self.inner.location_provider.as_ref()
+    }
+
+    /// Get uptime in seconds since service started
+    pub fn uptime_seconds(&self) -> u64 {
+        self.inner.started_at.elapsed().as_secs()
+    }
+
+    /// Check if running in production mode
+    pub fn is_production(&self) -> bool {
+        self.inner.is_production
     }
 }
 

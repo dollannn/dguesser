@@ -15,6 +15,7 @@ pub mod health;
 pub mod leaderboard;
 pub mod locations;
 pub mod maps;
+pub mod service;
 pub mod sessions;
 pub mod users;
 
@@ -22,6 +23,7 @@ pub mod users;
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        service::service_info,
         health::health_check,
         health::liveness,
         health::readiness,
@@ -119,6 +121,7 @@ pub mod users;
         health::HealthResponse,
         health::HealthChecks,
         health::CheckResult,
+        dguesser_protocol::api::service::ServiceInfo,
         dguesser_protocol::api::admin::AdminStatsResponse,
         dguesser_protocol::api::admin::ReviewQueueItem,
         dguesser_protocol::api::admin::ReviewQueueResponse,
@@ -130,6 +133,7 @@ pub mod users;
         dguesser_protocol::api::admin::UpdateReviewStatusResponse,
     )),
     tags(
+        (name = "service", description = "Service information endpoints"),
         (name = "health", description = "Health check endpoints"),
         (name = "auth", description = "Authentication endpoints"),
         (name = "games", description = "Game management endpoints"),
@@ -164,6 +168,8 @@ pub fn create_router(state: AppState, cors: CorsLayer) -> Router {
 
     // Create the main application router with state
     let app = Router::new()
+        // Root service info endpoint
+        .route("/", axum::routing::get(service::service_info))
         // Health endpoints (no rate limiting)
         .route("/health", axum::routing::get(health::health_check))
         .route("/livez", axum::routing::get(health::liveness))

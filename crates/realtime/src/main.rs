@@ -1,10 +1,11 @@
 //! DGuesser Realtime server (Socket.IO)
 
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use axum::routing::get;
 use axum::{Json, Router, extract::State, http::StatusCode};
-
+use dguesser_protocol::api::service::ServiceInfo;
 use serde::Serialize;
 use socketioxide::SocketIo;
 use tokio::signal;
@@ -67,11 +68,15 @@ async fn main() -> anyhow::Result<()> {
     io.ns("/", handlers::on_connect);
 
     // Build router with health endpoints
+    let http_state =
+        HttpState { db: state.db().clone(), redis, started_at: Instant::now(), is_production };
+
     let app = Router::new()
+        .route("/", get(service_info))
         .route("/health", get(health_check))
         .route("/livez", get(liveness))
         .route("/readyz", get(readiness))
-        .with_state(HealthState { db: state.db().clone(), redis })
+        .with_state(http_state)
         .layer(
             ServiceBuilder::new()
                 .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
@@ -175,12 +180,14 @@ async fn shutdown_signal() {
     }
 }
 
-// Health check types and handlers
+// HTTP route types and handlers
 
 #[derive(Clone)]
-struct HealthState {
+struct HttpState {
     db: sqlx::PgPool,
     redis: redis::Client,
+    started_at: Instant,
+    is_production: bool,
 }
 
 #[derive(Serialize)]
@@ -215,7 +222,22 @@ impl CheckResult {
     }
 }
 
-async fn health_check(State(state): State<HealthState>) -> (StatusCode, Json<HealthResponse>) {
+async fn service_info(State(state): State<HttpState>) -> Json<ServiceInfo> {
+    let environment = if state.is_production { "production" } else { "development" };
+
+    Json(ServiceInfo {
+        about: "TODO: Add description",
+        name: env!("CARGO_PKG_NAME"),
+        version: env!("CARGO_PKG_VERSION"),
+        git_sha: env!("GIT_SHA"),
+        environment,
+        rust_version: env!("RUST_VERSION"),
+        build_timestamp: env!("BUILD_TIMESTAMP"),
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+    })
+}
+
+async fn health_check(State(state): State<HttpState>) -> (StatusCode, Json<HealthResponse>) {
     let (db_check, redis_check) =
         tokio::join!(check_database(&state.db), check_redis(&state.redis));
 
@@ -237,7 +259,7 @@ async fn liveness() -> StatusCode {
     StatusCode::OK
 }
 
-async fn readiness(State(state): State<HealthState>) -> StatusCode {
+async fn readiness(State(state): State<HttpState>) -> StatusCode {
     let (db_check, redis_check) =
         tokio::join!(check_database(&state.db), check_redis(&state.redis));
 
