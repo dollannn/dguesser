@@ -3,6 +3,16 @@ FROM oven/bun:1 AS builder
 
 WORKDIR /app
 
+# Build arguments for Vite environment variables (baked in at build time)
+ARG VITE_API_URL
+ARG VITE_REALTIME_URL
+ARG VITE_GOOGLE_MAPS_API_KEY
+
+# Set as environment variables for the build
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_REALTIME_URL=$VITE_REALTIME_URL
+ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
+
 # Copy package files (from repo root, frontend/ prefix for Railway monorepo)
 COPY frontend/package.json frontend/bun.lock ./
 
