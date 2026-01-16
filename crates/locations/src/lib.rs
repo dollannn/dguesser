@@ -40,5 +40,5 @@ pub use error::LocationPackError;
 pub use index::CountryIndex;
 pub use manifest::Manifest;
 pub use pack::{PackRecord, RECORD_SIZE};
-pub use provider::PackProvider;
+pub use provider::{PackProvider, PackProviderConfig};
 pub use reader::{FileReader, HttpReader, RangeReader};
