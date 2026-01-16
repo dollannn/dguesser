@@ -55,7 +55,8 @@ pub async fn handle_join(
             return;
         }
         Err(e) => {
-            emit_error(&socket, "DATABASE_ERROR", &e.to_string());
+            tracing::error!(error = %e, game_id = %payload.game_id, "Database error in game lookup");
+            emit_error(&socket, "INTERNAL_ERROR", "An internal error occurred");
             return;
         }
     };

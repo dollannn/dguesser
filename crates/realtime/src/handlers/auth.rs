@@ -125,10 +125,14 @@ pub async fn handle_auth(
 /// Validate session and return user ID
 async fn authenticate(state: &AppState, session_id: &str) -> Result<String, String> {
     // Validate session
-    let session = dguesser_db::sessions::get_valid(state.db(), session_id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| "Invalid session".to_string())?;
+    let session = match dguesser_db::sessions::get_valid(state.db(), session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return Err("Invalid session".to_string()),
+        Err(e) => {
+            tracing::error!(error = %e, "Database error during session validation");
+            return Err("An internal error occurred".to_string());
+        }
+    };
 
     // Touch session to update last_accessed_at
     dguesser_db::sessions::touch(state.db(), session_id).await.ok();
