@@ -100,6 +100,29 @@ export interface GameSummary {
   played_at: string;
 }
 
+export interface UpdateSettingsRequest {
+  rounds?: number;
+  time_limit_seconds?: number;
+  map_id?: string;
+  movement_allowed?: boolean;
+  zoom_allowed?: boolean;
+  rotation_allowed?: boolean;
+}
+
+export interface UpdateSettingsResponse {
+  settings: GameSettings;
+}
+
+export interface GamePreset {
+  id: string;
+  name: string;
+  description: string;
+  settings: GameSettings;
+}
+
+/** Well-known preset IDs */
+export type PresetId = 'classic' | 'nomove' | 'speedround' | 'explorer' | 'custom';
+
 export const gamesApi = {
   /** Create a new game */
   async create(request: CreateGameRequest): Promise<CreateGameResponse> {
@@ -149,5 +172,15 @@ export const gamesApi = {
   /** Join a game by code */
   async joinByCode(code: string): Promise<GameDetails> {
     return api.post<GameDetails>('/games/join', { code });
+  },
+
+  /** Update game settings (host only, lobby only) */
+  async updateSettings(gameId: string, settings: UpdateSettingsRequest): Promise<UpdateSettingsResponse> {
+    return api.patch<UpdateSettingsResponse>(`/games/${gameId}/settings`, settings);
+  },
+
+  /** Get available game presets */
+  async getPresets(): Promise<GamePreset[]> {
+    return api.get<GamePreset[]>('/games/presets');
   },
 };

@@ -3,6 +3,29 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+/// Game settings payload for socket events
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GameSettingsPayload {
+    /// Number of rounds in the game
+    #[schema(example = 5)]
+    pub rounds: u8,
+    /// Time limit per round in seconds (0 = unlimited)
+    #[schema(example = 120)]
+    pub time_limit_seconds: u32,
+    /// Map/region identifier
+    #[schema(example = "world")]
+    pub map_id: String,
+    /// Whether players can move in Street View
+    #[schema(example = true)]
+    pub movement_allowed: bool,
+    /// Whether zoom is allowed
+    #[schema(example = true)]
+    pub zoom_allowed: bool,
+    /// Whether rotation/compass is allowed
+    #[schema(example = true)]
+    pub rotation_allowed: bool,
+}
+
 /// Client request to join a game
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct JoinGamePayload {
@@ -175,6 +198,11 @@ pub struct GameStatePayload {
     pub current_round: u8,
     /// Total rounds
     pub total_rounds: u8,
+    /// Game settings
+    pub settings: GameSettingsPayload,
+    /// User ID of the game creator/host
+    #[schema(example = "usr_V1StGXR8_Z5j")]
+    pub host_id: String,
     /// All players in the game
     pub players: Vec<PlayerInfo>,
     /// Current round location (if active)
@@ -271,4 +299,14 @@ pub struct PlayerScoreInfo {
     /// Whether the player is connected
     #[schema(example = true)]
     pub connected: bool,
+}
+
+/// Settings updated payload (broadcast to all players in lobby)
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SettingsUpdatedPayload {
+    /// Game ID (e.g., gam_FybH2oF9Xaw8)
+    #[schema(example = "gam_FybH2oF9Xaw8")]
+    pub game_id: String,
+    /// Updated settings
+    pub settings: GameSettingsPayload,
 }

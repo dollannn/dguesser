@@ -18,10 +18,11 @@ use dguesser_core::location::LocationProvider;
 use dguesser_db::DbPool;
 use dguesser_protocol::socket::events;
 use dguesser_protocol::socket::payloads::{
-    FinalStanding, GameEndPayload, GameStatePayload, PlayerDisconnectedPayload,
-    PlayerGuessedPayload, PlayerInfo, PlayerJoinedPayload, PlayerLeftPayload,
-    PlayerReconnectedPayload, PlayerScoreInfo, PlayerTimeoutPayload, RoundEndPayload,
-    RoundLocation, RoundResult, RoundStartPayload, ScoresUpdatePayload,
+    FinalStanding, GameEndPayload, GameSettingsPayload, GameStatePayload,
+    PlayerDisconnectedPayload, PlayerGuessedPayload, PlayerInfo, PlayerJoinedPayload,
+    PlayerLeftPayload, PlayerReconnectedPayload, PlayerScoreInfo, PlayerTimeoutPayload,
+    RoundEndPayload, RoundLocation, RoundResult, RoundStartPayload, ScoresUpdatePayload,
+    SettingsUpdatedPayload,
 };
 use socketioxide::SocketIo;
 use tokio::sync::mpsc;
@@ -112,6 +113,10 @@ impl GameActor {
                 }
                 GameCommand::Reconnect { user_id, socket_id } => {
                     self.handle_reconnect(&user_id, &socket_id).await;
+                }
+                GameCommand::UpdateSettings { user_id, settings, respond } => {
+                    let result = self.handle_update_settings(&user_id, settings).await;
+                    let _ = respond.send(result);
                 }
                 GameCommand::Tick => {
                     self.handle_tick().await;
@@ -728,6 +733,45 @@ impl GameActor {
         }
     }
 
+    /// Handle settings update (host only, lobby only)
+    async fn handle_update_settings(
+        &mut self,
+        user_id: &str,
+        settings: game::GameSettings,
+    ) -> Result<(), String> {
+        let state = self.state.as_ref().ok_or("Game not initialized")?;
+        let now = Utc::now();
+
+        // Apply update settings command
+        let result = reduce(
+            state,
+            CoreCommand::UpdateSettings {
+                user_id: user_id.to_string(),
+                settings: settings.clone(),
+            },
+            now,
+        );
+
+        if result.has_error() {
+            return Err(self.extract_error_message(&result));
+        }
+
+        // Persist settings to database
+        let settings_json = serde_json::to_value(&settings).unwrap_or_default();
+        dguesser_db::games::update_game_settings(&self.db, &self.game_id, settings_json)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Update state and broadcast
+        self.state = Some(result.state);
+        self.broadcast_events(&result.events).await;
+
+        // Save to Redis
+        self.save_state_to_redis().await;
+
+        Ok(())
+    }
+
     // =========================================================================
     // Round Management
     // =========================================================================
@@ -916,6 +960,9 @@ impl GameActor {
                 GameEvent::GameEnded { .. } => {
                     self.broadcast_game_end().await;
                 }
+                GameEvent::SettingsUpdated { settings } => {
+                    self.broadcast_settings_updated(settings).await;
+                }
                 GameEvent::Error { .. } => {
                     // Errors are returned to the caller, not broadcast
                 }
@@ -974,11 +1021,30 @@ impl GameActor {
             .and_then(|r| r.time_remaining_ms(Utc::now()))
             .map(|ms| ms as u32);
 
+        // Find the host
+        let host_id = state
+            .players
+            .values()
+            .find(|p| p.is_host)
+            .map(|p| p.user_id.clone())
+            .unwrap_or_default();
+
+        let settings = GameSettingsPayload {
+            rounds: state.settings.rounds,
+            time_limit_seconds: state.settings.time_limit_seconds,
+            map_id: state.settings.map_id.clone(),
+            movement_allowed: state.settings.movement_allowed,
+            zoom_allowed: state.settings.zoom_allowed,
+            rotation_allowed: state.settings.rotation_allowed,
+        };
+
         let payload = GameStatePayload {
             game_id: self.game_id.clone(),
             status: status.to_string(),
             current_round: state.round_number,
             total_rounds: state.settings.rounds,
+            settings,
+            host_id,
             players,
             location,
             time_remaining_ms,
@@ -1208,6 +1274,25 @@ impl GameActor {
         };
 
         io.to(self.game_id.clone()).emit(events::server::SCORES_UPDATE, &payload).ok();
+    }
+
+    /// Broadcast settings updated
+    async fn broadcast_settings_updated(&self, settings: &game::GameSettings) {
+        let Some(io) = &self.io else { return };
+
+        let payload = SettingsUpdatedPayload {
+            game_id: self.game_id.clone(),
+            settings: GameSettingsPayload {
+                rounds: settings.rounds,
+                time_limit_seconds: settings.time_limit_seconds,
+                map_id: settings.map_id.clone(),
+                movement_allowed: settings.movement_allowed,
+                zoom_allowed: settings.zoom_allowed,
+                rotation_allowed: settings.rotation_allowed,
+            },
+        };
+
+        io.to(self.game_id.clone()).emit(events::server::SETTINGS_UPDATED, &payload).ok();
     }
 }
 

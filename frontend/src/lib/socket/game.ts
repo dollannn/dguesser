@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { socketClient, toastStore } from './client';
+import type { GameSettings } from '$lib/api/games';
 
 // Types matching backend protocol
 export interface RoundLocation {
@@ -72,9 +73,17 @@ export interface GameStatePayload {
   status: string;
   current_round: number;
   total_rounds: number;
+  settings: GameSettings;
+  host_id: string;
   players: PlayerInfo[];
   location: RoundLocation | null;
   time_remaining_ms: number | null;
+}
+
+/** Settings updated payload */
+export interface SettingsUpdatedPayload {
+  game_id: string;
+  settings: GameSettings;
 }
 
 /** Player disconnected payload */
@@ -131,6 +140,10 @@ export interface GameState {
   status: 'idle' | 'lobby' | 'playing' | 'round_end' | 'finished';
   currentRound: number;
   totalRounds: number;
+  /** Game settings */
+  settings: GameSettings | null;
+  /** Host user ID (usr_xxxxxxxxxxxx) */
+  hostId: string | null;
   location: RoundLocation | null;
   timeLimit: number | null;
   roundStartedAt: number | null;
@@ -152,6 +165,8 @@ function createGameStore() {
     status: 'idle',
     currentRound: 0,
     totalRounds: 0,
+    settings: null,
+    hostId: null,
     location: null,
     timeLimit: null,
     roundStartedAt: null,
@@ -251,6 +266,8 @@ function createGameStore() {
         status,
         currentRound: payload.current_round,
         totalRounds: payload.total_rounds,
+        settings: payload.settings,
+        hostId: payload.host_id,
         location: payload.location,
         timeRemainingMs: payload.time_remaining_ms,
         roundStartedAt,
@@ -410,6 +427,15 @@ function createGameStore() {
       }));
     },
 
+    /** Handle settings updated (in lobby) */
+    handleSettingsUpdated(payload: SettingsUpdatedPayload): void {
+      update((s) => ({
+        ...s,
+        settings: payload.settings,
+        totalRounds: payload.settings.rounds,
+      }));
+    },
+
     /** Set round info (for restoring state) */
     setRoundInfo(currentRound: number, totalRounds: number): void {
       update((s) => ({
@@ -476,6 +502,10 @@ export function initGameSocketListeners(): () => void {
     // Live scores update
     socketClient.on<ScoresUpdatePayload>('scores:update', (data) => {
       gameStore.handleScoresUpdate(data);
+    }),
+    // Settings updated (in lobby)
+    socketClient.on<SettingsUpdatedPayload>('game:settings_updated', (data) => {
+      gameStore.handleSettingsUpdated(data);
     }),
     // Error handling
     socketClient.on<{ code: string; message: string }>('error', (data) => {

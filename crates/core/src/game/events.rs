@@ -9,6 +9,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::rules::GameSettings;
+
 /// Events emitted by the game reducer.
 ///
 /// These events are transport-agnostic and can be converted to
@@ -74,6 +76,12 @@ pub enum GameEvent {
     /// The game has ended with final standings.
     GameEnded { final_standings: Vec<FinalStandingData> },
 
+    /// Game settings have been updated (in lobby).
+    SettingsUpdated {
+        /// The updated settings
+        settings: GameSettings,
+    },
+
     /// An error occurred while processing a command.
     Error {
         /// Error code (e.g., "NOT_HOST", "ALREADY_GUESSED")
@@ -116,6 +124,7 @@ impl GameEvent {
             GameEvent::RoundEnded { .. } => "RoundEnded",
             GameEvent::ScoresUpdated { .. } => "ScoresUpdated",
             GameEvent::GameEnded { .. } => "GameEnded",
+            GameEvent::SettingsUpdated { .. } => "SettingsUpdated",
             GameEvent::Error { .. } => "Error",
         }
     }

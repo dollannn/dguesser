@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 
 use super::commands::{GameCommand, LocationData};
 use super::events::{FinalStandingData, GameEvent, RoundResultData, ScoreData};
+use super::rules::{GameSettings, validate_settings};
 use super::scoring::{ScoringConfig, calculate_score};
 use super::state::{GamePhase, GameState, Guess, PlayerState, RoundState};
 use crate::geo::distance::haversine_distance;
@@ -102,6 +103,10 @@ pub fn reduce(state: &GameState, command: GameCommand, now: DateTime<Utc>) -> Re
         GameCommand::EndGame => handle_end_game(state.clone()),
 
         GameCommand::Tick => handle_tick(state.clone(), now),
+
+        GameCommand::UpdateSettings { user_id, settings } => {
+            handle_update_settings(state.clone(), user_id, settings)
+        }
     }
 }
 
@@ -488,6 +493,38 @@ fn handle_tick(mut state: GameState, now: DateTime<Utc>) -> ReducerResult {
     } else {
         ReducerResult::with_events(state, events)
     }
+}
+
+fn handle_update_settings(
+    mut state: GameState,
+    user_id: String,
+    settings: GameSettings,
+) -> ReducerResult {
+    // Must be in lobby
+    if state.phase != GamePhase::Lobby {
+        return ReducerResult::error(
+            state,
+            "GAME_STARTED",
+            "Cannot update settings after game has started",
+        );
+    }
+
+    // Must be host
+    if !state.is_host(&user_id) {
+        return ReducerResult::error(state, "NOT_HOST", "Only the host can update settings");
+    }
+
+    // Validate settings
+    if let Err(errors) = validate_settings(&settings) {
+        return ReducerResult::error(state, "INVALID_SETTINGS", &errors.join(", "));
+    }
+
+    // Update settings
+    state.settings = settings.clone();
+
+    let event = GameEvent::SettingsUpdated { settings };
+
+    ReducerResult::with_events(state, vec![event])
 }
 
 // =============================================================================

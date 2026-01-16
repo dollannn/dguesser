@@ -18,6 +18,8 @@ pub mod server {
     pub const PLAYER_TIMEOUT: &str = "player:timeout";
     /// Live scoreboard update (during gameplay)
     pub const SCORES_UPDATE: &str = "scores:update";
+    /// Game settings updated (in lobby)
+    pub const SETTINGS_UPDATED: &str = "game:settings_updated";
 }
 
 /// Socket.IO event names (client -> server)

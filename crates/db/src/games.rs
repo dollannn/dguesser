@@ -218,6 +218,18 @@ pub async fn set_game_total_score(
     Ok(())
 }
 
+/// Update game settings (only valid in lobby)
+pub async fn update_game_settings(
+    pool: &DbPool,
+    game_id: &str,
+    settings: serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!("UPDATE games SET settings = $2 WHERE id = $1", game_id, settings)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Get active games in lobby (for listing joinable games)
 pub async fn get_lobby_games(pool: &DbPool, limit: i64) -> Result<Vec<Game>, sqlx::Error> {
     sqlx::query_as!(

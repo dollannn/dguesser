@@ -334,13 +334,13 @@ pub async fn create_map(
     }
 
     // Validate description
-    if let Some(ref desc) = body.description {
-        if desc.len() > 500 {
-            return Err(ApiError::bad_request(
-                "DESCRIPTION_TOO_LONG",
-                "Description must be at most 500 characters",
-            ));
-        }
+    if let Some(ref desc) = body.description
+        && desc.len() > 500
+    {
+        return Err(ApiError::bad_request(
+            "DESCRIPTION_TOO_LONG",
+            "Description must be at most 500 characters",
+        ));
     }
 
     // Parse visibility
@@ -491,13 +491,13 @@ pub async fn update_map(
         }
     }
 
-    if let Some(ref desc) = body.description {
-        if desc.len() > 500 {
-            return Err(ApiError::bad_request(
-                "DESCRIPTION_TOO_LONG",
-                "Description must be at most 500 characters",
-            ));
-        }
+    if let Some(ref desc) = body.description
+        && desc.len() > 500
+    {
+        return Err(ApiError::bad_request(
+            "DESCRIPTION_TOO_LONG",
+            "Description must be at most 500 characters",
+        ));
     }
 
     // Parse visibility
@@ -904,15 +904,7 @@ pub async fn remove_location(
 fn generate_slug(name: &str) -> String {
     name.to_lowercase()
         .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c
-            } else if c.is_whitespace() || c == '-' || c == '_' {
-                '-'
-            } else {
-                '-'
-            }
-        })
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { GameDetails } from '$lib/api/games';
+  import type { GameDetails, GameSettings } from '$lib/api/games';
+  import { gamesApi } from '$lib/api/games';
   import { user } from '$lib/stores/auth';
   import { gameStore } from '$lib/socket/game';
   import { Button } from '$lib/components/ui/button';
@@ -7,15 +8,14 @@
   import { Badge } from '$lib/components/ui/badge';
   import * as Avatar from '$lib/components/ui/avatar';
   import { Separator } from '$lib/components/ui/separator';
+  import GameSettingsForm from './GameSettingsForm.svelte';
   import PlayIcon from '@lucide/svelte/icons/play';
   import UsersIcon from '@lucide/svelte/icons/users';
   import TargetIcon from '@lucide/svelte/icons/target';
-  import ClockIcon from '@lucide/svelte/icons/clock';
-  import MapIcon from '@lucide/svelte/icons/map';
-  import FootprintsIcon from '@lucide/svelte/icons/footprints';
   import CopyIcon from '@lucide/svelte/icons/copy';
   import CheckIcon from '@lucide/svelte/icons/check';
   import CrownIcon from '@lucide/svelte/icons/crown';
+  import SettingsIcon from '@lucide/svelte/icons/settings';
   import { toast } from 'svelte-sonner';
 
   interface Props {
@@ -62,6 +62,26 @@
       .join('')
       .toUpperCase()
       .slice(0, 2);
+  }
+
+  // Use socket state settings if available, otherwise fall back to API
+  let currentSettings = $derived($gameStore.settings ?? game.settings);
+
+  // Handle settings changes from the form
+  let isUpdatingSettings = $state(false);
+  async function handleSettingsChange(changes: Partial<GameSettings>) {
+    if (isUpdatingSettings || !isHost) return;
+    
+    isUpdatingSettings = true;
+    try {
+      await gamesApi.updateSettings(game.id, changes);
+      // Socket will broadcast the update to all players
+    } catch (error) {
+      console.error('Failed to update settings:', error);
+      toast.error('Failed to update settings');
+    } finally {
+      isUpdatingSettings = false;
+    }
   }
 </script>
 
@@ -121,43 +141,18 @@
 
       <!-- Game Settings -->
       <div>
-        <h3 class="text-sm font-medium text-muted-foreground mb-3">Game Settings</h3>
-        <div class="grid grid-cols-2 gap-3">
-          <div class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
-            <TargetIcon class="size-4 text-primary" />
-            <div>
-              <p class="text-xs text-muted-foreground">Rounds</p>
-              <p class="text-sm font-medium">{game.settings.rounds}</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
-            <ClockIcon class="size-4 text-primary" />
-            <div>
-              <p class="text-xs text-muted-foreground">Time Limit</p>
-              <p class="text-sm font-medium">
-                {game.settings.time_limit_seconds > 0
-                  ? `${game.settings.time_limit_seconds}s`
-                  : 'Unlimited'}
-              </p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
-            <FootprintsIcon class="size-4 text-primary" />
-            <div>
-              <p class="text-xs text-muted-foreground">Movement</p>
-              <p class="text-sm font-medium">
-                {game.settings.movement_allowed ? 'Allowed' : 'Disabled'}
-              </p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
-            <MapIcon class="size-4 text-primary" />
-            <div>
-              <p class="text-xs text-muted-foreground">Map</p>
-              <p class="text-sm font-medium">{game.settings.map_id || 'World'}</p>
-            </div>
-          </div>
+        <div class="flex items-center gap-2 mb-3">
+          <SettingsIcon class="size-4 text-muted-foreground" />
+          <h3 class="text-sm font-medium text-muted-foreground">Game Settings</h3>
+          {#if isHost}
+            <Badge variant="outline" class="text-xs ml-auto">Editing</Badge>
+          {/if}
         </div>
+        <GameSettingsForm 
+          settings={currentSettings}
+          readonly={!isHost}
+          onchange={handleSettingsChange}
+        />
       </div>
 
       <!-- Players List (Multiplayer only) -->

@@ -81,6 +81,12 @@ pub enum GameCommand {
         user_id: String,
         socket_id: String,
     },
+    /// Update game settings (host only, lobby phase only)
+    UpdateSettings {
+        user_id: String,
+        settings: dguesser_core::game::GameSettings,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
     Tick,
     Shutdown,
 }

@@ -133,6 +133,7 @@
         locationId={gameState.location.location_id}
         movementAllowed={game.settings.movement_allowed}
         zoomAllowed={game.settings.zoom_allowed}
+        rotationAllowed={game.settings.rotation_allowed}
         showReportButton={true}
       />
     </div>

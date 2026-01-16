@@ -11,6 +11,7 @@
     locationId?: string | null;
     movementAllowed?: boolean;
     zoomAllowed?: boolean;
+    rotationAllowed?: boolean;
     showReportButton?: boolean;
   }
 
@@ -21,6 +22,7 @@
     locationId = null,
     movementAllowed = true,
     zoomAllowed = true,
+    rotationAllowed = true,
     showReportButton = true,
   }: Props = $props();
 
@@ -80,7 +82,7 @@
         disableDefaultUI: true,
         showRoadLabels: false,
         linksControl: movementAllowed,
-        panControl: true,
+        panControl: rotationAllowed,
         zoomControl: zoomAllowed,
         addressControl: false,
         fullscreenControl: false,
@@ -88,6 +90,8 @@
         motionTrackingControl: false,
         clickToGo: movementAllowed,
         scrollwheel: zoomAllowed,
+        // Note: rotationAllowed mainly controls the pan control UI
+        // Mouse/touch panning is harder to fully disable via API options
       });
 
       // Track if we've tried fallback

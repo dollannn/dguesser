@@ -2,6 +2,51 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Game preset configurations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GamePreset {
+    /// Standard game with all features enabled
+    Classic,
+    /// No movement or zoom - guess from starting position only
+    NoMove,
+    /// Quick rounds with short time limits
+    SpeedRound,
+    /// Extended exploration with more rounds and no time limit
+    Explorer,
+    /// Fully custom settings (no preset)
+    Custom,
+}
+
+impl GamePreset {
+    /// Get all available presets (excluding Custom)
+    pub fn all() -> &'static [GamePreset] {
+        &[GamePreset::Classic, GamePreset::NoMove, GamePreset::SpeedRound, GamePreset::Explorer]
+    }
+
+    /// Get display name for the preset
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            GamePreset::Classic => "Classic",
+            GamePreset::NoMove => "No Move",
+            GamePreset::SpeedRound => "Speed Round",
+            GamePreset::Explorer => "Explorer",
+            GamePreset::Custom => "Custom",
+        }
+    }
+
+    /// Get description for the preset
+    pub fn description(&self) -> &'static str {
+        match self {
+            GamePreset::Classic => "Standard game with all features enabled",
+            GamePreset::NoMove => "Guess from starting position - no moving or zooming",
+            GamePreset::SpeedRound => "Fast-paced with 30 second rounds",
+            GamePreset::Explorer => "Take your time with unlimited time and more rounds",
+            GamePreset::Custom => "Custom settings",
+        }
+    }
+}
+
 /// Game settings that affect rules
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameSettings {
@@ -21,14 +66,71 @@ pub struct GameSettings {
 
 impl Default for GameSettings {
     fn default() -> Self {
-        Self {
-            rounds: 5,
-            time_limit_seconds: 120,
-            map_id: "world".to_string(),
-            movement_allowed: true,
-            zoom_allowed: true,
-            rotation_allowed: true,
+        Self::from_preset(GamePreset::Classic)
+    }
+}
+
+impl GameSettings {
+    /// Create settings from a preset
+    pub fn from_preset(preset: GamePreset) -> Self {
+        match preset {
+            GamePreset::Classic => Self {
+                rounds: 5,
+                time_limit_seconds: 120,
+                map_id: "world".to_string(),
+                movement_allowed: true,
+                zoom_allowed: true,
+                rotation_allowed: true,
+            },
+            GamePreset::NoMove => Self {
+                rounds: 5,
+                time_limit_seconds: 120,
+                map_id: "world".to_string(),
+                movement_allowed: false,
+                zoom_allowed: false,
+                rotation_allowed: true,
+            },
+            GamePreset::SpeedRound => Self {
+                rounds: 5,
+                time_limit_seconds: 30,
+                map_id: "world".to_string(),
+                movement_allowed: true,
+                zoom_allowed: true,
+                rotation_allowed: true,
+            },
+            GamePreset::Explorer => Self {
+                rounds: 10,
+                time_limit_seconds: 0, // Unlimited
+                map_id: "world".to_string(),
+                movement_allowed: true,
+                zoom_allowed: true,
+                rotation_allowed: true,
+            },
+            GamePreset::Custom => Self {
+                rounds: 5,
+                time_limit_seconds: 120,
+                map_id: "world".to_string(),
+                movement_allowed: true,
+                zoom_allowed: true,
+                rotation_allowed: true,
+            },
         }
+    }
+
+    /// Detect which preset matches the current settings (if any)
+    pub fn detect_preset(&self) -> GamePreset {
+        for preset in GamePreset::all() {
+            let preset_settings = Self::from_preset(*preset);
+            if self.rounds == preset_settings.rounds
+                && self.time_limit_seconds == preset_settings.time_limit_seconds
+                && self.movement_allowed == preset_settings.movement_allowed
+                && self.zoom_allowed == preset_settings.zoom_allowed
+                && self.rotation_allowed == preset_settings.rotation_allowed
+            {
+                return *preset;
+            }
+        }
+        GamePreset::Custom
     }
 }
 
@@ -113,5 +215,49 @@ mod tests {
     fn test_no_time_limit() {
         let now = chrono::Utc::now() - chrono::Duration::hours(1);
         assert!(can_submit_guess(now, 0, false));
+    }
+
+    #[test]
+    fn test_preset_classic() {
+        let settings = GameSettings::from_preset(GamePreset::Classic);
+        assert_eq!(settings.rounds, 5);
+        assert_eq!(settings.time_limit_seconds, 120);
+        assert!(settings.movement_allowed);
+        assert!(settings.zoom_allowed);
+        assert!(settings.rotation_allowed);
+    }
+
+    #[test]
+    fn test_preset_no_move() {
+        let settings = GameSettings::from_preset(GamePreset::NoMove);
+        assert!(!settings.movement_allowed);
+        assert!(!settings.zoom_allowed);
+        assert!(settings.rotation_allowed);
+    }
+
+    #[test]
+    fn test_preset_speed_round() {
+        let settings = GameSettings::from_preset(GamePreset::SpeedRound);
+        assert_eq!(settings.time_limit_seconds, 30);
+    }
+
+    #[test]
+    fn test_preset_explorer() {
+        let settings = GameSettings::from_preset(GamePreset::Explorer);
+        assert_eq!(settings.rounds, 10);
+        assert_eq!(settings.time_limit_seconds, 0); // Unlimited
+    }
+
+    #[test]
+    fn test_detect_preset_classic() {
+        let settings = GameSettings::from_preset(GamePreset::Classic);
+        assert_eq!(settings.detect_preset(), GamePreset::Classic);
+    }
+
+    #[test]
+    fn test_detect_preset_custom() {
+        let mut settings = GameSettings::from_preset(GamePreset::Classic);
+        settings.rounds = 7; // Custom value
+        assert_eq!(settings.detect_preset(), GamePreset::Custom);
     }
 }

@@ -323,21 +323,20 @@ async fn report_location(
     // Check if we should auto-flag the location
     if let Ok(Some(location)) =
         dguesser_db::locations::get_location_by_id(state.db(), &location_id).await
+        && location.failure_count >= 3
     {
-        if location.failure_count >= 3 {
-            // Auto-flag after 3 reports
-            if let Err(e) = dguesser_db::locations::update_location_review_status(
-                state.db(),
-                &location_id,
-                "flagged",
-                None,
-            )
-            .await
-            {
-                tracing::warn!(error = %e, location_id = %location_id, "Failed to flag location");
-            } else {
-                tracing::warn!(location_id = %location_id, "Location flagged after 3 reports");
-            }
+        // Auto-flag after 3 reports
+        if let Err(e) = dguesser_db::locations::update_location_review_status(
+            state.db(),
+            &location_id,
+            "flagged",
+            None,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, location_id = %location_id, "Failed to flag location");
+        } else {
+            tracing::warn!(location_id = %location_id, "Location flagged after 3 reports");
         }
     }
 

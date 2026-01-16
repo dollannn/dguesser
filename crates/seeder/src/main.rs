@@ -226,9 +226,11 @@ struct ValiLocation {
     heading: Option<f64>,
     /// Pitch (not stored, but present in Vali output)
     #[serde(default)]
+    #[allow(dead_code)]
     pitch: Option<f64>,
     /// Zoom (not stored, but present in Vali output)
     #[serde(default)]
+    #[allow(dead_code)]
     zoom: Option<f64>,
     /// ISO 3166-1 alpha-2 country code
     #[serde(default)]
@@ -262,6 +264,7 @@ struct ValiLocation {
     elevation: Option<i32>,
     /// Tags from Vali
     #[serde(default)]
+    #[allow(dead_code)]
     tags: Option<Vec<String>>,
 }
 
@@ -306,20 +309,18 @@ impl ValiLocation {
         outdoor_only: bool,
     ) -> bool {
         // Filter by year
-        if let Some(min) = min_year {
-            if let Some(year) = self.year {
-                if year < min {
-                    return true;
-                }
-            }
+        if let Some(min) = min_year
+            && let Some(year) = self.year
+            && year < min
+        {
+            return true;
         }
 
-        if let Some(max) = max_year {
-            if let Some(year) = self.year {
-                if year > max {
-                    return true;
-                }
-            }
+        if let Some(max) = max_year
+            && let Some(year) = self.year
+            && year > max
+        {
+            return true;
         }
 
         // Filter trekker/scout coverage

@@ -33,10 +33,12 @@ pub fn router() -> Router<AppState> {
         .route("/join", post(join_game_by_code))
         .route("/{id}", get(get_game))
         .route("/{id}/start", post(start_game))
+        .route("/{id}/settings", axum::routing::patch(update_settings))
         .route("/{id}/rounds/current", get(get_current_round))
         .route("/{id}/rounds/next", post(next_round))
         .route("/{id}/rounds/{round}/guess", post(submit_guess))
         .route("/history", get(get_game_history))
+        .route("/presets", get(get_presets))
 }
 
 // =============================================================================
@@ -231,6 +233,63 @@ pub struct GameSummary {
     pub score: i32,
     /// When the game was played
     pub played_at: DateTime<Utc>,
+}
+
+/// Update game settings request (all fields optional for partial updates)
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateSettingsRequest {
+    /// Number of rounds (1-20)
+    #[schema(example = 5)]
+    pub rounds: Option<u8>,
+    /// Time limit per round in seconds (0 = unlimited)
+    #[schema(example = 120)]
+    pub time_limit_seconds: Option<u32>,
+    /// Map/region identifier
+    #[schema(example = "world")]
+    pub map_id: Option<String>,
+    /// Allow movement in Street View
+    pub movement_allowed: Option<bool>,
+    /// Allow zooming
+    pub zoom_allowed: Option<bool>,
+    /// Allow rotation/panning
+    pub rotation_allowed: Option<bool>,
+}
+
+/// Update settings response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UpdateSettingsResponse {
+    /// The updated settings
+    pub settings: SettingsDto,
+}
+
+/// Settings DTO for responses
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SettingsDto {
+    /// Number of rounds (1-20)
+    pub rounds: u8,
+    /// Time limit per round in seconds (0 = unlimited)
+    pub time_limit_seconds: u32,
+    /// Map/region identifier
+    pub map_id: String,
+    /// Allow movement in Street View
+    pub movement_allowed: bool,
+    /// Allow zooming
+    pub zoom_allowed: bool,
+    /// Allow rotation/panning
+    pub rotation_allowed: bool,
+}
+
+/// Game preset info
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PresetInfo {
+    /// Preset identifier
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Description
+    pub description: String,
+    /// Preset settings
+    pub settings: SettingsDto,
 }
 
 // =============================================================================
@@ -1015,6 +1074,119 @@ pub async fn get_game_history(
     }
 
     Ok(Json(summaries))
+}
+
+/// Update game settings (host only, lobby only)
+#[utoipa::path(
+    patch,
+    path = "/api/v1/games/{id}/settings",
+    params(
+        ("id" = String, Path, description = "Game ID")
+    ),
+    request_body = UpdateSettingsRequest,
+    responses(
+        (status = 200, description = "Settings updated", body = UpdateSettingsResponse),
+        (status = 400, description = "Invalid settings or game not in lobby"),
+        (status = 403, description = "Not authorized (not host)"),
+        (status = 404, description = "Game not found"),
+    ),
+    tag = "games"
+)]
+pub async fn update_settings(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateSettingsRequest>,
+) -> Result<Json<UpdateSettingsResponse>, ApiError> {
+    let now = Utc::now();
+
+    // Load current game state
+    let (game_state, _) = load_game_state(state.db(), &id).await?;
+
+    // Merge request with current settings
+    let mut new_settings = game_state.settings.clone();
+    if let Some(rounds) = req.rounds {
+        new_settings.rounds = rounds;
+    }
+    if let Some(time_limit_seconds) = req.time_limit_seconds {
+        new_settings.time_limit_seconds = time_limit_seconds;
+    }
+    if let Some(map_id) = req.map_id {
+        new_settings.map_id = map_id;
+    }
+    if let Some(movement_allowed) = req.movement_allowed {
+        new_settings.movement_allowed = movement_allowed;
+    }
+    if let Some(zoom_allowed) = req.zoom_allowed {
+        new_settings.zoom_allowed = zoom_allowed;
+    }
+    if let Some(rotation_allowed) = req.rotation_allowed {
+        new_settings.rotation_allowed = rotation_allowed;
+    }
+
+    // Use reducer for validation
+    let result = reduce(
+        &game_state,
+        GameCommand::UpdateSettings {
+            user_id: auth.user_id.clone(),
+            settings: new_settings.clone(),
+        },
+        now,
+    );
+
+    if result.has_error() {
+        return Err(reducer_error_to_api_error(&result));
+    }
+
+    // Persist to database
+    let settings_json = serde_json::to_value(&new_settings).unwrap_or_default();
+    dguesser_db::games::update_game_settings(state.db(), &id, settings_json).await?;
+
+    Ok(Json(UpdateSettingsResponse {
+        settings: SettingsDto {
+            rounds: new_settings.rounds,
+            time_limit_seconds: new_settings.time_limit_seconds,
+            map_id: new_settings.map_id,
+            movement_allowed: new_settings.movement_allowed,
+            zoom_allowed: new_settings.zoom_allowed,
+            rotation_allowed: new_settings.rotation_allowed,
+        },
+    }))
+}
+
+/// Get available game presets
+#[utoipa::path(
+    get,
+    path = "/api/v1/games/presets",
+    responses(
+        (status = 200, description = "Available presets", body = Vec<PresetInfo>),
+    ),
+    tag = "games"
+)]
+pub async fn get_presets() -> Json<Vec<PresetInfo>> {
+    use dguesser_core::game::rules::GamePreset;
+
+    let presets: Vec<PresetInfo> = GamePreset::all()
+        .iter()
+        .map(|preset| {
+            let settings = GameSettings::from_preset(*preset);
+            PresetInfo {
+                id: format!("{:?}", preset).to_lowercase(),
+                name: preset.display_name().to_string(),
+                description: preset.description().to_string(),
+                settings: SettingsDto {
+                    rounds: settings.rounds,
+                    time_limit_seconds: settings.time_limit_seconds,
+                    map_id: settings.map_id,
+                    movement_allowed: settings.movement_allowed,
+                    zoom_allowed: settings.zoom_allowed,
+                    rotation_allowed: settings.rotation_allowed,
+                },
+            }
+        })
+        .collect();
+
+    Json(presets)
 }
 
 // =============================================================================

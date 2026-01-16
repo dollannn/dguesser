@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::rules::GameSettings;
+
 /// Location data for starting or advancing a round.
 ///
 /// The caller is responsible for selecting the location (from a location pool,
@@ -136,6 +138,16 @@ pub enum GameCommand {
     ///
     /// Singleplayer can use "lazy" evaluation instead (check on each request).
     Tick,
+
+    /// Update game settings.
+    ///
+    /// Only valid in the `Lobby` phase and only by the host.
+    UpdateSettings {
+        /// User ID of the player attempting to update (must be host)
+        user_id: String,
+        /// New game settings
+        settings: GameSettings,
+    },
 }
 
 impl GameCommand {
@@ -147,7 +159,8 @@ impl GameCommand {
             | GameCommand::Disconnect { user_id }
             | GameCommand::Reconnect { user_id }
             | GameCommand::Start { user_id, .. }
-            | GameCommand::SubmitGuess { user_id, .. } => Some(user_id),
+            | GameCommand::SubmitGuess { user_id, .. }
+            | GameCommand::UpdateSettings { user_id, .. } => Some(user_id),
             GameCommand::EndRound
             | GameCommand::AdvanceRound { .. }
             | GameCommand::EndGame
@@ -157,7 +170,7 @@ impl GameCommand {
 
     /// Check if this command requires the user to be the host.
     pub fn requires_host(&self) -> bool {
-        matches!(self, GameCommand::Start { .. })
+        matches!(self, GameCommand::Start { .. } | GameCommand::UpdateSettings { .. })
     }
 
     /// Get a human-readable name for this command (for logging/debugging).
@@ -173,6 +186,7 @@ impl GameCommand {
             GameCommand::AdvanceRound { .. } => "AdvanceRound",
             GameCommand::EndGame => "EndGame",
             GameCommand::Tick => "Tick",
+            GameCommand::UpdateSettings { .. } => "UpdateSettings",
         }
     }
 }

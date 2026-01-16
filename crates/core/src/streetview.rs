@@ -132,11 +132,11 @@ fn percent_decode(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '%' {
             let hex: String = chars.by_ref().take(2).collect();
-            if hex.len() == 2 {
-                if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                    result.push(byte as char);
-                    continue;
-                }
+            if hex.len() == 2
+                && let Ok(byte) = u8::from_str_radix(&hex, 16)
+            {
+                result.push(byte as char);
+                continue;
             }
             result.push('%');
             result.push_str(&hex);
@@ -222,13 +222,13 @@ fn extract_view_params(url: &str) -> (Option<f64>, Option<f64>, Option<f64>) {
     }
 
     // Also check for explicit h= parameter in query string
-    if heading.is_none() {
-        if let Some(start) = url.find("h=") {
-            let after = &url[start + 2..];
-            let end = after.find(&['&', '!'][..]).unwrap_or(after.len());
-            if let Ok(v) = after[..end].parse::<f64>() {
-                heading = Some(v);
-            }
+    if heading.is_none()
+        && let Some(start) = url.find("h=")
+    {
+        let after = &url[start + 2..];
+        let end = after.find(&['&', '!'][..]).unwrap_or(after.len());
+        if let Ok(v) = after[..end].parse::<f64>() {
+            heading = Some(v);
         }
     }
 
