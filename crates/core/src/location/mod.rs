@@ -6,6 +6,6 @@
 mod types;
 
 pub use types::{
-    GameLocation, Location, LocationError, LocationProvider, LocationSource,
-    LocationValidationStatus, Map, MapRules, MapVisibility, ReviewStatus,
+    CountryDistribution, GameLocation, Location, LocationError, LocationProvider, LocationSource,
+    LocationValidationStatus, Map, MapRules, MapVisibility, ReviewStatus, SelectionConstraints,
 };

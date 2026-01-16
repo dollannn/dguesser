@@ -885,7 +885,13 @@ async fn create_map(
         .map(|c| c.split(',').map(|s| s.trim().to_uppercase()).collect())
         .unwrap_or_default();
 
-    let rules = MapRules { countries: country_list, min_year, max_year, outdoor_only };
+    let rules = MapRules {
+        countries: country_list,
+        min_year,
+        max_year,
+        outdoor_only,
+        ..Default::default()
+    };
 
     let map = dguesser_db::locations::create_map(pool, slug, name, description, &rules, is_default)
         .await?;

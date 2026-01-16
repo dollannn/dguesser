@@ -5,9 +5,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
+use dguesser_core::geo::distance::haversine_distance;
 use dguesser_core::location::{
-    GameLocation, Location, LocationError, LocationProvider, LocationSource,
-    LocationValidationStatus, Map, MapRules, MapVisibility, ReviewStatus,
+    CountryDistribution, GameLocation, Location, LocationError, LocationProvider, LocationSource,
+    LocationValidationStatus, Map, MapRules, MapVisibility, ReviewStatus, SelectionConstraints,
 };
 use sqlx::FromRow;
 
@@ -225,6 +226,18 @@ impl LocationProvider for LocationRepository {
     ) -> Pin<Box<dyn Future<Output = Result<(), LocationError>> + Send + 'a>> {
         Box::pin(async move { mark_location_as_failed(&self.pool, location_id).await })
     }
+
+    fn select_location_with_constraints<'a>(
+        &'a self,
+        map_id: &'a str,
+        exclude_ids: &'a [String],
+        constraints: &'a SelectionConstraints,
+    ) -> Pin<Box<dyn Future<Output = Result<GameLocation, LocationError>> + Send + 'a>> {
+        Box::pin(async move {
+            select_random_location_with_constraints(&self.pool, map_id, exclude_ids, constraints)
+                .await
+        })
+    }
 }
 
 // =============================================================================
@@ -262,7 +275,7 @@ fn build_location_filter_clause(rules: &MapRules) -> String {
 
 /// Select a random location from a map using the seek-then-wrap algorithm.
 /// This is O(log n) instead of O(n) for ORDER BY random().
-/// Respects map rules for min_year, max_year, and outdoor_only filtering.
+/// Respects map rules for min_year, max_year, outdoor_only, and country_distribution.
 async fn select_random_location(
     pool: &DbPool,
     map_id_or_slug: &str,
@@ -272,6 +285,56 @@ async fn select_random_location(
     let map = get_map_by_id_or_slug(pool, map_id_or_slug).await?;
     let map_id = &map.id;
     let filter_clause = build_location_filter_clause(&map.rules);
+
+    // Determine if we need country-based selection
+    let selected_country = match &map.rules.country_distribution {
+        CountryDistribution::Proportional => None, // Use default behavior
+        CountryDistribution::Equal => {
+            // Get available countries and pick one randomly
+            let countries = get_map_countries(pool, map_id, &filter_clause).await?;
+            if countries.is_empty() {
+                return Err(LocationError::NoLocationsAvailable(map_id_or_slug.to_string()));
+            }
+            let idx = rand::random::<usize>() % countries.len();
+            Some(countries[idx].clone())
+        }
+        CountryDistribution::Weighted { weights } => {
+            // Get available countries and pick based on weights
+            let countries = get_map_countries(pool, map_id, &filter_clause).await?;
+            if countries.is_empty() {
+                return Err(LocationError::NoLocationsAvailable(map_id_or_slug.to_string()));
+            }
+
+            // Build weighted list
+            let weighted: Vec<(&str, u32)> =
+                countries.iter().filter_map(|c| weights.get(c).map(|&w| (c.as_str(), w))).collect();
+
+            if weighted.is_empty() {
+                // No weights match available countries, fall back to equal
+                let idx = rand::random::<usize>() % countries.len();
+                Some(countries[idx].clone())
+            } else {
+                let total: u64 = weighted.iter().map(|(_, w)| *w as u64).sum();
+                let target = rand::random::<u64>() % total;
+                let mut cumulative = 0u64;
+                let mut selected = weighted[0].0;
+                for (country, weight) in &weighted {
+                    cumulative += *weight as u64;
+                    if cumulative > target {
+                        selected = country;
+                        break;
+                    }
+                }
+                Some(selected.to_string())
+            }
+        }
+    };
+
+    // Build country filter if needed
+    let country_filter = selected_country
+        .as_ref()
+        .map(|c| format!(" AND l.country_code = '{}'", c.replace('\'', "''")))
+        .unwrap_or_default();
 
     // Generate a random key
     let random_key: f64 = rand::random();
@@ -286,11 +349,11 @@ async fn select_random_location(
           AND l.active = TRUE
           AND ml.random_key >= $2
           AND l.id != ALL($3)
-          {}
+          {}{}
         ORDER BY ml.random_key
         LIMIT 1
         "#,
-        filter_clause
+        filter_clause, country_filter
     );
 
     // Try to find a location with random_key >= our random value
@@ -314,11 +377,11 @@ async fn select_random_location(
                 WHERE ml.map_id = $1
                   AND l.active = TRUE
                   AND l.id != ALL($2)
-                  {}
+                  {}{}
                 ORDER BY ml.random_key
                 LIMIT 1
                 "#,
-                filter_clause
+                filter_clause, country_filter
             );
 
             sqlx::query_as::<_, GameLocationRow>(&wrap_query)
@@ -332,6 +395,161 @@ async fn select_random_location(
     };
 
     Ok(location.into())
+}
+
+/// Get distinct countries available in a map (for country distribution selection).
+async fn get_map_countries(
+    pool: &DbPool,
+    map_id: &str,
+    filter_clause: &str,
+) -> Result<Vec<String>, LocationError> {
+    let query = format!(
+        r#"
+        SELECT DISTINCT l.country_code
+        FROM locations l
+        JOIN map_locations ml ON l.id = ml.location_id
+        WHERE ml.map_id = $1
+          AND l.active = TRUE
+          AND l.country_code IS NOT NULL
+          {}
+        "#,
+        filter_clause
+    );
+
+    let rows: Vec<(String,)> = sqlx::query_as(&query)
+        .bind(map_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    Ok(rows.into_iter().map(|(c,)| c).collect())
+}
+
+/// Select a random location with distance constraints.
+///
+/// Attempts to find a location that is at least `min_distance_meters` away
+/// from all previous locations. Falls back to any valid location if
+/// the constraint cannot be satisfied after multiple attempts.
+async fn select_random_location_with_constraints(
+    pool: &DbPool,
+    map_id_or_slug: &str,
+    exclude_ids: &[String],
+    constraints: &SelectionConstraints,
+) -> Result<GameLocation, LocationError> {
+    // If no distance constraint, use simple selection
+    if constraints.min_distance_meters <= 0.0 || constraints.previous_locations.is_empty() {
+        return select_random_location(pool, map_id_or_slug, exclude_ids).await;
+    }
+
+    const MAX_ATTEMPTS: u32 = 10;
+    const CANDIDATES_PER_ATTEMPT: usize = 16;
+
+    // Get map info once
+    let map = get_map_by_id_or_slug(pool, map_id_or_slug).await?;
+    let map_id = &map.id;
+    let filter_clause = build_location_filter_clause(&map.rules);
+
+    // Build country filter based on distribution strategy
+    let country_filter = match &map.rules.country_distribution {
+        CountryDistribution::Proportional => String::new(),
+        CountryDistribution::Equal => {
+            let countries = get_map_countries(pool, map_id, &filter_clause).await?;
+            if countries.is_empty() {
+                return Err(LocationError::NoLocationsAvailable(map_id_or_slug.to_string()));
+            }
+            let idx = rand::random::<usize>() % countries.len();
+            format!(" AND l.country_code = '{}'", countries[idx].replace('\'', "''"))
+        }
+        CountryDistribution::Weighted { weights } => {
+            let countries = get_map_countries(pool, map_id, &filter_clause).await?;
+            if countries.is_empty() {
+                return Err(LocationError::NoLocationsAvailable(map_id_or_slug.to_string()));
+            }
+            let weighted: Vec<(&str, u32)> =
+                countries.iter().filter_map(|c| weights.get(c).map(|&w| (c.as_str(), w))).collect();
+
+            if weighted.is_empty() {
+                let idx = rand::random::<usize>() % countries.len();
+                format!(" AND l.country_code = '{}'", countries[idx].replace('\'', "''"))
+            } else {
+                let total: u64 = weighted.iter().map(|(_, w)| *w as u64).sum();
+                let target = rand::random::<u64>() % total;
+                let mut cumulative = 0u64;
+                let mut selected = weighted[0].0;
+                for (country, weight) in &weighted {
+                    cumulative += *weight as u64;
+                    if cumulative > target {
+                        selected = country;
+                        break;
+                    }
+                }
+                format!(" AND l.country_code = '{}'", selected.replace('\'', "''"))
+            }
+        }
+    };
+
+    for attempt in 0..MAX_ATTEMPTS {
+        // Fetch multiple candidates
+        let query = format!(
+            r#"
+            SELECT l.id, l.panorama_id, l.lat, l.lng, l.country_code
+            FROM locations l
+            JOIN map_locations ml ON l.id = ml.location_id
+            WHERE ml.map_id = $1
+              AND l.active = TRUE
+              AND l.id != ALL($2)
+              {}{}
+            ORDER BY random()
+            LIMIT {}
+            "#,
+            filter_clause, country_filter, CANDIDATES_PER_ATTEMPT
+        );
+
+        let candidates: Vec<GameLocationRow> = sqlx::query_as(&query)
+            .bind(map_id)
+            .bind(exclude_ids)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| LocationError::Database(e.to_string()))?;
+
+        // Check each candidate for distance constraint
+        for candidate in candidates {
+            let is_far_enough =
+                constraints.previous_locations.iter().all(|(prev_lat, prev_lng)| {
+                    let distance =
+                        haversine_distance(candidate.lat, candidate.lng, *prev_lat, *prev_lng);
+                    distance >= constraints.min_distance_meters
+                });
+
+            if is_far_enough {
+                tracing::debug!(
+                    attempt = attempt,
+                    lat = candidate.lat,
+                    lng = candidate.lng,
+                    min_distance = constraints.min_distance_meters,
+                    "Found location meeting distance constraint"
+                );
+                return Ok(candidate.into());
+            }
+        }
+
+        tracing::debug!(
+            attempt = attempt,
+            candidates = CANDIDATES_PER_ATTEMPT,
+            min_distance = constraints.min_distance_meters,
+            "No candidates met distance constraint, retrying"
+        );
+    }
+
+    // Fall back to any valid location
+    tracing::warn!(
+        map_id = %map_id_or_slug,
+        min_distance = constraints.min_distance_meters,
+        previous_count = constraints.previous_locations.len(),
+        "Could not find location meeting distance constraint, falling back"
+    );
+
+    select_random_location(pool, map_id_or_slug, exclude_ids).await
 }
 
 /// All columns to select for a Map row.

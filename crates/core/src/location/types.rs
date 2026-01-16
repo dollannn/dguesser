@@ -282,6 +282,37 @@ impl From<Location> for GameLocation {
     }
 }
 
+/// Strategy for distributing location selection across countries.
+///
+/// This controls how likely each country is to be selected when picking
+/// a random location from a multi-country map.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CountryDistribution {
+    /// Each country weighted by total location count (default).
+    /// Countries with more Street View coverage are selected more often.
+    /// Good for: realistic representation of coverage.
+    Proportional,
+
+    /// Each eligible country has equal probability.
+    /// Good for: fair representation across all countries, world maps.
+    Equal,
+
+    /// Custom weights per country (relative values, not percentages).
+    /// Countries not listed get weight 0.
+    /// Good for: user-curated maps with specific country focus.
+    Weighted {
+        /// Country code -> relative weight (e.g., {"US": 100, "FR": 50, "JP": 50})
+        weights: std::collections::HashMap<String, u32>,
+    },
+}
+
+impl Default for CountryDistribution {
+    fn default() -> Self {
+        CountryDistribution::Proportional
+    }
+}
+
 /// Rules for filtering locations within a map.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MapRules {
@@ -295,6 +326,9 @@ pub struct MapRules {
     /// Only outdoor panoramas
     #[serde(default)]
     pub outdoor_only: bool,
+    /// How to distribute selection across countries
+    #[serde(default)]
+    pub country_distribution: CountryDistribution,
 }
 
 /// A map definition (playable region).
@@ -353,6 +387,30 @@ impl Map {
     }
 }
 
+/// Constraints for location selection beyond basic exclusion.
+#[derive(Debug, Clone, Default)]
+pub struct SelectionConstraints {
+    /// Previous locations in this game (lat, lng pairs).
+    /// Used to ensure geographic spread.
+    pub previous_locations: Vec<(f64, f64)>,
+
+    /// Minimum distance in meters from all previous locations.
+    /// Set to 0 to disable distance checking.
+    pub min_distance_meters: f64,
+}
+
+impl SelectionConstraints {
+    /// Create empty constraints (no distance requirements).
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Create constraints with minimum distance from previous locations.
+    pub fn with_min_distance(previous_locations: Vec<(f64, f64)>, min_distance_km: f64) -> Self {
+        Self { previous_locations, min_distance_meters: min_distance_km * 1000.0 }
+    }
+}
+
 /// Trait for selecting random locations from the location pool.
 ///
 /// This trait abstracts location selection so it can be implemented
@@ -371,6 +429,24 @@ pub trait LocationProvider: Send + Sync {
         map_id: &'a str,
         exclude_ids: &'a [String],
     ) -> Pin<Box<dyn Future<Output = Result<GameLocation, LocationError>> + Send + 'a>>;
+
+    /// Select a random location with additional constraints.
+    ///
+    /// # Arguments
+    /// * `map_id` - The map ID or slug to select from
+    /// * `exclude_ids` - Location IDs to exclude (already used in this game)
+    /// * `constraints` - Additional selection constraints (distance, etc.)
+    ///
+    /// Default implementation ignores constraints and calls `select_location`.
+    fn select_location_with_constraints<'a>(
+        &'a self,
+        map_id: &'a str,
+        exclude_ids: &'a [String],
+        _constraints: &'a SelectionConstraints,
+    ) -> Pin<Box<dyn Future<Output = Result<GameLocation, LocationError>> + Send + 'a>> {
+        // Default: ignore constraints, use basic selection
+        self.select_location(map_id, exclude_ids)
+    }
 
     /// Get a map by ID or slug.
     fn get_map<'a>(

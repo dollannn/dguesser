@@ -9,7 +9,11 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use dguesser_core::location::{GameLocation, LocationError, LocationProvider, Map, MapRules};
+use dguesser_core::geo::distance::haversine_distance;
+use dguesser_core::location::{
+    CountryDistribution, GameLocation, LocationError, LocationProvider, Map, MapRules,
+    SelectionConstraints,
+};
 
 use crate::bucket::BucketKey;
 use crate::cache::DisabledCache;
@@ -159,25 +163,57 @@ impl<R: RangeReader> PackProvider<R> {
             return Err(LocationPackError::NoEligibleBuckets);
         }
 
-        // Build weighted list of (country, bucket, count)
-        let mut weighted_buckets: Vec<(&str, BucketKey, u64)> = Vec::new();
+        // Build country stats: eligible buckets and total locations per country
+        let mut country_buckets: HashMap<&str, Vec<(BucketKey, u64)>> = HashMap::new();
+        let mut country_totals: HashMap<&str, u64> = HashMap::new();
 
         for &country in &countries {
             let index = self.country_index(country).await?;
             let eligible =
                 index.eligible_buckets(rules.min_year, rules.max_year, rules.outdoor_only);
 
+            if eligible.is_empty() {
+                continue;
+            }
+
+            let mut buckets = Vec::new();
+            let mut total = 0u64;
             for (key, info) in eligible {
-                weighted_buckets.push((country, key, info.count));
+                buckets.push((key, info.count));
+                total += info.count;
+            }
+
+            if total > 0 {
+                country_buckets.insert(country, buckets);
+                country_totals.insert(country, total);
             }
         }
 
-        if weighted_buckets.is_empty() {
+        if country_buckets.is_empty() {
             return Err(LocationPackError::NoEligibleBuckets);
         }
 
-        let total_weight: u64 = weighted_buckets.iter().map(|(_, _, c)| c).sum();
-        if total_weight == 0 {
+        // Calculate country weights based on distribution strategy
+        let country_weights: Vec<(&str, u64)> = match &rules.country_distribution {
+            CountryDistribution::Proportional => {
+                // Weight by total location count (original behavior)
+                country_totals.iter().map(|(&c, &t)| (c, t)).collect()
+            }
+            CountryDistribution::Equal => {
+                // Equal weight for all countries
+                country_buckets.keys().map(|&c| (c, 1u64)).collect()
+            }
+            CountryDistribution::Weighted { weights } => {
+                // Custom weights
+                country_buckets
+                    .keys()
+                    .filter_map(|&c| weights.get(c).map(|&w| (c, w as u64)))
+                    .collect()
+            }
+        };
+
+        let total_country_weight: u64 = country_weights.iter().map(|(_, w)| w).sum();
+        if total_country_weight == 0 {
             return Err(LocationPackError::NoEligibleBuckets);
         }
 
@@ -185,29 +221,45 @@ impl<R: RangeReader> PackProvider<R> {
         let mut retries = 0;
 
         while results.len() < count && retries < MAX_RETRIES {
-            // Weighted random selection of bucket using rand::random for Send safety
-            let target = rand::random::<u64>() % total_weight;
-            let rand_seed = rand::random::<u64>();
-
+            // Step 1: Select a country based on distribution strategy
+            let country_target = rand::random::<u64>() % total_country_weight;
             let mut cumulative = 0u64;
-            let mut selected = None;
+            let mut selected_country = None;
 
-            for (country, key, weight) in &weighted_buckets {
+            for (country, weight) in &country_weights {
                 cumulative += weight;
-                if cumulative > target {
-                    selected = Some((*country, *key, *weight));
+                if cumulative > country_target {
+                    selected_country = Some(*country);
                     break;
                 }
             }
 
-            let (country, bucket_key, bucket_count) = selected.unwrap();
+            let country = selected_country.unwrap();
+            let buckets = country_buckets.get(country).unwrap();
 
-            // Get the bucket info
+            // Step 2: Select a bucket within that country (weighted by bucket size)
+            let bucket_total: u64 = buckets.iter().map(|(_, c)| c).sum();
+            let bucket_target = rand::random::<u64>() % bucket_total;
+            let rand_seed = rand::random::<u64>();
+
+            let mut cumulative = 0u64;
+            let mut selected_bucket = None;
+
+            for (key, bucket_count) in buckets {
+                cumulative += bucket_count;
+                if cumulative > bucket_target {
+                    selected_bucket = Some((*key, *bucket_count));
+                    break;
+                }
+            }
+
+            let (bucket_key, bucket_count) = selected_bucket.unwrap();
+
+            // Step 3: Get the bucket info and fetch records
             let index = self.country_index(country).await?;
             let bucket_info =
                 index.get_bucket(&bucket_key).ok_or(LocationPackError::NoEligibleBuckets)?;
 
-            // Select a batch of records
             let records =
                 self.fetch_random_batch(country, bucket_info, bucket_count, rand_seed).await?;
 
@@ -422,6 +474,90 @@ impl<R: RangeReader + 'static> LocationProvider for PackProvider<R> {
             Ok(())
         })
     }
+
+    fn select_location_with_constraints<'a>(
+        &'a self,
+        map_id: &'a str,
+        exclude_ids: &'a [String],
+        constraints: &'a SelectionConstraints,
+    ) -> Pin<Box<dyn Future<Output = Result<GameLocation, LocationError>> + Send + 'a>> {
+        Box::pin(async move {
+            // Get the map rules
+            let maps = self.maps.read().await;
+            let map =
+                maps.get(map_id).ok_or_else(|| LocationError::MapNotFound(map_id.to_string()))?;
+            let rules = map.rules.clone();
+            drop(maps);
+
+            // Convert exclude_ids to hashes
+            let exclude_hashes: Vec<u64> =
+                exclude_ids.iter().map(|id| PackRecord::hash_pano_id(id)).collect();
+
+            // If no distance constraint, use simple selection
+            if constraints.min_distance_meters <= 0.0 || constraints.previous_locations.is_empty() {
+                let results = self.select_locations(&rules, &exclude_hashes, 1).await?;
+                let (country, record) = results
+                    .into_iter()
+                    .next()
+                    .ok_or(LocationError::NoLocationsAvailable(map_id.to_string()))?;
+                return Ok(record.to_game_location(&country));
+            }
+
+            // With distance constraint, fetch multiple candidates and filter
+            const MAX_ATTEMPTS: u32 = 10;
+            const CANDIDATES_PER_ATTEMPT: usize = 16;
+
+            for attempt in 0..MAX_ATTEMPTS {
+                let results =
+                    self.select_locations(&rules, &exclude_hashes, CANDIDATES_PER_ATTEMPT).await?;
+
+                // Find the first candidate that meets distance requirements
+                for (country, record) in results {
+                    let is_far_enough =
+                        constraints.previous_locations.iter().all(|(prev_lat, prev_lng)| {
+                            let distance =
+                                haversine_distance(record.lat, record.lng, *prev_lat, *prev_lng);
+                            distance >= constraints.min_distance_meters
+                        });
+
+                    if is_far_enough {
+                        tracing::debug!(
+                            attempt = attempt,
+                            lat = record.lat,
+                            lng = record.lng,
+                            min_distance = constraints.min_distance_meters,
+                            "Found location meeting distance constraint"
+                        );
+                        return Ok(record.to_game_location(&country));
+                    }
+                }
+
+                tracing::debug!(
+                    attempt = attempt,
+                    candidates = CANDIDATES_PER_ATTEMPT,
+                    min_distance = constraints.min_distance_meters,
+                    "No candidates met distance constraint, retrying"
+                );
+            }
+
+            // If we couldn't find a distant location after max attempts,
+            // fall back to any valid location (better than failing)
+            tracing::warn!(
+                map_id = %map_id,
+                min_distance = constraints.min_distance_meters,
+                previous_count = constraints.previous_locations.len(),
+                "Could not find location meeting distance constraint, falling back"
+            );
+
+            let results = self.select_locations(&rules, &exclude_hashes, 1).await?;
+            let (country, record) = results
+                .into_iter()
+                .next()
+                .ok_or(LocationError::NoLocationsAvailable(map_id.to_string()))?;
+
+            Ok(record.to_game_location(&country))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -545,5 +681,175 @@ mod tests {
         for (_, record) in &results2 {
             assert!(!hashes.contains(&record.id_hash));
         }
+    }
+
+    /// Create a multi-country mock reader for testing distribution strategies.
+    fn create_multi_country_reader() -> MockReader {
+        use crate::bucket::{ScoutBucket, YearBucket};
+
+        let mut manifest = Manifest::new("v2026-01");
+        let mut indexes = HashMap::new();
+        let mut packs = HashMap::new();
+
+        // US: 1000 locations (high coverage)
+        let mut us_index = CountryIndex::new("US", "v2026-01");
+        us_index.add_bucket(BucketKey::new(YearBucket::B4, ScoutBucket::S0), 1000);
+        manifest.add_country("US", 1000, None);
+        indexes.insert("US".to_string(), us_index);
+
+        let mut us_pack = Vec::new();
+        for i in 0..1000 {
+            let record = PackRecord::new(
+                format!("us_pano_{}", i),
+                40.0 + (i as f64 * 0.001),
+                -74.0 + (i as f64 * 0.001),
+                Some("US-NY".to_string()),
+                Some(18000),
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            us_pack.extend_from_slice(&record.encode());
+        }
+        packs.insert("US_B4_S0.pack".to_string(), us_pack);
+
+        // FR: 100 locations (medium coverage)
+        let mut fr_index = CountryIndex::new("FR", "v2026-01");
+        fr_index.add_bucket(BucketKey::new(YearBucket::B4, ScoutBucket::S0), 100);
+        manifest.add_country("FR", 100, None);
+        indexes.insert("FR".to_string(), fr_index);
+
+        let mut fr_pack = Vec::new();
+        for i in 0..100 {
+            let record = PackRecord::new(
+                format!("fr_pano_{}", i),
+                48.0 + (i as f64 * 0.01),
+                2.0 + (i as f64 * 0.01),
+                Some("FR-75".to_string()),
+                Some(18000),
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            fr_pack.extend_from_slice(&record.encode());
+        }
+        packs.insert("FR_B4_S0.pack".to_string(), fr_pack);
+
+        // AD: 10 locations (low coverage)
+        let mut ad_index = CountryIndex::new("AD", "v2026-01");
+        ad_index.add_bucket(BucketKey::new(YearBucket::B4, ScoutBucket::S0), 10);
+        manifest.add_country("AD", 10, None);
+        indexes.insert("AD".to_string(), ad_index);
+
+        let mut ad_pack = Vec::new();
+        for i in 0..10 {
+            let record = PackRecord::new(
+                format!("ad_pano_{}", i),
+                42.5 + (i as f64 * 0.01),
+                1.5 + (i as f64 * 0.01),
+                Some("AD-02".to_string()),
+                Some(18000),
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            ad_pack.extend_from_slice(&record.encode());
+        }
+        packs.insert("AD_B4_S0.pack".to_string(), ad_pack);
+
+        MockReader { manifest, indexes, packs }
+    }
+
+    #[tokio::test]
+    async fn test_equal_country_distribution() {
+        let reader = create_multi_country_reader();
+        let provider = PackProvider::with_reader(reader);
+
+        // With equal distribution, each country should have roughly equal representation
+        let rules = MapRules {
+            countries: vec!["US".to_string(), "FR".to_string(), "AD".to_string()],
+            country_distribution: CountryDistribution::Equal,
+            ..Default::default()
+        };
+
+        // Select many locations to get a statistical sample
+        let mut country_counts: HashMap<String, usize> = HashMap::new();
+        for _ in 0..100 {
+            let results = provider.select_locations(&rules, &[], 1).await.unwrap();
+            for (country, _) in results {
+                *country_counts.entry(country).or_insert(0) += 1;
+            }
+        }
+
+        // With equal distribution over 100 selections, each country should have
+        // roughly 33 selections. Allow for statistical variance.
+        // Without equal distribution, US would dominate with ~90% of selections
+        let us_count = country_counts.get("US").copied().unwrap_or(0);
+        let fr_count = country_counts.get("FR").copied().unwrap_or(0);
+        let ad_count = country_counts.get("AD").copied().unwrap_or(0);
+
+        // Each country should have at least 15% of selections (statistical threshold)
+        assert!(
+            us_count >= 15,
+            "US should have at least 15 selections with equal distribution, got {}",
+            us_count
+        );
+        assert!(
+            fr_count >= 15,
+            "FR should have at least 15 selections with equal distribution, got {}",
+            fr_count
+        );
+        assert!(
+            ad_count >= 15,
+            "AD should have at least 15 selections with equal distribution, got {}",
+            ad_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_weighted_country_distribution() {
+        let reader = create_multi_country_reader();
+        let provider = PackProvider::with_reader(reader);
+
+        // Custom weights: US=1, FR=1, AD=8 (AD should be heavily favored)
+        let mut weights = std::collections::HashMap::new();
+        weights.insert("US".to_string(), 1);
+        weights.insert("FR".to_string(), 1);
+        weights.insert("AD".to_string(), 8);
+
+        let rules = MapRules {
+            countries: vec!["US".to_string(), "FR".to_string(), "AD".to_string()],
+            country_distribution: CountryDistribution::Weighted { weights },
+            ..Default::default()
+        };
+
+        let mut country_counts: HashMap<String, usize> = HashMap::new();
+        for _ in 0..100 {
+            let results = provider.select_locations(&rules, &[], 1).await.unwrap();
+            for (country, _) in results {
+                *country_counts.entry(country).or_insert(0) += 1;
+            }
+        }
+
+        let ad_count = country_counts.get("AD").copied().unwrap_or(0);
+
+        // AD has 80% weight, so should have at least 60 out of 100 (allowing variance)
+        assert!(
+            ad_count >= 60,
+            "AD should have at least 60 selections with 80% weight, got {}",
+            ad_count
+        );
     }
 }
