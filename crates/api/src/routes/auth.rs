@@ -186,11 +186,13 @@ pub async fn google_redirect(
         .google_oauth()
         .ok_or_else(|| ApiError::service_unavailable("Google OAuth not configured"))?;
 
+    // Create OAuth state with CSRF protection
     let oauth_state = OAuthState::new(OAuthProvider::Google, query.redirect_to);
-    let url = google_oauth.authorization_url(&oauth_state.state, &oauth_state.nonce);
 
-    // TODO: Store oauth_state in Redis with short TTL for CSRF validation
-    // For now, we proceed without state validation (simplified for MVP)
+    // Store state in Redis for validation on callback
+    state.oauth_state_store().store(&oauth_state).await?;
+
+    let url = google_oauth.authorization_url(&oauth_state.state, &oauth_state.nonce);
 
     Ok(Redirect::temporary(&url))
 }
@@ -198,7 +200,6 @@ pub async fn google_redirect(
 #[derive(Debug, Deserialize)]
 pub struct CallbackQuery {
     code: String,
-    #[allow(dead_code)]
     state: String,
 }
 
@@ -213,7 +214,13 @@ async fn google_callback(
         .google_oauth()
         .ok_or_else(|| ApiError::service_unavailable("Google OAuth not configured"))?;
 
-    // TODO: Validate state parameter against stored state in Redis
+    // Validate state parameter against stored state (CSRF protection)
+    let stored_state = state.oauth_state_store().validate_and_consume(&query.state).await?;
+
+    // Verify provider matches
+    if stored_state.provider != OAuthProvider::Google {
+        return Err(dguesser_auth::OAuthError::ProviderMismatch.into());
+    }
 
     // Exchange code for identity
     let identity = google_oauth.exchange_code(&query.code).await?;
@@ -244,10 +251,81 @@ async fn google_callback(
         state.session_config().max_age_seconds(),
     );
 
-    // Redirect back to frontend
-    let redirect_url = format!("{}/auth/success", state.frontend_url());
+    // Determine redirect URL (use stored redirect_to if safe, otherwise default)
+    let redirect_url = stored_state
+        .redirect_to
+        .filter(|url| is_safe_redirect(url, state.frontend_url()))
+        .unwrap_or_else(|| format!("{}/auth/success", state.frontend_url()));
 
     Ok(([(SET_COOKIE, cookie)], Redirect::temporary(&redirect_url)))
+}
+
+/// Check if a redirect URL is safe (same-origin or relative path).
+///
+/// This prevents open redirect vulnerabilities by only allowing:
+/// - Relative paths starting with `/`
+/// - Absolute URLs that match the frontend origin exactly (followed by `/`, `?`, `#`, or end)
+fn is_safe_redirect(url: &str, frontend_url: &str) -> bool {
+    // Allow relative paths starting with /
+    if url.starts_with('/') && !url.starts_with("//") {
+        return true;
+    }
+
+    // Allow URLs that start with the frontend URL followed by a path separator or end
+    if let Some(remainder) = url.strip_prefix(frontend_url) {
+        // Must be empty, or start with /, ?, or #
+        if remainder.is_empty()
+            || remainder.starts_with('/')
+            || remainder.starts_with('?')
+            || remainder.starts_with('#')
+        {
+            return true;
+        }
+    }
+
+    // Reject everything else (external URLs, protocol-relative URLs, etc.)
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_safe_redirect_relative_paths() {
+        let frontend = "https://dguesser.com";
+
+        assert!(is_safe_redirect("/dashboard", frontend));
+        assert!(is_safe_redirect("/auth/success", frontend));
+        assert!(is_safe_redirect("/game/abc123", frontend));
+    }
+
+    #[test]
+    fn test_is_safe_redirect_same_origin() {
+        let frontend = "https://dguesser.com";
+
+        assert!(is_safe_redirect("https://dguesser.com/dashboard", frontend));
+        assert!(is_safe_redirect("https://dguesser.com/auth/success", frontend));
+    }
+
+    #[test]
+    fn test_is_safe_redirect_rejects_external() {
+        let frontend = "https://dguesser.com";
+
+        assert!(!is_safe_redirect("https://evil.com/phishing", frontend));
+        assert!(!is_safe_redirect("http://evil.com", frontend));
+        assert!(!is_safe_redirect("//evil.com/path", frontend)); // Protocol-relative
+        assert!(!is_safe_redirect("javascript:alert(1)", frontend));
+    }
+
+    #[test]
+    fn test_is_safe_redirect_rejects_similar_domains() {
+        let frontend = "https://dguesser.com";
+
+        // These should be rejected as they don't start with the exact frontend URL
+        assert!(!is_safe_redirect("https://dguesser.com.evil.com/path", frontend));
+        assert!(!is_safe_redirect("https://notdguesser.com/path", frontend));
+    }
 }
 
 /// Initiate Microsoft OAuth
@@ -271,10 +349,13 @@ pub async fn microsoft_redirect(
         .microsoft_oauth()
         .ok_or_else(|| ApiError::service_unavailable("Microsoft OAuth not configured"))?;
 
+    // Create OAuth state with CSRF protection
     let oauth_state = OAuthState::new(OAuthProvider::Microsoft, query.redirect_to);
-    let url = microsoft_oauth.authorization_url(&oauth_state.state, &oauth_state.nonce);
 
-    // TODO: Store oauth_state in Redis with short TTL for CSRF validation
+    // Store state in Redis for validation on callback
+    state.oauth_state_store().store(&oauth_state).await?;
+
+    let url = microsoft_oauth.authorization_url(&oauth_state.state, &oauth_state.nonce);
 
     Ok(Redirect::temporary(&url))
 }
@@ -290,7 +371,13 @@ async fn microsoft_callback(
         .microsoft_oauth()
         .ok_or_else(|| ApiError::service_unavailable("Microsoft OAuth not configured"))?;
 
-    // TODO: Validate state parameter against stored state in Redis
+    // Validate state parameter against stored state (CSRF protection)
+    let stored_state = state.oauth_state_store().validate_and_consume(&query.state).await?;
+
+    // Verify provider matches
+    if stored_state.provider != OAuthProvider::Microsoft {
+        return Err(dguesser_auth::OAuthError::ProviderMismatch.into());
+    }
 
     let identity = microsoft_oauth.exchange_code(&query.code).await?;
 
@@ -317,7 +404,11 @@ async fn microsoft_callback(
         state.session_config().max_age_seconds(),
     );
 
-    let redirect_url = format!("{}/auth/success", state.frontend_url());
+    // Determine redirect URL (use stored redirect_to if safe, otherwise default)
+    let redirect_url = stored_state
+        .redirect_to
+        .filter(|url| is_safe_redirect(url, state.frontend_url()))
+        .unwrap_or_else(|| format!("{}/auth/success", state.frontend_url()));
 
     Ok(([(SET_COOKIE, cookie)], Redirect::temporary(&redirect_url)))
 }

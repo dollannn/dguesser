@@ -15,6 +15,7 @@ pub mod session;
 pub use middleware::{AuthState, AuthUser, MaybeAuthUser, RequireAdmin, RequireAuth};
 pub use oauth::google::GoogleOAuth;
 pub use oauth::microsoft::MicrosoftOAuth;
+pub use oauth::state_store::OAuthStateStore;
 pub use oauth::{OAuthError, OAuthIdentity, OAuthProvider, OAuthState};
 pub use service::{
     AuthError, AuthResult, create_guest_session, handle_oauth_callback, logout,

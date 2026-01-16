@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use dguesser_auth::{GoogleOAuth, MicrosoftOAuth, SessionConfig};
+use dguesser_auth::{GoogleOAuth, MicrosoftOAuth, OAuthStateStore, SessionConfig};
 use dguesser_core::location::LocationProvider;
 use dguesser_db::{DbPool, LocationRepository};
 use dguesser_locations::reader::{FileReader, HttpReader};
@@ -19,8 +19,8 @@ pub struct AppState {
 
 struct AppStateInner {
     db: DbPool,
-    #[allow(dead_code)] // Will be used for OAuth state storage
     redis: redis::Client,
+    oauth_state_store: OAuthStateStore,
     session_config: SessionConfig,
     google_oauth: Option<GoogleOAuth>,
     microsoft_oauth: Option<MicrosoftOAuth>,
@@ -41,8 +41,9 @@ impl AppState {
         sqlx::migrate!("../../migrations").run(&db).await?;
         tracing::info!("Database migrations completed");
 
-        // Create Redis client
+        // Create Redis client and OAuth state store
         let redis = redis::Client::open(config.redis_url.as_str())?;
+        let oauth_state_store = OAuthStateStore::new(redis.clone());
         tracing::info!("Connected to Redis");
 
         // Create session config
@@ -130,6 +131,7 @@ impl AppState {
             inner: Arc::new(AppStateInner {
                 db,
                 redis,
+                oauth_state_store,
                 session_config,
                 google_oauth,
                 microsoft_oauth,
@@ -147,9 +149,13 @@ impl AppState {
     }
 
     /// Get the Redis client
-    #[allow(dead_code)] // Will be used for OAuth state storage
     pub fn redis(&self) -> &redis::Client {
         &self.inner.redis
+    }
+
+    /// Get the OAuth state store for CSRF protection
+    pub fn oauth_state_store(&self) -> &OAuthStateStore {
+        &self.inner.oauth_state_store
     }
 
     /// Get the session configuration

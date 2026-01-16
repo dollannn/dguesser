@@ -6,6 +6,7 @@
 
 pub mod google;
 pub mod microsoft;
+pub mod state_store;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -32,6 +33,14 @@ pub enum OAuthError {
     /// OAuth state has expired
     #[error("OAuth state expired")]
     StateExpired,
+
+    /// State storage error (Redis)
+    #[error("State storage error: {0}")]
+    StateStorage(String),
+
+    /// Provider mismatch between stored state and callback
+    #[error("OAuth provider mismatch")]
+    ProviderMismatch,
 
     /// HTTP request to OAuth provider failed
     #[error("Request failed: {0}")]
