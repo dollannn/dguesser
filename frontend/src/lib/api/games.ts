@@ -37,6 +37,8 @@ export interface GameDetails {
   id: string;
   mode: string;
   status: string;
+  /** Join code for multiplayer games (6 alphanumeric chars) */
+  join_code: string | null;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;

@@ -28,6 +28,7 @@ use dguesser_db::{GameMode, GameStatus};
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", post(create_game))
+        .route("/join", post(join_game_by_code))
         .route("/{id}", get(get_game))
         .route("/{id}/start", post(start_game))
         .route("/{id}/rounds/current", get(get_current_round))
@@ -86,6 +87,9 @@ pub struct GameDetails {
     /// Game status
     #[schema(example = "active")]
     pub status: String,
+    /// Join code for multiplayer games
+    #[schema(example = "ABC123")]
+    pub join_code: Option<String>,
     /// When the game was created
     pub created_at: DateTime<Utc>,
     /// When the game started
@@ -100,6 +104,14 @@ pub struct GameDetails {
     pub current_round: u8,
     /// Total number of rounds
     pub total_rounds: u8,
+}
+
+/// Join game by code request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct JoinGameRequest {
+    /// The 6-character join code
+    #[schema(example = "ABC123")]
+    pub code: String,
 }
 
 /// Player info in a game
@@ -405,6 +417,78 @@ pub async fn create_game(
     Ok(Json(CreateGameResponse { id: game.id, join_code }))
 }
 
+/// Join a game by join code (lookup only, player added via Socket.IO)
+#[utoipa::path(
+    post,
+    path = "/api/v1/games/join",
+    request_body = JoinGameRequest,
+    responses(
+        (status = 200, description = "Game details", body = GameDetails),
+        (status = 400, description = "Invalid code format"),
+        (status = 404, description = "Game not found or not joinable"),
+    ),
+    tag = "games"
+)]
+pub async fn join_game_by_code(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Json(req): Json<JoinGameRequest>,
+) -> Result<Json<GameDetails>, ApiError> {
+    // Validate code format (6 alphanumeric characters)
+    let code = req.code.trim().to_uppercase();
+    if code.len() != 6 || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(ApiError::bad_request(
+            "INVALID_CODE",
+            "Join code must be 6 alphanumeric characters",
+        ));
+    }
+
+    // Look up game by join code
+    let game = dguesser_db::games::get_game_by_join_code(state.db(), &code)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Game not found with this code"))?;
+
+    // Validate game is in lobby status
+    if game.status != GameStatus::Lobby {
+        return Err(ApiError::bad_request(
+            "GAME_NOT_JOINABLE",
+            "This game has already started or ended",
+        ));
+    }
+
+    // Get players for response
+    let players = dguesser_db::games::get_players(state.db(), &game.id).await?;
+    let rounds = dguesser_db::games::get_rounds_for_game(state.db(), &game.id).await?;
+
+    // Build player info list
+    let mut player_infos = Vec::new();
+    for p in players {
+        let user = dguesser_db::users::get_by_id(state.db(), &p.user_id).await?;
+        player_infos.push(PlayerInfo {
+            user_id: p.user_id,
+            display_name: user.map(|u| u.display_name).unwrap_or_else(|| "Unknown".to_string()),
+            is_host: p.is_host,
+            score: p.score_total,
+        });
+    }
+
+    let total_rounds = game.settings.get("rounds").and_then(|v| v.as_u64()).unwrap_or(5) as u8;
+
+    Ok(Json(GameDetails {
+        id: game.id,
+        mode: game.mode.to_string(),
+        status: game.status.to_string(),
+        join_code: game.join_code,
+        created_at: game.created_at,
+        started_at: game.started_at,
+        ended_at: game.ended_at,
+        settings: game.settings,
+        players: player_infos,
+        current_round: rounds.len() as u8,
+        total_rounds,
+    }))
+}
+
 /// Get game details
 #[utoipa::path(
     get,
@@ -455,6 +539,7 @@ pub async fn get_game(
         id: game.id,
         mode: game.mode.to_string(),
         status: game.status.to_string(),
+        join_code: game.join_code,
         created_at: game.created_at,
         started_at: game.started_at,
         ended_at: game.ended_at,

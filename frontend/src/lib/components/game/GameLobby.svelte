@@ -31,7 +31,7 @@
   let canStart = $derived(isHost && (game.mode === 'solo' || playerCount >= 2));
   
   let copied = $state(false);
-  let joinCode = $derived(game.status === 'waiting' ? '...' : game.id.slice(-6).toUpperCase());
+  let joinCode = $derived(game.join_code ?? '------');
 
   async function copyCode() {
     try {

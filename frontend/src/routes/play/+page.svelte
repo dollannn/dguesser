@@ -50,7 +50,7 @@
       }
 
       const game = await gamesApi.create({ mode: 'multiplayer' });
-      goto(`/game/${game.id}/lobby`);
+      goto(`/game/${game.id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to create game';
     } finally {
@@ -70,7 +70,7 @@
       }
 
       const game = await gamesApi.joinByCode(joinCode.trim().toUpperCase());
-      goto(`/game/${game.id}/lobby`);
+      goto(`/game/${game.id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to join game';
     } finally {
