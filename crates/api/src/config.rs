@@ -49,11 +49,6 @@ impl R2LocationConfig {
         Some(Self { base_url, version, max_disabled_cache })
     }
 
-    /// Check if this is a local file path.
-    pub fn is_local(&self) -> bool {
-        self.base_url.starts_with("file://") || self.base_url.starts_with("/")
-    }
-
     /// Get the local path (if local).
     pub fn local_path(&self) -> Option<&str> {
         if self.base_url.starts_with("file://") {

@@ -24,8 +24,9 @@ pub struct ReportLocationRequest {
     /// Reason for the report.
     /// Valid values: "zero_results", "corrupted", "low_quality", "indoor", "restricted", "other"
     pub reason: String,
-    /// Optional notes about the issue
+    /// Optional notes about the issue (reserved for future use)
     #[serde(default)]
+    #[allow(dead_code)]
     pub notes: Option<String>,
 }
 
