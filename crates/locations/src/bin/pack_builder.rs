@@ -17,7 +17,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
@@ -43,7 +43,7 @@ struct Cli {
 enum Commands {
     /// Build packs from Vali JSON files
     Build {
-        /// Input directory containing Vali JSON files (one per country)
+        /// Input: directory with JSON files (one per country) OR a single JSON file with mixed countries
         #[arg(short, long)]
         input: PathBuf,
 
@@ -110,10 +110,10 @@ enum Commands {
 // Vali JSON Format
 // =============================================================================
 
-/// Location from Vali JSON output.
+/// Location from Vali JSON output (detailed format with explicit fields).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ValiLocation {
+struct ValiLocationDetailed {
     lat: f64,
     lng: f64,
     #[serde(default)]
@@ -140,6 +140,167 @@ struct ValiLocation {
     roads100: Option<i32>,
     #[serde(default)]
     elevation: Option<i32>,
+}
+
+/// Location from Vali "generate" command output (tags-based format).
+/// Example: {"lat":42.61,"lng":1.63,"heading":180,"extra":{"tags":["AD","AD-02","2014","10","asphalt","IsScout-No","1950","ArrowCount-2"]}}
+#[derive(Debug, Deserialize)]
+struct ValiLocationGenerated {
+    lat: f64,
+    lng: f64,
+    #[serde(default)]
+    heading: Option<f64>,
+    #[serde(default, rename = "panoId")]
+    pano_id: Option<String>,
+    #[serde(default)]
+    extra: Option<ValiExtra>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ValiExtra {
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// Unified location struct that can be created from either format.
+#[derive(Debug)]
+struct ValiLocation {
+    lat: f64,
+    lng: f64,
+    pano_id: Option<String>,
+    heading: Option<f64>,
+    country_code: Option<String>,
+    subdivision_code: Option<String>,
+    year: Option<i32>,
+    month: Option<i32>,
+    surface: Option<String>,
+    arrow_count: Option<i32>,
+    is_scout: Option<bool>,
+    buildings100: Option<i32>,
+    roads100: Option<i32>,
+    elevation: Option<i32>,
+}
+
+impl From<ValiLocationDetailed> for ValiLocation {
+    fn from(loc: ValiLocationDetailed) -> Self {
+        Self {
+            lat: loc.lat,
+            lng: loc.lng,
+            pano_id: loc.pano_id,
+            heading: loc.heading,
+            country_code: loc.country_code,
+            subdivision_code: loc.subdivision_code,
+            year: loc.year,
+            month: loc.month,
+            surface: loc.surface,
+            arrow_count: loc.arrow_count,
+            is_scout: loc.is_scout,
+            buildings100: loc.buildings100,
+            roads100: loc.roads100,
+            elevation: loc.elevation,
+        }
+    }
+}
+
+impl From<ValiLocationGenerated> for ValiLocation {
+    fn from(loc: ValiLocationGenerated) -> Self {
+        let mut result = ValiLocation {
+            lat: loc.lat,
+            lng: loc.lng,
+            pano_id: loc.pano_id,
+            heading: loc.heading,
+            country_code: None,
+            subdivision_code: None,
+            year: None,
+            month: None,
+            surface: None,
+            arrow_count: None,
+            is_scout: None,
+            buildings100: None,
+            roads100: None,
+            elevation: None,
+        };
+
+        // Parse tags from extra.tags array
+        // Tags format examples: "AD", "AD-02", "2014", "10", "asphalt", "IsScout-No", "1950", "ArrowCount-2"
+        if let Some(extra) = loc.extra {
+            let mut tag_iter = extra.tags.iter();
+
+            // First tag is typically country code (2-letter ISO)
+            if let Some(tag) = tag_iter.next() {
+                if tag.len() == 2 && tag.chars().all(|c| c.is_ascii_uppercase()) {
+                    result.country_code = Some(tag.clone());
+                }
+            }
+
+            // Second tag is typically subdivision code (e.g., "AD-02", "US-CA")
+            if let Some(tag) = tag_iter.next() {
+                if tag.contains('-') && tag.len() >= 4 {
+                    result.subdivision_code = Some(tag.clone());
+                }
+            }
+
+            // Parse remaining tags
+            for tag in tag_iter {
+                // Year (4-digit number between 2000-2030)
+                if let Ok(num) = tag.parse::<i32>() {
+                    if num >= 2000 && num <= 2030 && result.year.is_none() {
+                        result.year = Some(num);
+                        continue;
+                    }
+                    // Month (1-12)
+                    if num >= 1 && num <= 12 && result.month.is_none() {
+                        result.month = Some(num);
+                        continue;
+                    }
+                    // Elevation (typically 3-5 digit number)
+                    if num >= -500 && num <= 9000 && result.elevation.is_none() {
+                        result.elevation = Some(num);
+                        continue;
+                    }
+                }
+
+                // IsScout-Yes/No
+                if tag == "IsScout-Yes" {
+                    result.is_scout = Some(true);
+                    continue;
+                }
+                if tag == "IsScout-No" {
+                    result.is_scout = Some(false);
+                    continue;
+                }
+
+                // ArrowCount-N
+                if let Some(count_str) = tag.strip_prefix("ArrowCount-") {
+                    if let Ok(count) = count_str.parse::<i32>() {
+                        result.arrow_count = Some(count);
+                    }
+                    continue;
+                }
+
+                // Surface types (asphalt, gravel, dirt, etc.)
+                let surface_types = [
+                    "asphalt",
+                    "paved",
+                    "concrete",
+                    "gravel",
+                    "dirt",
+                    "sand",
+                    "grass",
+                    "ground",
+                    "unpaved",
+                    "cobblestone",
+                    "fine_gravel",
+                    "earth",
+                ];
+                if surface_types.contains(&tag.as_str()) {
+                    result.surface = Some(tag.clone());
+                }
+            }
+        }
+
+        result
+    }
 }
 
 /// Maximum field lengths from the pack format.
@@ -279,6 +440,32 @@ fn days_since_epoch(date: NaiveDate) -> i64 {
     (date - epoch).num_days()
 }
 
+/// Parse Vali JSON in either detailed format or generate output format.
+fn parse_vali_json(content: &str) -> Result<Vec<ValiLocation>> {
+    // Try the generate output format FIRST (with tags) since it's most common from `vali generate`
+    if let Ok(locations) = serde_json::from_str::<Vec<ValiLocationGenerated>>(content) {
+        // Check if we actually got meaningful data (extra.tags present)
+        let has_tags = locations.first().map(|l| l.extra.is_some()).unwrap_or(false);
+        if has_tags {
+            tracing::debug!(count = locations.len(), "Parsed as Vali generate output format");
+            return Ok(locations.into_iter().map(ValiLocation::from).collect());
+        }
+    }
+
+    // Try the detailed format (explicit fields)
+    if let Ok(locations) = serde_json::from_str::<Vec<ValiLocationDetailed>>(content) {
+        tracing::debug!(count = locations.len(), "Parsed as detailed format");
+        return Ok(locations.into_iter().map(ValiLocation::from).collect());
+    }
+
+    // Return error with details
+    anyhow::bail!(
+        "Failed to parse JSON as either detailed or generate format. \
+         Expected either explicit fields (countryCode, year, etc.) or \
+         Vali generate output format (extra.tags array)."
+    )
+}
+
 // =============================================================================
 // Build Command
 // =============================================================================
@@ -292,18 +479,58 @@ fn build_packs(
     outdoor_only: bool,
     dry_run: bool,
 ) -> Result<()> {
-    // Find all JSON files in input directory
-    let json_files: Vec<PathBuf> = std::fs::read_dir(input)?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "json").unwrap_or(false))
-        .map(|e| e.path())
-        .collect();
+    // Determine if input is a file or directory
+    let is_single_file = input.is_file();
 
-    if json_files.is_empty() {
-        anyhow::bail!("No JSON files found in {}", input.display());
+    // Load all locations, grouped by country
+    let mut country_locations: HashMap<String, Vec<ValiLocation>> = HashMap::new();
+
+    if is_single_file {
+        // Single file mode: parse and group by country_code
+        println!("Processing single file: {}", input.display());
+        let content = std::fs::read_to_string(input)?;
+        let locations = parse_vali_json(&content)
+            .with_context(|| format!("Failed to parse {}", input.display()))?;
+
+        println!("Loaded {} locations, grouping by country...", locations.len());
+
+        for loc in locations {
+            if let Some(ref country) = loc.country_code {
+                country_locations.entry(country.clone()).or_default().push(loc);
+            } else {
+                tracing::warn!("Location at {},{} has no country code, skipping", loc.lat, loc.lng);
+            }
+        }
+
+        println!("Found {} countries", country_locations.len());
+    } else {
+        // Directory mode: each file is a separate country
+        let json_files: Vec<PathBuf> = std::fs::read_dir(input)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|ext| ext == "json").unwrap_or(false))
+            .map(|e| e.path())
+            .collect();
+
+        if json_files.is_empty() {
+            anyhow::bail!("No JSON files found in {}", input.display());
+        }
+
+        println!("Found {} JSON files", json_files.len());
+
+        for file_path in &json_files {
+            let country_code = file_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_uppercase())
+                .context("Invalid file name")?;
+
+            let content = std::fs::read_to_string(file_path)?;
+            let locations = parse_vali_json(&content)
+                .with_context(|| format!("Failed to parse {}", file_path.display()))?;
+
+            country_locations.entry(country_code).or_default().extend(locations);
+        }
     }
-
-    println!("Found {} JSON files", json_files.len());
 
     // Create output directory structure
     let version_dir = output.join(version);
@@ -318,8 +545,12 @@ fn build_packs(
     let mut total_locations = 0u64;
     let mut total_filtered = 0u64;
 
+    // Sort countries for deterministic output
+    let mut countries: Vec<_> = country_locations.keys().cloned().collect();
+    countries.sort();
+
     // Progress bar
-    let pb = ProgressBar::new(json_files.len() as u64);
+    let pb = ProgressBar::new(countries.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
@@ -327,21 +558,11 @@ fn build_packs(
             .progress_chars("#>-"),
     );
 
-    // Process each country file
-    for file_path in json_files {
-        let country_code = file_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_uppercase())
-            .context("Invalid file name")?;
-
+    // Process each country
+    for country_code in countries {
         pb.set_message(country_code.clone());
 
-        // Read and parse JSON
-        let content = std::fs::read_to_string(&file_path)?;
-        let locations: Vec<ValiLocation> = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse {}", file_path.display()))?;
-
+        let locations = country_locations.remove(&country_code).unwrap_or_default();
         let raw_count = locations.len();
 
         // Group by bucket and filter
