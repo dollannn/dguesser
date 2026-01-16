@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE maps\n        SET active = FALSE, updated_at = NOW()\n        WHERE id = $1 AND active = TRUE\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5c4e2c6a65689dbcc1b3d7476b645b8c8a9913f330c3e0045af94c485a7c6ffb"
+}

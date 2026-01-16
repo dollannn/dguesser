@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO rounds (id, game_id, round_number, location_lat, location_lng, panorama_id, time_limit_ms)\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING id, game_id, round_number, location_lat, location_lng, panorama_id,\n                  started_at, ended_at, time_limit_ms\n        ",
+  "query": "\n        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,\n               started_at, ended_at, time_limit_ms\n        FROM rounds WHERE game_id = $1\n        ORDER BY round_number DESC\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -35,29 +35,28 @@
       },
       {
         "ordinal": 6,
+        "name": "location_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
         "name": "started_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "ended_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "time_limit_ms",
         "type_info": "Int4"
       }
     ],
     "parameters": {
       "Left": [
-        "Varchar",
-        "Varchar",
-        "Int2",
-        "Float8",
-        "Float8",
-        "Varchar",
-        "Int4"
+        "Text"
       ]
     },
     "nullable": [
@@ -69,8 +68,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "c528a97187a01814dde1920a0dcaa60f760604c91a67df05eff1eb08da2df6d0"
+  "hash": "158437824819a85183aa7e1c0a28d5fcb3723221cdc035bbafcbead3942eb1de"
 }

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO locations (id, panorama_id, lat, lng, country_code, subdivision_code)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            ON CONFLICT (panorama_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Float8",
+        "Float8",
+        "Bpchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1ac97566548739f93daaf994c7107365ab2c97b1bc0d7867de3afbaa67875501"
+}

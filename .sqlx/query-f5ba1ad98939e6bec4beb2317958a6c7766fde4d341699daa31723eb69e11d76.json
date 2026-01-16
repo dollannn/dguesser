@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT country_code, COUNT(*) as count\n        FROM locations\n        WHERE active = TRUE \n          AND country_code IS NOT NULL\n          AND (review_status IS NULL OR review_status = 'approved')\n        GROUP BY country_code\n        ORDER BY count DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "country_code",
+        "type_info": "Bpchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "f5ba1ad98939e6bec4beb2317958a6c7766fde4d341699daa31723eb69e11d76"
+}

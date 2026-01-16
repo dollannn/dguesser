@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*)\n        FROM map_locations ml\n        JOIN locations l ON l.id = ml.location_id\n        WHERE ml.map_id = $1 AND l.active = TRUE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e664b9ee9006413bf777bb5f63f0aa8670cbd718322c98a528b359651a34bef1"
+}

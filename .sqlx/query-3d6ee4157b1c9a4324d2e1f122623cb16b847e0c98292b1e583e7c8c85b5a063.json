@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, kind as \"kind: UserKind\", email, email_verified, display_name, avatar_url,\n               created_at, updated_at, last_seen_at, games_played, total_score, best_score\n        FROM users WHERE email = $1\n        ",
+  "query": "\n        UPDATE users\n        SET kind = 'authenticated',\n            email = $2,\n            email_verified = TRUE,\n            display_name = COALESCE($3, display_name),\n            avatar_url = COALESCE($4, avatar_url)\n        WHERE id = $1 AND deleted_at IS NULL\n        RETURNING id, kind as \"kind: UserKind\", role, username, email, email_verified,\n                  display_name, avatar_url, created_at, updated_at, last_seen_at,\n                  games_played, total_score, best_score, deleted_at\n        ",
   "describe": {
     "columns": [
       {
@@ -25,63 +25,83 @@
       },
       {
         "ordinal": 2,
-        "name": "email",
+        "name": "role",
         "type_info": "Varchar"
       },
       {
         "ordinal": 3,
-        "name": "email_verified",
-        "type_info": "Bool"
+        "name": "username",
+        "type_info": "Varchar"
       },
       {
         "ordinal": 4,
-        "name": "display_name",
+        "name": "email",
         "type_info": "Varchar"
       },
       {
         "ordinal": 5,
-        "name": "avatar_url",
-        "type_info": "Varchar"
+        "name": "email_verified",
+        "type_info": "Bool"
       },
       {
         "ordinal": 6,
+        "name": "display_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "games_played",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "total_score",
         "type_info": "Int8"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "best_score",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Text",
+        "Varchar",
+        "Varchar",
         "Text"
       ]
     },
     "nullable": [
       false,
       false,
+      false,
+      true,
       true,
       false,
       false,
@@ -91,8 +111,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "f6ca2c9fc37da8860e126c71b98695ed30a5b876602f47bb8cbad86329be104d"
+  "hash": "3d6ee4157b1c9a4324d2e1f122623cb16b847e0c98292b1e583e7c8c85b5a063"
 }

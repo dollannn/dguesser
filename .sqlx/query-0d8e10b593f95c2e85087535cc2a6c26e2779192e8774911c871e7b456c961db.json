@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*)\n            FROM locations\n            WHERE active = TRUE\n              AND capture_date IS NOT NULL\n              AND EXTRACT(YEAR FROM capture_date) < $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Numeric"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0d8e10b593f95c2e85087535cc2a6c26e2779192e8774911c871e7b456c961db"
+}

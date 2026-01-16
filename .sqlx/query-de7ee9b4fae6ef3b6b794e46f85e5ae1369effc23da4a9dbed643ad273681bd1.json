@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id,\n               started_at, ended_at, time_limit_ms\n        FROM rounds WHERE game_id = $1\n        ORDER BY round_number DESC\n        LIMIT 1\n        ",
+  "query": "\n        SELECT id, game_id, round_number, location_lat, location_lng, panorama_id, location_id,\n               started_at, ended_at, time_limit_ms\n        FROM rounds WHERE game_id = $1\n        ORDER BY round_number ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -35,16 +35,21 @@
       },
       {
         "ordinal": 6,
+        "name": "location_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
         "name": "started_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "ended_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "time_limit_ms",
         "type_info": "Int4"
       }
@@ -63,8 +68,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "ac5dff6fb87ea5a53df61b710ee1a727ef77a2ac81f645c3614772e71ced2da1"
+  "hash": "de7ee9b4fae6ef3b6b794e46f85e5ae1369effc23da4a9dbed643ad273681bd1"
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM locations WHERE review_status IN ('pending', 'flagged') OR failure_count >= 2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d4725f401ca4e3524547d7699d385d1aeba5ea4d7597cf90d84f4e2a4e6032a5"
+}

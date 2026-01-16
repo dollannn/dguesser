@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE game_players SET score_total = score_total + $3 WHERE game_id = $1 AND user_id = $2 RETURNING score_total",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "score_total",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2fea4f648ef5eb8008e81e3f88b101d5211cdf85284583d9257a3ff41a477f79"
+}

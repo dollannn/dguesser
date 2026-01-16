@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT rank::bigint as \"rank!\", score::bigint as \"score!\"\n        FROM (\n            SELECT \n                u.id,\n                COALESCE(SUM(gp.score_total), 0) as score,\n                RANK() OVER (ORDER BY COALESCE(SUM(gp.score_total), 0) DESC) as rank\n            FROM users u\n            INNER JOIN game_players gp ON gp.user_id = u.id\n            INNER JOIN games g ON g.id = gp.game_id\n            WHERE g.status = 'finished' AND g.ended_at >= $1\n            GROUP BY u.id\n            HAVING SUM(gp.score_total) > 0\n        ) ranked\n        WHERE id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rank!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "score!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "989807f569af9b967701897715383d61c3fa7afcd96d12d980b505eb48c5d6d1"
+}

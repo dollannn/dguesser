@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE users\n        SET games_played = games_played + 1,\n            total_score = total_score + $2,\n            best_score = GREATEST(best_score, $2),\n            last_seen_at = NOW()\n        WHERE id = $1 AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f65095682ca5b1dd2e96d016707a1e1e580dae79537b696d91ba5aa64e390af1"
+}

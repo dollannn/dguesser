@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE locations\n        SET failure_count = COALESCE(failure_count, 0) + 1,\n            last_failure_reason = $2\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "330faba143f02841b7be1b8ef7c9224c3c1b610ec35012178baaf22254bbb150"
+}

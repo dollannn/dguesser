@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM map_locations\n        WHERE map_id = $1 AND location_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "63c6abb81e6a5bc5ef3a1bccb8c7f96804d75ffad407cc3a17e22650a98a7dba"
+}

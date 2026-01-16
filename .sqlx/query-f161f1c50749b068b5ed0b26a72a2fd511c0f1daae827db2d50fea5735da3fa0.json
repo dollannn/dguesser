@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO map_locations (map_id, location_id)\n        VALUES ($1, $2)\n        ON CONFLICT (map_id, location_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f161f1c50749b068b5ed0b26a72a2fd511c0f1daae827db2d50fea5735da3fa0"
+}

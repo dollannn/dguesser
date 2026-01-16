@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT rank::bigint as \"rank\"\n        FROM (\n            SELECT id, RANK() OVER (ORDER BY best_score DESC) as rank\n            FROM users\n            WHERE games_played > 0\n        ) ranked\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rank",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "968e19154158afcaef456b9e3511b4b6946c605e4a8f68e9eaeaf8e0af129f31"
+}

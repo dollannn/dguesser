@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(DISTINCT gp.user_id)::bigint as \"count!\"\n        FROM game_players gp\n        INNER JOIN games g ON g.id = gp.game_id\n        WHERE g.status = 'finished' AND g.ended_at >= $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a020764cde7da1cf3cd3634c00ac25af4715ccf7737dbcb6d95e2bffd97bfb3c"
+}

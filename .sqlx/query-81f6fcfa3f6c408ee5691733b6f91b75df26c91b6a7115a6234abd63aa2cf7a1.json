@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            u.id as user_id,\n            u.display_name,\n            u.avatar_url,\n            COALESCE(MAX(gp.score_total), 0)::bigint as \"score!: i64\",\n            COUNT(DISTINCT gp.game_id)::bigint as \"games_count!: i64\"\n        FROM users u\n        INNER JOIN game_players gp ON gp.user_id = u.id\n        INNER JOIN games g ON g.id = gp.game_id\n        WHERE g.status = 'finished' AND g.ended_at >= $1\n        GROUP BY u.id, u.display_name, u.avatar_url\n        HAVING MAX(gp.score_total) > 0\n        ORDER BY MAX(gp.score_total) DESC, COUNT(DISTINCT gp.game_id) DESC\n        LIMIT $2 OFFSET $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "display_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "score!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "games_count!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "81f6fcfa3f6c408ee5691733b6f91b75df26c91b6a7115a6234abd63aa2cf7a1"
+}
