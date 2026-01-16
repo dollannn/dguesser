@@ -48,6 +48,9 @@ COPY crates ./crates
 COPY .sqlx .sqlx
 ENV SQLX_OFFLINE=true
 
+# Copy migrations for sqlx::migrate!() macro (compile-time path verification)
+COPY migrations ./migrations
+
 RUN cargo build --release -p dguesser-api \
     && strip /app/target/release/api
 
