@@ -23,8 +23,11 @@ RUN bun install --frozen-lockfile
 # Copy source files
 COPY frontend/ .
 
-# Build the application
-RUN bun run build
+# Cache buster - change this to force rebuild when env vars change
+ARG CACHEBUST=1
+
+# Build the application (env vars are baked in at this step)
+RUN echo "Building with VITE_API_URL=$VITE_API_URL" && bun run build
 
 # Runtime stage
 FROM gcr.io/distroless/nodejs22-debian12
