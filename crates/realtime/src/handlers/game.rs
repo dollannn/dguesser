@@ -5,6 +5,7 @@ use serde::Deserialize;
 use socketioxide::extract::{Data, SocketRef, State};
 use tokio::sync::oneshot;
 
+use crate::rate_limit::{SocketRateLimitConfig, check_rate_limit};
 use crate::state::{AppState, GameCommand};
 
 /// Payload for joining a game
@@ -40,6 +41,11 @@ pub async fn handle_join(
             return;
         }
     };
+
+    // Rate limit by user
+    if !check_user_rate_limit(&state, &SocketRateLimitConfig::JOIN, &user_id, &socket).await {
+        return;
+    }
 
     // Verify game exists and player can join
     let game = match dguesser_db::games::get_game_by_id(state.db(), &payload.game_id).await {
@@ -109,6 +115,11 @@ pub async fn handle_leave(
     let socket_id = socket.id.to_string();
 
     if let Some(user_id) = state.get_user_for_socket(&socket_id).await {
+        // Rate limit by user
+        if !check_user_rate_limit(&state, &SocketRateLimitConfig::LEAVE, &user_id, &socket).await {
+            return;
+        }
+
         if let Some(handle) = state.get_game(&payload.game_id).await {
             let _ = handle.tx.send(GameCommand::Leave { user_id }).await;
         }
@@ -131,6 +142,11 @@ pub async fn handle_start(
             return;
         }
     };
+
+    // Rate limit by user
+    if !check_user_rate_limit(&state, &SocketRateLimitConfig::START, &user_id, &socket).await {
+        return;
+    }
 
     let handle = match state.get_game(&payload.game_id).await {
         Some(h) => h,
@@ -174,6 +190,15 @@ pub async fn handle_guess(
             return;
         }
     };
+
+    // Rate limit: burst (3/s) and sustained (60/min)
+    if !check_user_rate_limit(&state, &SocketRateLimitConfig::GUESS_BURST, &user_id, &socket).await
+    {
+        return;
+    }
+    if !check_user_rate_limit(&state, &SocketRateLimitConfig::GUESS, &user_id, &socket).await {
+        return;
+    }
 
     // Validate coordinates
     if !(-90.0..=90.0).contains(&payload.lat) || !(-180.0..=180.0).contains(&payload.lng) {
@@ -236,13 +261,18 @@ pub async fn handle_ready(
     let socket_id = socket.id.to_string();
 
     // Get authenticated user
-    let _user_id = match state.get_user_for_socket(&socket_id).await {
+    let user_id = match state.get_user_for_socket(&socket_id).await {
         Some(id) => id,
         None => {
             emit_error(&socket, "NOT_AUTHENTICATED", "Please authenticate first");
             return;
         }
     };
+
+    // Rate limit by user
+    if !check_user_rate_limit(&state, &SocketRateLimitConfig::READY, &user_id, &socket).await {
+        return;
+    }
 
     // Verify game exists
     if state.get_game(&payload.game_id).await.is_none() {
@@ -252,11 +282,39 @@ pub async fn handle_ready(
 
     // TODO: Implement ready state tracking in game actor
     // This is useful for waiting for all players before starting next round
-    tracing::debug!("Player ready for game {}", payload.game_id);
+    tracing::debug!("Player {} ready for game {}", user_id, payload.game_id);
+}
+
+/// Check rate limit for a user and emit error if exceeded
+///
+/// Returns `true` if the request is allowed, `false` if rate limited.
+async fn check_user_rate_limit(
+    state: &AppState,
+    config: &SocketRateLimitConfig,
+    user_id: &str,
+    socket: &SocketRef,
+) -> bool {
+    match check_rate_limit(state.redis(), config, user_id).await {
+        Ok(result) if result.allowed => true,
+        Ok(_) => {
+            emit_error(socket, "RATE_LIMITED", "Too many requests, please slow down");
+            false
+        }
+        Err(e) => {
+            // Log error but allow request (fail-open for consistency with API)
+            tracing::error!(
+                error = %e,
+                event = config.event,
+                user_id = %user_id,
+                "Rate limit Redis error, allowing request"
+            );
+            true
+        }
+    }
 }
 
 /// Emit an error to the socket
-fn emit_error(socket: &SocketRef, code: &str, message: &str) {
+pub fn emit_error(socket: &SocketRef, code: &str, message: &str) {
     socket
         .emit("error", &ErrorPayload { code: code.to_string(), message: message.to_string() })
         .ok();

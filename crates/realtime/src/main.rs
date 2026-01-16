@@ -22,6 +22,7 @@ use tracing_subscriber::{
 mod actors;
 mod config;
 mod handlers;
+mod rate_limit;
 mod redis_state;
 mod state;
 

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use socketioxide::extract::{Data, SocketRef, State};
 
+use crate::rate_limit::{SocketRateLimitConfig, check_rate_limit, get_socket_ip};
 use crate::state::AppState;
 
 /// Cookie name for session ID
@@ -51,6 +52,29 @@ pub async fn handle_auth(
     Data(payload): Data<AuthPayload>,
 ) {
     let socket_id = socket.id.to_string();
+
+    // Rate limit by IP (unauthenticated, so we use IP)
+    let client_ip = get_socket_ip(&socket);
+    match check_rate_limit(state.redis(), &SocketRateLimitConfig::AUTH, &client_ip).await {
+        Ok(result) if result.allowed => {}
+        Ok(_) => {
+            socket
+                .emit(
+                    "auth:error",
+                    &AuthResponse {
+                        success: false,
+                        user_id: None,
+                        error: Some("Too many authentication attempts, please wait".to_string()),
+                    },
+                )
+                .ok();
+            return;
+        }
+        Err(e) => {
+            // Log error but allow request (fail-open for consistency with API)
+            tracing::error!(error = %e, "Rate limit Redis error in auth handler");
+        }
+    }
 
     // Try to get session_id from payload first, then from cookie
     let session_id = if payload.session_id.is_empty() {
