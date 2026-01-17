@@ -62,27 +62,26 @@ async fn main() -> anyhow::Result<()> {
 
 /// Build CORS layer based on configuration
 fn build_cors_layer(config: &Config) -> CorsLayer {
-    use http::{HeaderValue, Method, header};
+    use http::HeaderValue;
     use std::time::Duration;
+    use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin};
 
-    let origin = config.frontend_url.parse::<HeaderValue>().expect("Invalid frontend URL for CORS");
+    // Normalize frontend URL (remove trailing slash for CORS origin matching)
+    let frontend_url = config.frontend_url.trim_end_matches('/');
+    let origin: HeaderValue = frontend_url.parse().expect("Invalid frontend URL for CORS");
 
+    tracing::info!(
+        frontend_url = %frontend_url,
+        "CORS configured for origin"
+    );
+
+    // Use mirror_request() for methods and headers when credentials are enabled.
+    // This returns whatever method/headers the browser requested in the preflight,
+    // which is the correct behavior for APIs with credentials.
     CorsLayer::new()
-        .allow_origin(origin)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::PATCH,
-            Method::DELETE,
-            Method::OPTIONS,
-        ])
-        .allow_headers([
-            header::CONTENT_TYPE,
-            header::AUTHORIZATION,
-            header::ACCEPT,
-            header::COOKIE,
-        ])
+        .allow_origin(AllowOrigin::exact(origin))
+        .allow_methods(AllowMethods::mirror_request())
+        .allow_headers(AllowHeaders::mirror_request())
         .allow_credentials(true)
         .max_age(Duration::from_secs(3600))
 }

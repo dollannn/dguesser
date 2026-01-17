@@ -76,10 +76,21 @@
     movementAllowed = settings.movement_allowed;
     zoomAllowed = settings.zoom_allowed;
     rotationAllowed = settings.rotation_allowed;
+    initialized = true;
+  });
+
+  // Normalize map_id after maps are loaded (handles slug -> id conversion)
+  // This runs when maps load or when settings.map_id changes
+  $effect(() => {
+    // Wait for maps to load before normalizing
+    if (mapsLoading || maps.length === 0) {
+      // Keep the raw map_id until maps are available
+      mapId = settings.map_id;
+      return;
+    }
     // Normalize map_id to actual ID if we find a matching map
     const foundMap = findMapByIdOrSlug(settings.map_id);
     mapId = foundMap?.id ?? settings.map_id;
-    initialized = true;
   });
 
   // Detect which preset matches current settings

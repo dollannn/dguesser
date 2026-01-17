@@ -278,24 +278,32 @@ pub async fn list_maps(
         .await
         .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
 
-    let summaries = maps
-        .into_iter()
-        .map(|m| {
-            let is_system = m.is_system_map();
-            let is_owned = user_id.is_some_and(|uid| m.is_owned_by(uid));
-            MapSummary {
-                id: m.id,
-                slug: m.slug,
-                name: m.name,
-                description: m.description,
-                visibility: m.visibility.to_string(),
-                is_system_map: is_system,
-                is_owned,
-                location_count: m.location_count,
-                created_at: m.created_at,
-            }
-        })
-        .collect();
+    // Fetch location counts from provider (works for both R2 and PostgreSQL)
+    let mut summaries = Vec::with_capacity(maps.len());
+    for m in maps {
+        // Use location provider for count (R2 reads from manifest, PostgreSQL from DB)
+        // Fall back to database count for user-created maps without R2 packs
+        let location_count = state
+            .location_provider()
+            .get_location_count(&m.id)
+            .await
+            .unwrap_or(m.location_count as i64) as i32;
+
+        let is_system = m.is_system_map();
+        let is_owned = user_id.is_some_and(|uid| m.is_owned_by(uid));
+
+        summaries.push(MapSummary {
+            id: m.id,
+            slug: m.slug,
+            name: m.name,
+            description: m.description,
+            visibility: m.visibility.to_string(),
+            is_system_map: is_system,
+            is_owned,
+            location_count,
+            created_at: m.created_at,
+        });
+    }
 
     Ok(Json(ListMapsResponse { maps: summaries }))
 }
@@ -426,6 +434,13 @@ pub async fn get_map(
     let is_system = map.is_system_map();
     let is_owned = user_id.is_some_and(|uid| map.is_owned_by(uid));
 
+    // Use location provider for count (R2 reads from manifest, PostgreSQL from DB)
+    let location_count = state
+        .location_provider()
+        .get_location_count(&map.id)
+        .await
+        .unwrap_or(map.location_count as i64) as i32;
+
     Ok(Json(MapDetails {
         id: map.id,
         slug: map.slug,
@@ -435,7 +450,7 @@ pub async fn get_map(
         is_system_map: is_system,
         is_owned,
         is_default: map.is_default,
-        location_count: map.location_count,
+        location_count,
         created_at: map.created_at,
         updated_at: map.updated_at,
     }))

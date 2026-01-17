@@ -73,19 +73,18 @@ async fn main() -> anyhow::Result<()> {
         HttpState { db: state.db().clone(), redis, started_at: Instant::now(), is_production };
 
     // Configure CORS - restrict to frontend origin only
-    // Note: Cannot use wildcard (*) for headers/methods when credentials are enabled
-    use axum::http::{Method, header};
+    // Use mirror_request() for methods/headers when credentials are enabled
+    use tower_http::cors::{AllowHeaders, AllowMethods};
+
+    let frontend_url = config.frontend_url.trim_end_matches('/');
+    tracing::info!(frontend_url = %frontend_url, "CORS configured for origin");
+
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::exact(
-            config.frontend_url.parse().expect("Invalid FRONTEND_URL for CORS"),
+            frontend_url.parse().expect("Invalid FRONTEND_URL for CORS"),
         ))
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([
-            header::CONTENT_TYPE,
-            header::AUTHORIZATION,
-            header::ACCEPT,
-            header::COOKIE,
-        ])
+        .allow_methods(AllowMethods::mirror_request())
+        .allow_headers(AllowHeaders::mirror_request())
         .allow_credentials(true);
 
     let app = Router::new()
