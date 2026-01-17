@@ -10,7 +10,7 @@ use serde::Serialize;
 use socketioxide::SocketIo;
 use tokio::signal;
 use tower::ServiceBuilder;
-use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{
     EnvFilter,
@@ -73,12 +73,19 @@ async fn main() -> anyhow::Result<()> {
         HttpState { db: state.db().clone(), redis, started_at: Instant::now(), is_production };
 
     // Configure CORS - restrict to frontend origin only
+    // Note: Cannot use wildcard (*) for headers/methods when credentials are enabled
+    use axum::http::{Method, header};
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::exact(
             config.frontend_url.parse().expect("Invalid FRONTEND_URL for CORS"),
         ))
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::COOKIE,
+        ])
         .allow_credentials(true);
 
     let app = Router::new()
