@@ -247,16 +247,16 @@
         type="single" 
         value={currentPreset}
         onValueChange={(v) => v && applyPreset(v)}
-        class="flex flex-wrap gap-2"
+        class="grid grid-cols-3 sm:grid-cols-5 gap-2"
       >
         {#each presets as preset}
           <ToggleGroup.Item 
             value={preset.id} 
-            class="flex items-center gap-2 px-3 py-2 rounded-md border data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+            class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-md border data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
             aria-label={preset.name}
           >
-            <preset.icon class="size-4" />
-            <span class="text-sm font-medium">{preset.name}</span>
+            <preset.icon class="size-4 shrink-0" />
+            <span class="text-sm font-medium truncate">{preset.name}</span>
           </ToggleGroup.Item>
         {/each}
       </ToggleGroup.Root>
