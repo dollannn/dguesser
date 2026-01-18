@@ -3,7 +3,6 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile.realtime"
-buildContext = "../.."
 watchPatterns = [
     "crates/realtime/**",
     "crates/core/**",

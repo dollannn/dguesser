@@ -3,7 +3,6 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile.api"
-buildContext = "../.."
 watchPatterns = [
     "crates/api/**",
     "crates/core/**",
