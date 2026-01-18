@@ -90,7 +90,19 @@
     }
     // Normalize map_id to actual ID if we find a matching map
     const foundMap = findMapByIdOrSlug(settings.map_id);
-    mapId = foundMap?.id ?? settings.map_id;
+    if (foundMap) {
+      mapId = foundMap.id;
+    } else if (maps.length > 0) {
+      // No match found - default to first available map and sync to backend
+      mapId = maps[0].id;
+      // Notify backend of the corrected map_id (only if we're the host and can edit)
+      if (!readonly && onchange) {
+        onchange({ map_id: mapId });
+      }
+    } else {
+      // Fallback to the original value (shouldn't happen if maps loaded properly)
+      mapId = settings.map_id;
+    }
   });
 
   // Detect which preset matches current settings
