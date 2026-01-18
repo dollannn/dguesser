@@ -91,10 +91,12 @@ impl Config {
         };
 
         Ok(Self {
-            port: env::var("REALTIME_PORT")
+            // Railway sets PORT automatically - use it first, then fall back to REALTIME_PORT
+            port: env::var("PORT")
+                .or_else(|_| env::var("REALTIME_PORT"))
                 .unwrap_or_else(|_| "3002".to_string())
                 .parse()
-                .context("Invalid REALTIME_PORT")?,
+                .context("Invalid PORT/REALTIME_PORT")?,
             database_url: env::var("DATABASE_URL").context("DATABASE_URL not set")?,
             redis_url: env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".to_string()),

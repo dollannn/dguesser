@@ -98,10 +98,12 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let port = env::var("API_PORT")
+        // Railway sets PORT automatically - use it first, then fall back to API_PORT
+        let port = env::var("PORT")
+            .or_else(|_| env::var("API_PORT"))
             .unwrap_or_else(|_| "3001".to_string())
             .parse()
-            .context("Invalid API_PORT")?;
+            .context("Invalid PORT/API_PORT")?;
 
         let frontend_url =
             env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
