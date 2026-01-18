@@ -1,15 +1,13 @@
 // Server-side API helper for SSR data fetching
-import { API_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 
 interface FetchOptions {
   cookies?: string;
 }
 
 class ServerApi {
-  private baseUrl: string;
-
-  constructor() {
-    this.baseUrl = `${API_URL || 'http://localhost:3001'}/api/v1`;
+  private get baseUrl(): string {
+    return `${env.API_URL || 'http://localhost:3001'}/api/v1`;
   }
 
   async get<T>(path: string, options: FetchOptions = {}): Promise<T> {
