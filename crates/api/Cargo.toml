@@ -36,7 +36,7 @@ rand.workspace = true
 governor.workspace = true
 validator.workspace = true
 utoipa.workspace = true
-utoipa-swagger-ui.workspace = true
+utoipa-scalar.workspace = true
 once_cell.workspace = true
 regex.workspace = true
 

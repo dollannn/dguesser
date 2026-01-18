@@ -3,7 +3,7 @@
 use axum::{Router, middleware};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
+use utoipa_scalar::{Scalar, Servable};
 
 use crate::middleware::{rate_limit, rate_limit_auth, rate_limit_game, security_headers};
 use crate::state::AppState;
@@ -157,7 +157,7 @@ pub struct ApiDoc;
 /// # Arguments
 /// * `state` - Application state
 /// * `cors` - CORS layer configuration
-/// * `is_production` - If true, Swagger UI is disabled for security
+/// * `is_production` - If true, API docs are disabled for security
 pub fn create_router(state: AppState, cors: CorsLayer, is_production: bool) -> Router {
     // Auth routes with stricter rate limiting (10/min)
     let auth_routes =
@@ -193,14 +193,13 @@ pub fn create_router(state: AppState, cors: CorsLayer, is_production: bool) -> R
         .nest("/api/v1", api_routes)
         .with_state(state);
 
-    // Conditionally add Swagger UI (disabled in production for security)
+    // Conditionally add Scalar docs (disabled in production for security)
     let app = if is_production {
-        tracing::info!("Swagger UI disabled in production");
+        tracing::info!("API docs disabled in production");
         app
     } else {
-        let swagger_ui = SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi());
-        tracing::info!("Swagger UI enabled at /docs");
-        app.merge(swagger_ui)
+        tracing::info!("Scalar API docs enabled at /docs");
+        app.merge(Scalar::with_url("/docs", ApiDoc::openapi()))
     };
 
     // Add global layers

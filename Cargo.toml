@@ -52,7 +52,7 @@ nanoid = "0.4"               # Prefixed public IDs (usr_xxx, gam_xxx)
 
 # API Documentation
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa-scalar = { version = "0.3", features = ["axum"] }
 
 # Utilities
 base64-url = "3"             # URL-safe base64 for session tokens
