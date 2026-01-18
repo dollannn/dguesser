@@ -3,7 +3,20 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile.api"
-buildContext = "../.."
+buildContext = "/"
+watchPatterns = [
+    "crates/api/**",
+    "crates/core/**",
+    "crates/db/**",
+    "crates/auth/**",
+    "crates/protocol/**",
+    "crates/locations/**",
+    "migrations/**",
+    ".sqlx/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "Dockerfile.api",
+]
 
 [deploy]
 healthcheckPath = "/health"

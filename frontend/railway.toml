@@ -4,6 +4,9 @@
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 buildContext = "."
+watchPatterns = [
+    "frontend/**",
+]
 
 [deploy]
 healthcheckPath = "/"

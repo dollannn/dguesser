@@ -3,7 +3,19 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile.realtime"
-buildContext = "../.."
+buildContext = "/"
+watchPatterns = [
+    "crates/realtime/**",
+    "crates/core/**",
+    "crates/db/**",
+    "crates/auth/**",
+    "crates/protocol/**",
+    "crates/locations/**",
+    ".sqlx/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "Dockerfile.realtime",
+]
 
 [deploy]
 healthcheckPath = "/health"
