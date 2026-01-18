@@ -18,6 +18,7 @@ watchPatterns = [
 
 [deploy]
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 120
+startCommand = "./realtime"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
