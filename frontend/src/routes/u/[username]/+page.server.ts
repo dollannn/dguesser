@@ -17,7 +17,7 @@ export const load: PageServerLoad = async ({ params, request }) => {
   try {
     const cookieHeader = request.headers.get('cookie') || '';
     const profile = await serverApi.get<UserProfile>(
-      `/users/username/${params.username}`,
+      `/users/u/${params.username}`,
       { cookies: cookieHeader }
     );
     return { profile };

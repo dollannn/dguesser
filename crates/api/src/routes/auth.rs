@@ -33,6 +33,9 @@ pub struct CurrentUserResponse {
     /// User ID (prefixed nanoid)
     #[schema(example = "usr_V1StGXR8_Z5j")]
     pub id: String,
+    /// Unique username
+    #[schema(example = "coolplayer42")]
+    pub username: Option<String>,
     /// Display name
     pub display_name: String,
     /// Email address (if authenticated)
@@ -56,6 +59,7 @@ impl CurrentUserResponse {
     fn from_user(user: &dguesser_db::User) -> Self {
         Self {
             id: user.id.clone(),
+            username: user.username.clone(),
             display_name: user.display_name.clone(),
             email: user.email.clone(),
             avatar_url: user.avatar_url.clone(),
