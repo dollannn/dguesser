@@ -1,0 +1,15 @@
+# Dependencies
+node_modules
+
+# Build output
+build
+.svelte-kit
+
+# Environment files (use build args instead)
+.env
+.env.*
+!.env.example
+
+# Development files
+*.log
+.DS_Store

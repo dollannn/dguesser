@@ -12,6 +12,16 @@ RUN bun install --frozen-lockfile
 # Copy source files
 COPY . .
 
+# Build-time arguments for Vite (baked into JS bundle)
+ARG VITE_API_URL
+ARG VITE_REALTIME_URL
+ARG VITE_GOOGLE_MAPS_API_KEY
+
+# Set as environment variables for the build process
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_REALTIME_URL=$VITE_REALTIME_URL
+ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
+
 # Build the application
 RUN bun run build
 
@@ -26,6 +36,9 @@ ENV HOST=0.0.0.0
 
 # Railway sets PORT automatically, default to 3000
 ENV PORT=3000
+
+# Runtime environment variables for SSR (set via Railway env vars)
+# API_URL - Server-side API URL for SSR requests (e.g., http://api-service:3001 or https://api.dguesser.lol)
 
 # Copy built application
 COPY --from=builder /app/build ./build
