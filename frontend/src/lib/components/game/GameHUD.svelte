@@ -28,9 +28,9 @@
     </div>
   {/if}
 
-  <!-- Bottom Right - Map -->
+  <!-- Bottom Right - Map (offset to avoid Street View controls) -->
   {#if bottomRight}
-    <div class="absolute bottom-8 right-8 pointer-events-auto">
+    <div class="absolute bottom-8 right-20 pointer-events-auto">
       {@render bottomRight()}
     </div>
   {/if}

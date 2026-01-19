@@ -25,6 +25,7 @@
   let marker: L.Marker | null = null;
   let hoverMarker: L.Marker | null = null;
   let leaflet: typeof L | null = null;
+  let resizeObserver: ResizeObserver | null = null;
 
   // MAP-005: Extracted helper function to create marker icons
   function createMarkerIcon(L: typeof import('leaflet'), opacity: number = 1): L.DivIcon {
@@ -69,6 +70,13 @@
 
     // Add zoom control to bottom left
     leaflet.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+    // Use ResizeObserver for robust tile loading - handles initial sizing,
+    // expand/collapse transitions, and window resizes
+    resizeObserver = new ResizeObserver(() => {
+      map?.invalidateSize();
+    });
+    resizeObserver.observe(container);
 
     // Handle clicks
     map.on('click', (e: L.LeafletMouseEvent) => {
@@ -118,14 +126,13 @@
     if (guessLat !== null && guessLng !== null) {
       marker = leaflet.marker([guessLat, guessLng], { icon: guessIcon }).addTo(map);
     }
-
-    // Invalidate size after a brief delay to fix initial centering
-    setTimeout(() => {
-      map?.invalidateSize();
-    }, 100);
   });
 
   onDestroy(() => {
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
     if (hoverMarker) {
       hoverMarker.remove();
       hoverMarker = null;
@@ -161,15 +168,8 @@
     }
   });
 
-  // Invalidate map size when expanded state changes
-  $effect(() => {
-    if (map && expanded !== undefined) {
-      // Small delay to allow CSS transition to complete
-      setTimeout(() => {
-        map?.invalidateSize();
-      }, 350);
-    }
-  });
+  // Note: ResizeObserver handles map size invalidation automatically
+  // when expanded state changes and triggers container resize
 </script>
 
 <div

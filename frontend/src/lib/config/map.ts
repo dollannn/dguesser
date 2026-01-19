@@ -27,8 +27,8 @@ export const MAP_TILES = {
  * Default map view settings
  */
 export const MAP_DEFAULTS = {
-  /** Default center coordinates [lat, lng] */
-  center: [20, 0] as [number, number],
+  /** Default center coordinates [lat, lng] - Central Europe */
+  center: [48, 10] as [number, number],
   
   /** Default zoom level for initial view */
   zoom: 2,
