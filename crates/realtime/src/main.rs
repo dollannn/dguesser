@@ -239,7 +239,7 @@ async fn service_info(State(state): State<HttpState>) -> Json<ServiceInfo> {
     let environment = if state.is_production { "production" } else { "development" };
 
     Json(ServiceInfo {
-        about: "TODO: Add description",
+        about: "dguesser.lol - realtime service",
         name: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
         git_sha: env!("GIT_SHA"),
