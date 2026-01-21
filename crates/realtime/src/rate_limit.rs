@@ -19,8 +19,8 @@ pub struct SocketRateLimitConfig {
 }
 
 impl SocketRateLimitConfig {
-    /// Auth event: 20 requests per minute per IP
-    pub const AUTH: Self = Self { event: "auth", max_requests: 20, window_secs: 60 };
+    /// Auth event: 60 requests per minute per IP
+    pub const AUTH: Self = Self { event: "auth", max_requests: 60, window_secs: 60 };
 
     /// Game join: 30 requests per minute per user
     pub const JOIN: Self = Self { event: "game:join", max_requests: 30, window_secs: 60 };
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_config_values() {
-        assert_eq!(SocketRateLimitConfig::AUTH.max_requests, 20);
+        assert_eq!(SocketRateLimitConfig::AUTH.max_requests, 60);
         assert_eq!(SocketRateLimitConfig::AUTH.window_secs, 60);
 
         assert_eq!(SocketRateLimitConfig::GUESS.max_requests, 120);

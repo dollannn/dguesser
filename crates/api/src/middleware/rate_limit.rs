@@ -41,7 +41,7 @@ impl Default for RateLimitConfig {
 impl RateLimitConfig {
     /// Rate limit for authentication endpoints
     pub fn auth() -> Self {
-        Self { max_requests: 60, window_secs: 60, prefix: "ratelimit:auth" }
+        Self { max_requests: 120, window_secs: 60, prefix: "ratelimit:auth" }
     }
 
     /// Rate limit for game actions
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn test_auth_config() {
         let config = RateLimitConfig::auth();
-        assert_eq!(config.max_requests, 60);
+        assert_eq!(config.max_requests, 120);
         assert_eq!(config.window_secs, 60);
     }
 
