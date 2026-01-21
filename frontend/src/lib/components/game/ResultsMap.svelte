@@ -2,7 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import type L from 'leaflet';
-  import { MAP_TILES, MAP_DEFAULTS } from '$lib/config/map';
+  import { MAP_TILES, MAP_DEFAULTS, MARKER_CONFIG } from '$lib/config/map';
+  import { createMapPinIcon } from '$lib/components/map';
 
   interface Guess {
     lat: number;
@@ -21,9 +22,6 @@
   let container: HTMLDivElement;
   let map: L.Map | null = null;
   let leaflet: typeof L | null = null;
-
-  // Player colors for guesses
-  const colors = ['#22c55e', '#3b82f6', '#a855f7', '#f59e0b', '#ec4899', '#06b6d4'];
 
   onMount(async () => {
     if (!browser) return;
@@ -50,17 +48,11 @@
     // Create bounds to fit all markers
     const bounds = leaflet.latLngBounds([[correctLat, correctLng]]);
 
-    // Add correct location marker (red circle with pin)
-    const correctIcon = leaflet.divIcon({
-      className: 'correct-marker',
-      html: `
-        <div class="marker-container">
-          <div class="marker-circle correct"></div>
-          <div class="marker-pulse"></div>
-        </div>
-      `,
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
+    // Add correct location marker (red pin with pulse animation)
+    const correctIcon = createMapPinIcon(leaflet, {
+      color: MARKER_CONFIG.colors.correct,
+      size: MARKER_CONFIG.size,
+      pulse: true,
     });
 
     leaflet.marker([correctLat, correctLng], { icon: correctIcon })
@@ -73,18 +65,12 @@
 
     // Add guess markers and lines
     guesses.forEach((guess, i) => {
-      const color = colors[i % colors.length];
+      const color = MARKER_CONFIG.colors.players[i % MARKER_CONFIG.colors.players.length];
 
-      // Create custom icon for guess
-      const guessIcon = leaflet!.divIcon({
-        className: 'guess-marker',
-        html: `
-          <div class="marker-container">
-            <div class="marker-circle" style="background-color: ${color};"></div>
-          </div>
-        `,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
+      // Create standardized pin icon for guess
+      const guessIcon = createMapPinIcon(leaflet!, {
+        color,
+        size: MARKER_CONFIG.size,
       });
 
       // Add guess marker
@@ -133,54 +119,38 @@
 <div bind:this={container} class="w-full h-full rounded-lg"></div>
 
 <style>
-  :global(.correct-marker),
-  :global(.guess-marker) {
-    background: transparent;
-    border: none;
+  /* Map pin styles */
+  :global(.map-pin-icon) {
+    background: transparent !important;
+    border: none !important;
   }
 
-  :global(.marker-container) {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  :global(.marker-circle) {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    border: 3px solid white;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
-  :global(.marker-circle.correct) {
-    width: 24px;
-    height: 24px;
-    background-color: #ef4444;
-    border: 3px solid white;
-  }
-
-  :global(.marker-pulse) {
-    position: absolute;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background-color: rgba(239, 68, 68, 0.3);
-    animation: pulse 2s ease-out infinite;
-  }
-
-  @keyframes pulse {
+  @keyframes map-pin-pulse {
     0% {
-      transform: scale(0.5);
-      opacity: 1;
+      transform: translateX(-50%) scale(0.8);
+      opacity: 0.6;
     }
     100% {
-      transform: scale(1.5);
+      transform: translateX(-50%) scale(2);
       opacity: 0;
     }
   }
 
+  @keyframes map-pin-bounce {
+    0% {
+      transform: translateY(-8px);
+      opacity: 0;
+    }
+    60% {
+      transform: translateY(2px);
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  /* Tooltip styles */
   :global(.results-tooltip) {
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(8px);
@@ -197,6 +167,7 @@
     border-top-color: rgba(255, 255, 255, 0.95) !important;
   }
 
+  /* Zoom control styles */
   :global(.leaflet-control-zoom) {
     border: none !important;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;

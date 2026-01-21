@@ -2,7 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import type L from 'leaflet';
-  import { MAP_TILES, MAP_DEFAULTS } from '$lib/config/map';
+  import { MAP_TILES, MAP_DEFAULTS, MARKER_CONFIG } from '$lib/config/map';
+  import { createMapPinIcon, MAP_PIN_STYLES } from '$lib/components/map';
 
   interface Props {
     guessLat?: number | null;
@@ -27,33 +28,23 @@
   let leaflet: typeof L | null = null;
   let resizeObserver: ResizeObserver | null = null;
 
-  // MAP-005: Extracted helper function to create marker icons
-  function createMarkerIcon(L: typeof import('leaflet'), opacity: number = 1): L.DivIcon {
-    const opacityStyle = opacity < 1 ? `opacity: ${opacity};` : '';
-    return L.divIcon({
-      className: opacity < 1 ? 'hover-marker' : 'guess-marker',
-      html: `
-        <div style="position: relative; ${opacityStyle}">
-          <div style="width: 24px; height: 24px; background: #22c55e; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
-            <div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div>
-          </div>
-          <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 100%; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #22c55e; margin-top: -3px;"></div>
-        </div>
-      `,
-      iconSize: [24, 32],
-      iconAnchor: [12, 32],
-    });
-  }
-
   onMount(async () => {
     if (!browser) return;
 
     // Dynamically import Leaflet only on client side
     leaflet = (await import('leaflet')).default;
 
-    // Create marker icons using helper function
-    const guessIcon = createMarkerIcon(leaflet);
-    const hoverIcon = createMarkerIcon(leaflet, 0.5);
+    // Create marker icons using standardized map pin
+    const guessIcon = createMapPinIcon(leaflet, {
+      color: MARKER_CONFIG.colors.guess,
+      size: MARKER_CONFIG.size,
+      bounce: true,
+    });
+    const hoverIcon = createMapPinIcon(leaflet, {
+      color: MARKER_CONFIG.colors.guess,
+      size: MARKER_CONFIG.size,
+      opacity: MARKER_CONFIG.hoverOpacity,
+    });
 
     // MAP-006: Initialize map with centralized config
     map = leaflet.map(container, {
@@ -147,8 +138,12 @@
   $effect(() => {
     if (!map || !leaflet) return;
 
-    // MAP-005: Use shared helper function for icon creation
-    const guessIcon = createMarkerIcon(leaflet);
+    // Use standardized map pin for guess marker
+    const guessIcon = createMapPinIcon(leaflet, {
+      color: MARKER_CONFIG.colors.guess,
+      size: MARKER_CONFIG.size,
+      bounce: true,
+    });
 
     if (guessLat !== null && guessLng !== null) {
       // Remove hover marker when placing a real guess
@@ -180,16 +175,38 @@
 ></div>
 
 <style>
-  :global(.guess-marker),
-  :global(.hover-marker) {
-    background: transparent;
-    border: none;
+  /* Map pin styles */
+  :global(.map-pin-icon) {
+    background: transparent !important;
+    border: none !important;
   }
 
-  :global(.hover-marker) {
-    pointer-events: none;
+  @keyframes map-pin-pulse {
+    0% {
+      transform: translateX(-50%) scale(0.8);
+      opacity: 0.6;
+    }
+    100% {
+      transform: translateX(-50%) scale(2);
+      opacity: 0;
+    }
   }
 
+  @keyframes map-pin-bounce {
+    0% {
+      transform: translateY(-8px);
+      opacity: 0;
+    }
+    60% {
+      transform: translateY(2px);
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  /* Zoom control styles */
   :global(.leaflet-control-zoom) {
     border: none !important;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15) !important;

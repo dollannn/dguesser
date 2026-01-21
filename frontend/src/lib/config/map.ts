@@ -44,15 +44,19 @@ export const MAP_DEFAULTS = {
  * Marker appearance settings
  */
 export const MARKER_CONFIG = {
-  /** Size of marker icon [width, height] */
-  iconSize: [24, 36] as [number, number],
-  
-  /** Anchor point for marker [x, y] from top-left */
-  iconAnchor: [12, 36] as [number, number],
-  
-  /** Color for guess markers (green) */
-  guessColor: '#22c55e',
-  
-  /** Color for correct location markers (red) */
-  correctColor: '#ef4444',
+  /** Base size of marker icon in pixels */
+  size: 32,
+
+  /** Marker colors by type */
+  colors: {
+    /** Color for guess markers (Tailwind blue-500) */
+    guess: '#3b82f6',
+    /** Color for correct location markers (Tailwind green-500) */
+    correct: '#22c55e',
+    /** Colors for multiplayer guess markers - cycles through array */
+    players: ['#3b82f6', '#a855f7', '#f59e0b', '#ec4899', '#06b6d4', '#14b8a6'],
+  },
+
+  /** Hover preview opacity */
+  hoverOpacity: 0.5,
 };
