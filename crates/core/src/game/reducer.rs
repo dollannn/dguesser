@@ -15,8 +15,11 @@ use super::scoring::{ScoringConfig, calculate_score};
 use super::state::{GamePhase, GameState, Guess, PlayerState, RoundState};
 use crate::geo::distance::haversine_distance;
 
-/// Grace period for reconnection in milliseconds (30 seconds).
-pub const RECONNECTION_GRACE_PERIOD_MS: u32 = 30_000;
+/// Grace period for reconnection in lobby in milliseconds (30 seconds).
+pub const LOBBY_RECONNECTION_GRACE_PERIOD_MS: u32 = 30_000;
+
+/// Timeout for abandonment when all players disconnect during active game (2 minutes).
+pub const ALL_DISCONNECTED_TIMEOUT_MS: u32 = 120_000;
 
 /// Maximum players allowed per game (prevents resource exhaustion).
 pub const MAX_PLAYERS_PER_GAME: usize = 50;
@@ -176,12 +179,22 @@ fn handle_disconnect(mut state: GameState, user_id: String, now: DateTime<Utc>) 
 
     player.connected = false;
     player.disconnected_at = Some(now);
+    let display_name = player.display_name.clone();
 
-    let event = GameEvent::PlayerDisconnected {
-        user_id,
-        display_name: player.display_name.clone(),
-        grace_period_ms: RECONNECTION_GRACE_PERIOD_MS,
+    // In lobby: 30-second grace period before being removed
+    // During active game: player stays until game ends (no individual timeout)
+    let grace_period_ms = match state.phase {
+        GamePhase::Lobby => Some(LOBBY_RECONNECTION_GRACE_PERIOD_MS),
+        _ => None, // No individual timeout during active game
     };
+
+    // Check if ALL players are now disconnected (for game abandonment tracking)
+    let all_disconnected = state.players.values().all(|p| !p.connected);
+    if all_disconnected && state.all_disconnected_at.is_none() {
+        state.all_disconnected_at = Some(now);
+    }
+
+    let event = GameEvent::PlayerDisconnected { user_id, display_name, grace_period_ms };
 
     ReducerResult::with_events(state, vec![event])
 }
@@ -198,6 +211,9 @@ fn handle_reconnect(mut state: GameState, user_id: String) -> ReducerResult {
 
     player.connected = true;
     player.disconnected_at = None;
+
+    // A player reconnected, so we're no longer in "all disconnected" state
+    state.all_disconnected_at = None;
 
     let event = GameEvent::PlayerReconnected { user_id, display_name: player.display_name.clone() };
 
@@ -472,9 +488,10 @@ fn handle_tick(mut state: GameState, now: DateTime<Utc>) -> ReducerResult {
     {
         let connected_ids = state.connected_player_ids();
 
-        // Check if round should end (timeout or all guessed)
+        // Check if round should end (timeout or all connected players guessed)
+        // Don't auto-end if there are no connected players - let abandonment logic handle that
         let timed_out = round.is_timed_out(now);
-        let all_guessed = round.all_guessed(&connected_ids);
+        let all_guessed = !connected_ids.is_empty() && round.all_guessed(&connected_ids);
 
         if timed_out || all_guessed {
             // End the round - recursively process EndRound
@@ -482,24 +499,61 @@ fn handle_tick(mut state: GameState, now: DateTime<Utc>) -> ReducerResult {
         }
     }
 
-    // Check for disconnection grace period timeouts
-    let timed_out_players: Vec<(String, String)> = state
-        .players
-        .iter()
-        .filter_map(|(id, p)| {
-            if let Some(disconnected_at) = p.disconnected_at {
-                let elapsed = (now - disconnected_at).num_milliseconds();
-                if elapsed > RECONNECTION_GRACE_PERIOD_MS as i64 {
-                    return Some((id.clone(), p.display_name.clone()));
+    // Check for disconnection grace period timeouts - ONLY in Lobby phase
+    // During active games, disconnected players stay until game ends
+    if state.phase == GamePhase::Lobby {
+        let timed_out_players: Vec<(String, String)> = state
+            .players
+            .iter()
+            .filter_map(|(id, p)| {
+                if let Some(disconnected_at) = p.disconnected_at {
+                    let elapsed = (now - disconnected_at).num_milliseconds();
+                    if elapsed > LOBBY_RECONNECTION_GRACE_PERIOD_MS as i64 {
+                        return Some((id.clone(), p.display_name.clone()));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        for (user_id, display_name) in timed_out_players {
+            state.players.remove(&user_id);
+            events.push(GameEvent::PlayerTimedOut { user_id, display_name });
+        }
+    }
+
+    // Check for game abandonment (all players disconnected for too long)
+    // This applies during active games only
+    if matches!(
+        state.phase,
+        GamePhase::Active | GamePhase::RoundInProgress | GamePhase::BetweenRounds
+    ) {
+        // Update all_disconnected_at tracking
+        let all_disconnected = state.players.values().all(|p| !p.connected);
+
+        if all_disconnected {
+            // Set timestamp if not already set
+            if state.all_disconnected_at.is_none() {
+                state.all_disconnected_at = Some(now);
+            }
+
+            // Check if timeout has elapsed
+            if let Some(all_disconnected_at) = state.all_disconnected_at {
+                let elapsed = (now - all_disconnected_at).num_milliseconds();
+                if elapsed > ALL_DISCONNECTED_TIMEOUT_MS as i64 {
+                    // Game is abandoned
+                    state.phase = GamePhase::Finished;
+                    state.all_disconnected_at = None;
+                    events.push(GameEvent::GameAbandoned {
+                        reason: "All players disconnected".to_string(),
+                    });
+                    return ReducerResult::with_events(state, events);
                 }
             }
-            None
-        })
-        .collect();
-
-    for (user_id, display_name) in timed_out_players {
-        state.players.remove(&user_id);
-        events.push(GameEvent::PlayerTimedOut { user_id, display_name });
+        } else {
+            // At least one player is connected, clear the all_disconnected timestamp
+            state.all_disconnected_at = None;
+        }
     }
 
     if events.is_empty() {
@@ -1170,5 +1224,163 @@ mod tests {
 
         assert!(result.state.players.get("usr_host").unwrap().connected);
         assert!(matches!(result.events[0], GameEvent::PlayerReconnected { .. }));
+    }
+
+    #[test]
+    fn test_disconnect_in_lobby_has_grace_period() {
+        let mut state = test_state();
+        add_host(&mut state);
+        let now = Utc::now();
+
+        // Disconnect in lobby phase
+        let result =
+            reduce(&state, GameCommand::Disconnect { user_id: "usr_host".to_string() }, now);
+
+        // Should have grace period in lobby
+        match &result.events[0] {
+            GameEvent::PlayerDisconnected { grace_period_ms, .. } => {
+                assert_eq!(*grace_period_ms, Some(LOBBY_RECONNECTION_GRACE_PERIOD_MS));
+            }
+            _ => panic!("Expected PlayerDisconnected event"),
+        }
+    }
+
+    #[test]
+    fn test_disconnect_mid_game_no_grace_period() {
+        let mut state = test_state();
+        add_host(&mut state);
+        add_player(&mut state, "usr_p1");
+        let now = Utc::now();
+
+        // Start game
+        let result = reduce(
+            &state,
+            GameCommand::Start {
+                user_id: "usr_host".to_string(),
+                first_location: LocationData::new(0.0, 0.0, None),
+            },
+            now,
+        );
+        state = result.state;
+
+        // Disconnect during game
+        let result = reduce(&state, GameCommand::Disconnect { user_id: "usr_p1".to_string() }, now);
+
+        // Should NOT have grace period mid-game (player stays until game ends)
+        match &result.events[0] {
+            GameEvent::PlayerDisconnected { grace_period_ms, .. } => {
+                assert_eq!(*grace_period_ms, None);
+            }
+            _ => panic!("Expected PlayerDisconnected event"),
+        }
+    }
+
+    #[test]
+    fn test_mid_game_disconnect_player_not_removed_after_timeout() {
+        let mut state = test_state();
+        add_host(&mut state);
+        add_player(&mut state, "usr_p1");
+        let now = Utc::now();
+
+        // Start game
+        let result = reduce(
+            &state,
+            GameCommand::Start {
+                user_id: "usr_host".to_string(),
+                first_location: LocationData::new(0.0, 0.0, None),
+            },
+            now,
+        );
+        state = result.state;
+
+        // Disconnect player during game
+        let result = reduce(&state, GameCommand::Disconnect { user_id: "usr_p1".to_string() }, now);
+        state = result.state;
+
+        // Wait long past any grace period (5 minutes)
+        let much_later = now + chrono::Duration::minutes(5);
+        let result = reduce(&state, GameCommand::Tick, much_later);
+
+        // Player should still be in the game (just disconnected)
+        assert!(result.state.players.contains_key("usr_p1"));
+        assert!(!result.state.players.get("usr_p1").unwrap().connected);
+    }
+
+    #[test]
+    fn test_all_players_disconnect_triggers_abandonment() {
+        let mut state = test_state();
+        // Use no time limit so round doesn't timeout before abandonment
+        state.settings.time_limit_seconds = 0;
+        add_host(&mut state);
+        let now = Utc::now();
+
+        // Start game
+        let result = reduce(
+            &state,
+            GameCommand::Start {
+                user_id: "usr_host".to_string(),
+                first_location: LocationData::new(0.0, 0.0, None),
+            },
+            now,
+        );
+        state = result.state;
+
+        // Disconnect all players
+        let result =
+            reduce(&state, GameCommand::Disconnect { user_id: "usr_host".to_string() }, now);
+        state = result.state;
+
+        // all_disconnected_at should be set
+        assert!(state.all_disconnected_at.is_some());
+
+        // Tick past the abandonment timeout (2 minutes + buffer)
+        let later = now + chrono::Duration::seconds(150);
+        let result = reduce(&state, GameCommand::Tick, later);
+
+        // Game should be abandoned
+        assert_eq!(result.state.phase, GamePhase::Finished);
+        assert!(result.events.iter().any(|e| matches!(e, GameEvent::GameAbandoned { .. })));
+    }
+
+    #[test]
+    fn test_reconnect_prevents_abandonment() {
+        let mut state = test_state();
+        // Use no time limit so round doesn't timeout
+        state.settings.time_limit_seconds = 0;
+        add_host(&mut state);
+        let now = Utc::now();
+
+        // Start game
+        let result = reduce(
+            &state,
+            GameCommand::Start {
+                user_id: "usr_host".to_string(),
+                first_location: LocationData::new(0.0, 0.0, None),
+            },
+            now,
+        );
+        state = result.state;
+
+        // Disconnect all players
+        let result =
+            reduce(&state, GameCommand::Disconnect { user_id: "usr_host".to_string() }, now);
+        state = result.state;
+        assert!(state.all_disconnected_at.is_some());
+
+        // Reconnect before timeout
+        let result =
+            reduce(&state, GameCommand::Reconnect { user_id: "usr_host".to_string() }, now);
+        state = result.state;
+
+        // all_disconnected_at should be cleared
+        assert!(state.all_disconnected_at.is_none());
+
+        // Tick past would-be abandonment timeout
+        let later = now + chrono::Duration::seconds(150);
+        let result = reduce(&state, GameCommand::Tick, later);
+
+        // Game should NOT be abandoned
+        assert_ne!(result.state.phase, GamePhase::Finished);
+        assert!(!result.events.iter().any(|e| matches!(e, GameEvent::GameAbandoned { .. })));
     }
 }

@@ -20,6 +20,8 @@ pub mod server {
     pub const SCORES_UPDATE: &str = "scores:update";
     /// Game settings updated (in lobby)
     pub const SETTINGS_UPDATED: &str = "game:settings_updated";
+    /// Game abandoned (all players disconnected for too long)
+    pub const GAME_ABANDONED: &str = "game:abandoned";
 }
 
 /// Socket.IO event names (client -> server)

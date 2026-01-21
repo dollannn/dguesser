@@ -201,6 +201,9 @@ pub struct GameState {
     pub created_at: DateTime<Utc>,
     /// When the game started (first round began)
     pub started_at: Option<DateTime<Utc>>,
+    /// When all players became disconnected (for abandonment timeout)
+    #[serde(default)]
+    pub all_disconnected_at: Option<DateTime<Utc>>,
 }
 
 impl GameState {
@@ -216,6 +219,7 @@ impl GameState {
             round_number: 0,
             created_at: Utc::now(),
             started_at: None,
+            all_disconnected_at: None,
         }
     }
 

@@ -33,8 +33,8 @@ pub enum GameEvent {
     PlayerDisconnected {
         user_id: String,
         display_name: String,
-        /// Grace period duration in milliseconds
-        grace_period_ms: u32,
+        /// Grace period in milliseconds (None = until game ends, player won't be kicked mid-game)
+        grace_period_ms: Option<u32>,
     },
 
     /// A player reconnected within the grace period.
@@ -82,6 +82,12 @@ pub enum GameEvent {
         settings: GameSettings,
     },
 
+    /// The game was abandoned (all players disconnected for too long).
+    GameAbandoned {
+        /// Reason for abandonment
+        reason: String,
+    },
+
     /// An error occurred while processing a command.
     Error {
         /// Error code (e.g., "NOT_HOST", "ALREADY_GUESSED")
@@ -125,6 +131,7 @@ impl GameEvent {
             GameEvent::ScoresUpdated { .. } => "ScoresUpdated",
             GameEvent::GameEnded { .. } => "GameEnded",
             GameEvent::SettingsUpdated { .. } => "SettingsUpdated",
+            GameEvent::GameAbandoned { .. } => "GameAbandoned",
             GameEvent::Error { .. } => "Error",
         }
     }

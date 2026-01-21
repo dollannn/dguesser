@@ -239,8 +239,9 @@ pub struct PlayerDisconnectedPayload {
     pub user_id: String,
     /// Display name
     pub display_name: String,
-    /// Grace period in milliseconds
-    pub grace_period_ms: u32,
+    /// Grace period in milliseconds (None = until game ends, player won't be kicked mid-game)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grace_period_ms: Option<u32>,
 }
 
 /// Player reconnected payload (within grace period)
@@ -312,4 +313,15 @@ pub struct SettingsUpdatedPayload {
     pub game_id: String,
     /// Updated settings
     pub settings: GameSettingsPayload,
+}
+
+/// Game abandoned payload (all players disconnected for too long)
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GameAbandonedPayload {
+    /// Game ID (e.g., gam_FybH2oF9Xaw8)
+    #[schema(example = "gam_FybH2oF9Xaw8")]
+    pub game_id: String,
+    /// Reason for abandonment
+    #[schema(example = "All players disconnected")]
+    pub reason: String,
 }

@@ -48,8 +48,9 @@ pub struct GameHandle {
     pub tx: mpsc::Sender<GameCommand>,
 }
 
-/// Grace period for reconnection in seconds
-/// NOTE: This is now defined in dguesser_core::game::reducer::RECONNECTION_GRACE_PERIOD_MS
+/// Grace period for reconnection in lobby (seconds).
+/// NOTE: During active games, players can reconnect for the entire game duration.
+/// See dguesser_core::game::reducer for timeout constants.
 #[allow(dead_code)]
 pub const RECONNECTION_GRACE_PERIOD_SECS: u64 = 30;
 

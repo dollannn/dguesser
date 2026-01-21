@@ -18,7 +18,7 @@ use dguesser_core::location::LocationProvider;
 use dguesser_db::DbPool;
 use dguesser_protocol::socket::events;
 use dguesser_protocol::socket::payloads::{
-    FinalStanding, GameEndPayload, GameSettingsPayload, GameStatePayload,
+    FinalStanding, GameAbandonedPayload, GameEndPayload, GameSettingsPayload, GameStatePayload,
     PlayerDisconnectedPayload, PlayerGuessedPayload, PlayerInfo, PlayerJoinedPayload,
     PlayerLeftPayload, PlayerReconnectedPayload, PlayerScoreInfo, PlayerTimeoutPayload,
     RoundEndPayload, RoundLocation, RoundResult, RoundStartPayload, ScoresUpdatePayload,
@@ -1020,6 +1020,9 @@ impl GameActor {
                 GameEvent::SettingsUpdated { settings } => {
                     self.broadcast_settings_updated(settings).await;
                 }
+                GameEvent::GameAbandoned { reason } => {
+                    self.broadcast_game_abandoned(reason).await;
+                }
                 GameEvent::Error { .. } => {
                     // Errors are returned to the caller, not broadcast
                 }
@@ -1151,7 +1154,7 @@ impl GameActor {
         &self,
         user_id: &str,
         display_name: &str,
-        grace_period_ms: u32,
+        grace_period_ms: Option<u32>,
     ) {
         let payload = PlayerDisconnectedPayload {
             user_id: user_id.to_string(),
@@ -1284,6 +1287,29 @@ impl GameActor {
         let payload = GameEndPayload { game_id: self.game_id.clone(), final_standings };
 
         self.emitter.emit_to_room(&self.game_id, events::server::GAME_END, &payload).await.ok();
+    }
+
+    /// Broadcast game abandoned (all players disconnected)
+    async fn broadcast_game_abandoned(&self, reason: &str) {
+        let payload =
+            GameAbandonedPayload { game_id: self.game_id.clone(), reason: reason.to_string() };
+
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::GAME_ABANDONED, &payload)
+            .await
+            .ok();
+
+        // Also update database status to Abandoned
+        dguesser_db::games::update_game_status(
+            &self.db,
+            &self.game_id,
+            dguesser_db::GameStatus::Abandoned,
+        )
+        .await
+        .ok();
+
+        // Delete from Redis
+        self.delete_state_from_redis().await;
     }
 
     /// Broadcast live scores update

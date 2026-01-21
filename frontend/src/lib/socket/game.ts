@@ -90,7 +90,8 @@ export interface SettingsUpdatedPayload {
 export interface PlayerDisconnectedPayload {
   user_id: string;
   display_name: string;
-  grace_period_ms: number;
+  /** Grace period in ms, or null/undefined if player won't be kicked (mid-game disconnects) */
+  grace_period_ms?: number | null;
 }
 
 /** Player reconnected payload */
@@ -103,6 +104,12 @@ export interface PlayerReconnectedPayload {
 export interface PlayerTimedOutPayload {
   user_id: string;
   display_name: string;
+}
+
+/** Game abandoned payload (all players disconnected for too long) */
+export interface GameAbandonedPayload {
+  game_id: string;
+  reason: string;
 }
 
 /** Live scores update payload */
@@ -369,6 +376,17 @@ function createGameStore() {
       }));
     },
 
+    /** Handle game abandoned (all players disconnected for too long) */
+    handleGameAbandoned(payload: GameAbandonedPayload): void {
+      socketClient.setActiveGame(null);
+      update((s) => ({
+        ...s,
+        status: 'finished',
+        finalStandings: [],
+      }));
+      toastStore.add('error', `Game abandoned: ${payload.reason}`);
+    },
+
     handlePlayerJoined(payload: { player: PlayerInfo }): void {
       update((s) => {
         const players = new Map(s.players);
@@ -501,6 +519,9 @@ export function initGameSocketListeners(): () => void {
     }),
     socketClient.on<GameEndPayload>('game:end', (data) => {
       gameStore.handleGameEnd(data);
+    }),
+    socketClient.on<GameAbandonedPayload>('game:abandoned', (data) => {
+      gameStore.handleGameAbandoned(data);
     }),
     socketClient.on<{ player: PlayerInfo }>('player:joined', (data) => {
       gameStore.handlePlayerJoined(data);
