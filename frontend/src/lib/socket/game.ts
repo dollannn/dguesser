@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
-import { socketClient, toastStore } from './client';
+import { socketClient, toastStore, type GamePhase } from './client';
 import type { GameSettings } from '$lib/api/games';
+import { authStore } from '$lib/stores/auth';
 
 // Types matching backend protocol
 export interface RoundLocation {
@@ -195,7 +196,8 @@ function createGameStore() {
       // Wait for socket authentication before joining
       await socketClient.waitForAuth();
       socketClient.emit('game:join', { game_id: gameId });
-      socketClient.setActiveGame(gameId);
+      // Set as lobby phase - will be updated to 'active' when game starts
+      socketClient.setActiveGame(gameId, 'lobby');
       update((s) => ({ ...s, gameId, status: 'lobby' }));
     },
 
@@ -204,7 +206,7 @@ function createGameStore() {
       if (currentState.gameId) {
         socketClient.emit('game:leave', { game_id: currentState.gameId });
       }
-      socketClient.setActiveGame(null);
+      socketClient.setActiveGame(null, null);
       set(initialState);
     },
 
@@ -246,21 +248,29 @@ function createGameStore() {
         });
       }
 
-      // Map server status to client status
+      // Map server status to client status and determine phase for reconnection logic
       let status: GameState['status'];
+      let socketPhase: GamePhase;
       switch (payload.status) {
         case 'lobby':
           status = 'lobby';
+          socketPhase = 'lobby';
           break;
         case 'active':
           status = payload.location ? 'playing' : 'lobby';
+          socketPhase = 'active'; // Active games allow auto-rejoin
           break;
         case 'finished':
           status = 'finished';
+          socketPhase = null; // No need to rejoin finished games
           break;
         default:
           status = 'lobby';
+          socketPhase = 'lobby';
       }
+
+      // Update socket client's phase for reconnection logic
+      socketClient.setActiveGamePhase(socketPhase);
 
       // Calculate round started time from time remaining
       let roundStartedAt: number | null = null;
@@ -304,6 +314,9 @@ function createGameStore() {
     },
 
     handleRoundStart(payload: RoundStartPayload): void {
+      // Game is now active - update phase for reconnection logic
+      socketClient.setActiveGamePhase('active');
+
       update((s) => ({
         ...s,
         status: 'playing',
@@ -368,7 +381,7 @@ function createGameStore() {
     },
 
     handleGameEnd(payload: GameEndPayload): void {
-      socketClient.setActiveGame(null);
+      socketClient.setActiveGame(null, null);
       update((s) => ({
         ...s,
         status: 'finished',
@@ -378,7 +391,7 @@ function createGameStore() {
 
     /** Handle game abandoned (all players disconnected for too long) */
     handleGameAbandoned(payload: GameAbandonedPayload): void {
-      socketClient.setActiveGame(null);
+      socketClient.setActiveGame(null, null);
       update((s) => ({
         ...s,
         status: 'finished',
@@ -403,6 +416,16 @@ function createGameStore() {
     },
 
     handlePlayerLeft(payload: { user_id: string }): void {
+      // Check if this is the current user being removed
+      const currentUserId = getCurrentUserId();
+      if (payload.user_id === currentUserId) {
+        // We were removed from the game - clear state and prevent auto-rejoin
+        socketClient.setActiveGame(null, null);
+        set(initialState);
+        toastStore.add('info', 'You have left the game.');
+        return;
+      }
+
       update((s) => {
         const players = new Map(s.players);
         players.delete(payload.user_id);
@@ -483,20 +506,16 @@ function createGameStore() {
     },
 
     reset(): void {
-      socketClient.setActiveGame(null);
+      socketClient.setActiveGame(null, null);
       set(initialState);
     },
   };
 }
 
-/** Get current user ID from local storage or session */
+/** Get current user ID from auth store */
 function getCurrentUserId(): string | null {
-  // This would typically come from your auth store
-  // For now, return null - will be enhanced when needed
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('userId') || null;
-  }
-  return null;
+  const authState = get(authStore);
+  return authState.user?.id ?? null;
 }
 
 export const gameStore = createGameStore();

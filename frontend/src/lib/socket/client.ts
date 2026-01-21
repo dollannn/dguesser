@@ -20,6 +20,9 @@ export type ConnectionStatus =
   | 'authenticated'
   | 'reconnecting';
 
+/** Game phase for reconnection logic */
+export type GamePhase = 'lobby' | 'active' | null;
+
 export interface SocketState {
   status: ConnectionStatus;
   error: string | null;
@@ -27,6 +30,8 @@ export interface SocketState {
   maxReconnectAttempts: number;
   /** Game ID to rejoin on reconnect (if any) */
   activeGameId: string | null;
+  /** Game phase - used to determine if auto-rejoin is allowed */
+  activeGamePhase: GamePhase;
 }
 
 /** Toast notification types */
@@ -82,6 +87,7 @@ class SocketClient {
       reconnectAttempt: 0,
       maxReconnectAttempts: RECONNECTION_CONFIG.reconnectionAttempts,
       activeGameId: null,
+      activeGamePhase: null,
     });
   }
 
@@ -202,10 +208,15 @@ class SocketClient {
     this.socket.on('auth:success', () => {
       this.state.update((s) => ({ ...s, status: 'authenticated' }));
 
-      // Rejoin active game if we were in one
-      const { activeGameId } = get(this.state);
-      if (activeGameId) {
+      // Auto-rejoin active game ONLY if it was in active phase (not lobby)
+      // In lobby phase, disconnection should require manual rejoin
+      const { activeGameId, activeGamePhase } = get(this.state);
+      if (activeGameId && activeGamePhase === 'active') {
         this.emit('game:join', { game_id: activeGameId });
+      } else if (activeGameId && activeGamePhase === 'lobby') {
+        // Clear the active game - user must manually rejoin lobby
+        this.state.update((s) => ({ ...s, activeGameId: null, activeGamePhase: null }));
+        toastStore.add('info', 'You were disconnected from the lobby. Please rejoin.');
       }
     });
 
@@ -220,9 +231,14 @@ class SocketClient {
     this.socket?.emit('auth', { session_id: '' });
   }
 
-  /** Set the active game ID (for auto-rejoin on reconnect) */
-  setActiveGame(gameId: string | null): void {
-    this.state.update((s) => ({ ...s, activeGameId: gameId }));
+  /** Set the active game ID and phase (for auto-rejoin on reconnect) */
+  setActiveGame(gameId: string | null, phase: GamePhase = null): void {
+    this.state.update((s) => ({ ...s, activeGameId: gameId, activeGamePhase: phase }));
+  }
+
+  /** Update just the game phase (e.g., when game starts) */
+  setActiveGamePhase(phase: GamePhase): void {
+    this.state.update((s) => ({ ...s, activeGamePhase: phase }));
   }
 
   /**
@@ -308,6 +324,7 @@ class SocketClient {
       reconnectAttempt: 0,
       maxReconnectAttempts: RECONNECTION_CONFIG.reconnectionAttempts,
       activeGameId: null,
+      activeGamePhase: null,
     });
   }
 
