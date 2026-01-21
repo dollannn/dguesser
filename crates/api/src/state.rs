@@ -52,12 +52,16 @@ impl AppState {
         let oauth_state_store = OAuthStateStore::new(redis.clone());
         tracing::info!("Connected to Redis");
 
-        // Create session config
-        let session_config = if config.is_production {
+        // Create session config with optional cookie domain for cross-subdomain support
+        let mut session_config = if config.is_production {
             SessionConfig::default()
         } else {
             SessionConfig::development()
         };
+        if let Some(ref domain) = config.cookie_domain {
+            session_config.domain = Some(domain.clone());
+            tracing::info!(cookie_domain = %domain, "Session cookie domain configured");
+        }
 
         // Create OAuth clients if configured
         let google_oauth = if config.has_google_oauth() {

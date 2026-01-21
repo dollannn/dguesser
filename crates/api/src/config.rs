@@ -94,6 +94,9 @@ pub struct Config {
     pub trusted_proxy_count: u8,
     /// Whether to trust Cloudflare headers (CF-Connecting-IP)
     pub trust_cloudflare: bool,
+    /// Cookie domain for session cookies (e.g., ".dguesser.lol" for cross-subdomain)
+    /// If not set, cookies are scoped to the exact domain that set them
+    pub cookie_domain: Option<String>,
 }
 
 impl Config {
@@ -148,6 +151,7 @@ impl Config {
             trust_cloudflare: env::var("TRUST_CLOUDFLARE")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(true), // Default: trust Cloudflare headers
+            cookie_domain: env::var("COOKIE_DOMAIN").ok(),
         })
     }
 
