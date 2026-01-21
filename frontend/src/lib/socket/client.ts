@@ -217,6 +217,55 @@ class SocketClient {
     this.state.update((s) => ({ ...s, activeGameId: gameId }));
   }
 
+  /**
+   * Wait for the socket to be authenticated.
+   * Resolves immediately if already authenticated, otherwise waits for auth:success.
+   * Rejects on auth:error or timeout.
+   */
+  async waitForAuth(timeoutMs = 10000): Promise<void> {
+    const currentStatus = get(this.state).status;
+    if (currentStatus === 'authenticated') return;
+
+    // If not connected at all, wait a moment for connection to establish
+    if (!this.socket?.connected && currentStatus !== 'connecting') {
+      // Socket not even connecting - this shouldn't happen in normal flow
+      throw new Error('Socket not connected');
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('Authentication timeout'));
+      }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.socket?.off('auth:success', onSuccess);
+        this.socket?.off('auth:error', onError);
+      };
+
+      const onSuccess = () => {
+        cleanup();
+        resolve();
+      };
+
+      const onError = (data: { error: string }) => {
+        cleanup();
+        reject(new Error(data.error));
+      };
+
+      // Check again in case status changed during setup
+      if (get(this.state).status === 'authenticated') {
+        cleanup();
+        resolve();
+        return;
+      }
+
+      this.socket?.once('auth:success', onSuccess);
+      this.socket?.once('auth:error', onError);
+    });
+  }
+
   /** Register a callback to run on successful reconnection */
   onReconnect(callback: () => void): () => void {
     this.reconnectCallbacks.push(callback);

@@ -2,9 +2,9 @@
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
-  import { gamesApi, type GameDetails } from '$lib/api/games';
-  import { gameStore, initGameSocketListeners } from '$lib/socket/game';
-  import { authStore, user } from '$lib/stores/auth';
+import { gamesApi, type GameDetails } from '$lib/api/games';
+import { gameStore, initGameSocketListeners } from '$lib/socket/game';
+import { authStore, user } from '$lib/stores/auth';
 
   import GameLoading from '$lib/components/game/GameLoading.svelte';
   import GameLobby from '$lib/components/game/GameLobby.svelte';
@@ -44,8 +44,8 @@
 
       // Handle based on game mode and status
       if (game.mode === 'multiplayer') {
-        // Multiplayer: join game room via socket
-        gameStore.joinGame(gameId);
+        // Multiplayer: show lobby, user will click "Join Game" button
+        // No auto-join - let the user decide when to join
       } else if (game.mode === 'solo') {
         // Solo: restore state based on game status
         await restoreSoloGameState(game);

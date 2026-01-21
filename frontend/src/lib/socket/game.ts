@@ -184,7 +184,9 @@ function createGameStore() {
   return {
     subscribe,
 
-    joinGame(gameId: string): void {
+    async joinGame(gameId: string): Promise<void> {
+      // Wait for socket authentication before joining
+      await socketClient.waitForAuth();
       socketClient.emit('game:join', { game_id: gameId });
       socketClient.setActiveGame(gameId);
       update((s) => ({ ...s, gameId, status: 'lobby' }));

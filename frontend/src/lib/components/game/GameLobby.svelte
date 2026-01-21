@@ -36,9 +36,19 @@
   let playerCount = $derived($gameStore.players.size > 0 ? $gameStore.players.size : game.players.length);
   let canStart = $derived(isHost && (game.mode === 'solo' || playerCount >= 2));
   let canJoin = $derived(!isPlayer && game.mode === 'multiplayer' && playerCount < 8);
+  let isJoining = $state(false);
 
-  function joinGame() {
-    gameStore.joinGame(game.id);
+  async function joinGame() {
+    if (isJoining) return;
+    isJoining = true;
+    try {
+      await gameStore.joinGame(game.id);
+    } catch (error) {
+      console.error('Failed to join game:', error);
+      toast.error('Failed to join game');
+    } finally {
+      isJoining = false;
+    }
   }
   
   let copied = $state(false);
@@ -207,9 +217,9 @@
     <Card.Footer class="pt-6">
       <div class="w-full text-center">
         {#if canJoin}
-          <Button onclick={joinGame} size="lg" class="w-full sm:w-auto px-8">
+          <Button onclick={joinGame} size="lg" class="w-full sm:w-auto px-8" disabled={isJoining}>
             <UsersIcon class="size-5" />
-            Join Game
+            {isJoining ? 'Joining...' : 'Join Game'}
           </Button>
         {:else if canStart}
           <Button onclick={onStart} size="lg" class="w-full sm:w-auto px-8">
