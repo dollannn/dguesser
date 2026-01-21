@@ -72,6 +72,8 @@ class SocketClient {
   private socket: Socket | null = null;
   public state: Writable<SocketState>;
   private reconnectCallbacks: Array<() => void> = [];
+  /** Listeners registered before socket was created */
+  private pendingListeners: Array<{ event: string; callback: (data: unknown) => void }> = [];
 
   constructor() {
     this.state = writable({
@@ -96,6 +98,12 @@ class SocketClient {
     });
 
     this.setupEventHandlers();
+
+    // Attach any listeners that were registered before socket was created
+    for (const { event, callback } of this.pendingListeners) {
+      this.socket.on(event, callback);
+    }
+    this.pendingListeners = [];
   }
 
   private setupEventHandlers(): void {
@@ -220,16 +228,16 @@ class SocketClient {
   /**
    * Wait for the socket to be authenticated.
    * Resolves immediately if already authenticated, otherwise waits for auth:success.
+   * Will initiate connection if not already connecting/connected.
    * Rejects on auth:error or timeout.
    */
   async waitForAuth(timeoutMs = 10000): Promise<void> {
     const currentStatus = get(this.state).status;
     if (currentStatus === 'authenticated') return;
 
-    // If not connected at all, wait a moment for connection to establish
+    // If socket not connected and not connecting, start connection
     if (!this.socket?.connected && currentStatus !== 'connecting') {
-      // Socket not even connecting - this shouldn't happen in normal flow
-      throw new Error('Socket not connected');
+      this.connect();
     }
 
     return new Promise((resolve, reject) => {
@@ -242,6 +250,7 @@ class SocketClient {
         clearTimeout(timeout);
         this.socket?.off('auth:success', onSuccess);
         this.socket?.off('auth:error', onError);
+        this.socket?.off('connect_error', onConnectError);
       };
 
       const onSuccess = () => {
@@ -254,6 +263,11 @@ class SocketClient {
         reject(new Error(data.error));
       };
 
+      const onConnectError = (error: Error) => {
+        cleanup();
+        reject(new Error(`Connection failed: ${error.message}`));
+      };
+
       // Check again in case status changed during setup
       if (get(this.state).status === 'authenticated') {
         cleanup();
@@ -263,6 +277,7 @@ class SocketClient {
 
       this.socket?.once('auth:success', onSuccess);
       this.socket?.once('auth:error', onError);
+      this.socket?.once('connect_error', onConnectError);
     });
   }
 
@@ -286,6 +301,7 @@ class SocketClient {
   disconnect(): void {
     this.socket?.disconnect();
     this.socket = null;
+    this.pendingListeners = [];
     this.state.set({
       status: 'disconnected',
       error: null,
@@ -300,9 +316,21 @@ class SocketClient {
   }
 
   on<T>(event: string, callback: (data: T) => void): () => void {
-    this.socket?.on(event, callback);
+    const wrappedCallback = callback as (data: unknown) => void;
+
+    if (this.socket) {
+      this.socket.on(event, callback);
+    } else {
+      // Buffer listener to be attached when socket is created
+      this.pendingListeners.push({ event, callback: wrappedCallback });
+    }
+
     return () => {
       this.socket?.off(event, callback);
+      // Also remove from pending if socket not yet created
+      this.pendingListeners = this.pendingListeners.filter(
+        (l) => !(l.event === event && l.callback === wrappedCallback)
+      );
     };
   }
 

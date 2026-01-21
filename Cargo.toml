@@ -30,10 +30,12 @@ tower-http = { version = "0.6", features = ["cors", "trace", "timeout", "limit"]
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "ipnetwork"] }
 
 # Redis
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
 
 # Socket.IO
-socketioxide = { version = "0.15", features = ["state"] }
+socketioxide = { version = "0.17", features = ["state"] }
+socketioxide-redis = { version = "0.3", features = ["redis"] }
+socketioxide-emitter = { version = "0.1", features = ["common-parser"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

@@ -24,9 +24,9 @@ use dguesser_protocol::socket::payloads::{
     RoundEndPayload, RoundLocation, RoundResult, RoundStartPayload, ScoresUpdatePayload,
     SettingsUpdatedPayload,
 };
-use socketioxide::SocketIo;
 use tokio::sync::mpsc;
 
+use crate::emitter::BroadcastEmitter;
 use crate::redis_state::{
     CachedGameState, CachedGuess, CachedPlayerState, CachedRoundState, RedisStateManager,
 };
@@ -46,8 +46,8 @@ pub struct GameActor {
     socket_ids: HashMap<String, String>,
     /// Current round's database ID (for persistence)
     current_round_db_id: Option<String>,
-    /// Socket.IO instance for broadcasting
-    io: Option<SocketIo>,
+    /// Broadcast emitter for sending Socket.IO events via Redis
+    emitter: BroadcastEmitter,
     /// Redis state manager for hot caching
     redis_state: Option<Arc<RedisStateManager>>,
     /// Track when we last saved to Redis (for debouncing)
@@ -61,7 +61,7 @@ impl GameActor {
         game_id: &str,
         db: DbPool,
         rx: mpsc::Receiver<GameCommand>,
-        io: Option<SocketIo>,
+        emitter: BroadcastEmitter,
         location_provider: Arc<dyn LocationProvider>,
     ) -> Self {
         Self {
@@ -71,7 +71,7 @@ impl GameActor {
             state: None,
             socket_ids: HashMap::new(),
             current_round_db_id: None,
-            io,
+            emitter,
             redis_state: None,
             last_redis_save: None,
             location_provider,
@@ -494,12 +494,28 @@ impl GameActor {
     }
 
     /// Handle player leaving (disconnect)
+    ///
+    /// Behavior depends on game phase:
+    /// - In lobby: immediately remove player (no grace period)
+    /// - In active game: start grace period for potential reconnection
     async fn handle_leave(&mut self, user_id: &str) {
         let Some(state) = self.state.as_ref() else { return };
         let now = Utc::now();
 
-        // Apply disconnect command (starts grace period)
-        let result = reduce(state, CoreCommand::Disconnect { user_id: user_id.to_string() }, now);
+        // Phase-aware leave handling
+        let result = match state.phase {
+            GamePhase::Lobby => {
+                // In lobby: immediately remove player
+                reduce(state, CoreCommand::Leave { user_id: user_id.to_string() }, now)
+            }
+            GamePhase::Active
+            | GamePhase::RoundInProgress
+            | GamePhase::BetweenRounds
+            | GamePhase::Finished => {
+                // During game: use disconnect with grace period
+                reduce(state, CoreCommand::Disconnect { user_id: user_id.to_string() }, now)
+            }
+        };
 
         // Remove socket mapping
         self.socket_ids.remove(user_id);
@@ -1022,9 +1038,8 @@ impl GameActor {
             .unwrap_or_else(|| "Unknown error".to_string())
     }
 
-    /// Send current game state to a specific socket
+    /// Send current game state to a specific socket (via socket's personal room)
     async fn send_game_state_to_socket(&self, socket_id: &str) {
-        let Some(io) = &self.io else { return };
         let Some(state) = &self.state else { return };
 
         let players: Vec<PlayerInfo> = state
@@ -1092,9 +1107,8 @@ impl GameActor {
             time_remaining_ms,
         };
 
-        if let Some(socket) = io.get_socket(socket_id.parse().unwrap_or_default()) {
-            socket.emit(events::server::GAME_STATE, &payload).ok();
-        }
+        // Emit to socket's personal room (socket joins a room named after its ID)
+        self.emitter.emit_to_socket(socket_id, events::server::GAME_STATE, &payload).await.ok();
     }
 
     /// Broadcast player joined
@@ -1104,8 +1118,6 @@ impl GameActor {
         display_name: &str,
         avatar_url: Option<&str>,
     ) {
-        let Some(io) = &self.io else { return };
-
         let payload = PlayerJoinedPayload {
             player: PlayerInfo {
                 id: user_id.to_string(),
@@ -1118,19 +1130,20 @@ impl GameActor {
             },
         };
 
-        io.to(self.game_id.clone()).emit(events::server::PLAYER_JOINED, &payload).ok();
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::PLAYER_JOINED, &payload)
+            .await
+            .ok();
     }
 
     /// Broadcast player left
     async fn broadcast_player_left(&self, user_id: &str, display_name: &str) {
-        let Some(io) = &self.io else { return };
-
         let payload = PlayerLeftPayload {
             user_id: user_id.to_string(),
             display_name: display_name.to_string(),
         };
 
-        io.to(self.game_id.clone()).emit(events::server::PLAYER_LEFT, &payload).ok();
+        self.emitter.emit_to_room(&self.game_id, events::server::PLAYER_LEFT, &payload).await.ok();
     }
 
     /// Broadcast player disconnected
@@ -1140,56 +1153,59 @@ impl GameActor {
         display_name: &str,
         grace_period_ms: u32,
     ) {
-        let Some(io) = &self.io else { return };
-
         let payload = PlayerDisconnectedPayload {
             user_id: user_id.to_string(),
             display_name: display_name.to_string(),
             grace_period_ms,
         };
 
-        io.to(self.game_id.clone()).emit(events::server::PLAYER_DISCONNECTED, &payload).ok();
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::PLAYER_DISCONNECTED, &payload)
+            .await
+            .ok();
     }
 
     /// Broadcast player reconnected
     async fn broadcast_player_reconnected(&self, user_id: &str, display_name: &str) {
-        let Some(io) = &self.io else { return };
-
         let payload = PlayerReconnectedPayload {
             user_id: user_id.to_string(),
             display_name: display_name.to_string(),
         };
 
-        io.to(self.game_id.clone()).emit(events::server::PLAYER_RECONNECTED, &payload).ok();
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::PLAYER_RECONNECTED, &payload)
+            .await
+            .ok();
     }
 
     /// Broadcast player timeout
     async fn broadcast_player_timeout(&self, user_id: &str, display_name: &str) {
-        let Some(io) = &self.io else { return };
-
         let payload = PlayerTimeoutPayload {
             user_id: user_id.to_string(),
             display_name: display_name.to_string(),
         };
 
-        io.to(self.game_id.clone()).emit(events::server::PLAYER_TIMEOUT, &payload).ok();
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::PLAYER_TIMEOUT, &payload)
+            .await
+            .ok();
     }
 
     /// Broadcast player guessed
     async fn broadcast_player_guessed(&self, user_id: &str, display_name: &str) {
-        let Some(io) = &self.io else { return };
-
         let payload = PlayerGuessedPayload {
             user_id: user_id.to_string(),
             display_name: display_name.to_string(),
         };
 
-        io.to(self.game_id.clone()).emit(events::server::PLAYER_GUESSED, &payload).ok();
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::PLAYER_GUESSED, &payload)
+            .await
+            .ok();
     }
 
     /// Broadcast round start
     async fn broadcast_round_start(&self) {
-        let Some(io) = &self.io else { return };
         let Some(state) = &self.state else { return };
         let Some(round) = &state.current_round else { return };
 
@@ -1206,12 +1222,11 @@ impl GameActor {
             started_at: round.started_at.timestamp_millis(),
         };
 
-        io.to(self.game_id.clone()).emit(events::server::ROUND_START, &payload).ok();
+        self.emitter.emit_to_room(&self.game_id, events::server::ROUND_START, &payload).await.ok();
     }
 
     /// Broadcast round end with results
     async fn broadcast_round_end(&self) {
-        let Some(io) = &self.io else { return };
         let Some(state) = &self.state else { return };
 
         // Get the last completed round
@@ -1244,12 +1259,11 @@ impl GameActor {
             results,
         };
 
-        io.to(self.game_id.clone()).emit(events::server::ROUND_END, &payload).ok();
+        self.emitter.emit_to_room(&self.game_id, events::server::ROUND_END, &payload).await.ok();
     }
 
     /// Broadcast game end
     async fn broadcast_game_end(&self) {
-        let Some(io) = &self.io else { return };
         let Some(state) = &self.state else { return };
 
         // Sort players by score
@@ -1269,12 +1283,11 @@ impl GameActor {
 
         let payload = GameEndPayload { game_id: self.game_id.clone(), final_standings };
 
-        io.to(self.game_id.clone()).emit(events::server::GAME_END, &payload).ok();
+        self.emitter.emit_to_room(&self.game_id, events::server::GAME_END, &payload).await.ok();
     }
 
     /// Broadcast live scores update
     async fn broadcast_scores_update(&self) {
-        let Some(io) = &self.io else { return };
         let Some(state) = &self.state else { return };
 
         // Only during active gameplay
@@ -1317,13 +1330,14 @@ impl GameActor {
             scores,
         };
 
-        io.to(self.game_id.clone()).emit(events::server::SCORES_UPDATE, &payload).ok();
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::SCORES_UPDATE, &payload)
+            .await
+            .ok();
     }
 
     /// Broadcast settings updated
     async fn broadcast_settings_updated(&self, settings: &game::GameSettings) {
-        let Some(io) = &self.io else { return };
-
         let payload = SettingsUpdatedPayload {
             game_id: self.game_id.clone(),
             settings: GameSettingsPayload {
@@ -1336,7 +1350,10 @@ impl GameActor {
             },
         };
 
-        io.to(self.game_id.clone()).emit(events::server::SETTINGS_UPDATED, &payload).ok();
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::SETTINGS_UPDATED, &payload)
+            .await
+            .ok();
     }
 }
 

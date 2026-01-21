@@ -3,7 +3,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
 import { gamesApi, type GameDetails } from '$lib/api/games';
-import { gameStore, initGameSocketListeners } from '$lib/socket/game';
+import { gameStore } from '$lib/socket/game';
 import { authStore, user } from '$lib/stores/auth';
 
   import GameLoading from '$lib/components/game/GameLoading.svelte';
@@ -16,7 +16,6 @@ import { authStore, user } from '$lib/stores/auth';
   let game: GameDetails | null = $state(null);
   let loading = $state(true);
   let error = $state('');
-  let cleanupListeners: (() => void) | null = null;
 
   // Game ID from route params - guaranteed to exist for [id] route
   let gameId = $derived($page.params.id as string);
@@ -39,13 +38,20 @@ import { authStore, user } from '$lib/stores/auth';
       // Load game data
       game = await gamesApi.get(gameId);
 
-      // Initialize socket listeners
-      cleanupListeners = initGameSocketListeners();
-
       // Handle based on game mode and status
       if (game.mode === 'multiplayer') {
-        // Multiplayer: show lobby, user will click "Join Game" button
-        // No auto-join - let the user decide when to join
+        // Check if user is already a player in the game (e.g., host or rejoining)
+        const isExistingPlayer = game.players.some((p) => p.user_id === $user?.id);
+        if (isExistingPlayer) {
+          // Auto-join socket room to receive realtime updates
+          try {
+            await gameStore.joinGame(game.id);
+          } catch (e) {
+            console.error('Failed to join socket room:', e);
+            // Non-fatal - they can still see the lobby, just won't get realtime updates
+          }
+        }
+        // New players will click "Join Game" button
       } else if (game.mode === 'solo') {
         // Solo: restore state based on game status
         await restoreSoloGameState(game);
@@ -122,7 +128,6 @@ import { authStore, user } from '$lib/stores/auth';
   }
 
   onDestroy(() => {
-    cleanupListeners?.();
     gameStore.leaveGame();
   });
 

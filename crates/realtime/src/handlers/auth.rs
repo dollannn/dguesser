@@ -1,6 +1,7 @@
 //! Socket authentication handler
 
 use serde::{Deserialize, Serialize};
+use socketioxide::adapter::Adapter;
 use socketioxide::extract::{Data, SocketRef, State};
 
 use crate::rate_limit::{SocketRateLimitConfig, check_rate_limit, get_socket_ip};
@@ -29,7 +30,7 @@ pub struct AuthResponse {
 }
 
 /// Extract session ID from cookie header
-fn extract_session_from_cookie(socket: &SocketRef) -> Option<String> {
+fn extract_session_from_cookie<A: Adapter>(socket: &SocketRef<A>) -> Option<String> {
     let req_parts = socket.req_parts();
     let cookie_header = req_parts.headers.get("cookie")?.to_str().ok()?;
 
@@ -46,8 +47,8 @@ fn extract_session_from_cookie(socket: &SocketRef) -> Option<String> {
 }
 
 /// Handle authentication request
-pub async fn handle_auth(
-    socket: SocketRef,
+pub async fn handle_auth<A: Adapter>(
+    socket: SocketRef<A>,
     State(state): State<AppState>,
     Data(payload): Data<AuthPayload>,
 ) {

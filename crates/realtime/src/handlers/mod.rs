@@ -5,6 +5,7 @@ pub mod game;
 
 use std::time::Duration;
 
+use socketioxide::adapter::Adapter;
 use socketioxide::extract::{SocketRef, State};
 use socketioxide::socket::DisconnectReason;
 use tracing::info;
@@ -16,20 +17,23 @@ use crate::state::{AppState, GameCommand};
 const AUTH_TIMEOUT_SECS: u64 = 30;
 
 /// Main connection handler - called when a socket connects
-pub async fn on_connect(socket: SocketRef, State(state): State<AppState>) {
+pub async fn on_connect<A: Adapter>(socket: SocketRef<A>, State(state): State<AppState>) {
     let socket_id = socket.id.to_string();
     info!("Socket connected: {}", socket_id);
 
+    // Join personal room for direct messages (used by emitter for socket-specific events)
+    socket.join(socket_id.clone());
+
     // Register event handlers
-    socket.on("auth", auth::handle_auth);
-    socket.on("game:join", game::handle_join);
-    socket.on("game:leave", game::handle_leave);
-    socket.on("game:start", game::handle_start);
-    socket.on("guess:submit", game::handle_guess);
-    socket.on("player:ready", game::handle_ready);
+    socket.on("auth", auth::handle_auth::<A>);
+    socket.on("game:join", game::handle_join::<A>);
+    socket.on("game:leave", game::handle_leave::<A>);
+    socket.on("game:start", game::handle_start::<A>);
+    socket.on("guess:submit", game::handle_guess::<A>);
+    socket.on("player:ready", game::handle_ready::<A>);
 
     // Handle disconnect
-    socket.on_disconnect(handle_disconnect);
+    socket.on_disconnect(handle_disconnect::<A>);
 
     // Spawn auth timeout task - disconnect if not authenticated within timeout
     let timeout_socket = socket.clone();
@@ -52,8 +56,8 @@ pub async fn on_connect(socket: SocketRef, State(state): State<AppState>) {
 }
 
 /// Handle socket disconnect
-async fn handle_disconnect(
-    socket: SocketRef,
+async fn handle_disconnect<A: Adapter>(
+    socket: SocketRef<A>,
     State(state): State<AppState>,
     reason: DisconnectReason,
 ) {
@@ -64,16 +68,14 @@ async fn handle_disconnect(
     if let Some(user_id) = state.unregister_socket(&socket_id).await {
         // Notify any active games about the disconnect
         // Get all rooms this socket was in
-        #[allow(irrefutable_let_patterns)]
-        if let Ok(rooms) = socket.rooms() {
-            for room in rooms.into_iter() {
-                // Room names are game IDs (gam_xxxxxxxxxxxx)
-                if room.starts_with("gam_")
-                    && let Some(handle) = state.get_game(&room).await
-                {
-                    // Send leave command - the game actor will handle grace period
-                    let _ = handle.tx.send(GameCommand::Leave { user_id: user_id.clone() }).await;
-                }
+        let rooms = socket.rooms();
+        for room in rooms.into_iter() {
+            // Room names are game IDs (gam_xxxxxxxxxxxx)
+            if room.starts_with("gam_")
+                && let Some(handle) = state.get_game(&room).await
+            {
+                // Send leave command - the game actor will handle grace period
+                let _ = handle.tx.send(GameCommand::Leave { user_id: user_id.clone() }).await;
             }
         }
     }

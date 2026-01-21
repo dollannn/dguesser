@@ -12,6 +12,7 @@ mod error;
 mod logging;
 mod middleware;
 mod routes;
+pub mod socket;
 mod state;
 
 use config::Config;

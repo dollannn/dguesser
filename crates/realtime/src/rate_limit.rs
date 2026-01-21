@@ -4,6 +4,7 @@
 //! Uses Redis sliding window counters, matching the API rate limiting pattern.
 
 use redis::AsyncCommands;
+use socketioxide::adapter::Adapter;
 use socketioxide::extract::SocketRef;
 
 /// Rate limit configuration for socket events
@@ -101,7 +102,7 @@ pub async fn check_rate_limit(
 ///
 /// Checks X-Forwarded-For and X-Real-IP headers for proxy setups.
 /// Falls back to "unknown" if no IP can be determined.
-pub fn get_socket_ip(socket: &SocketRef) -> String {
+pub fn get_socket_ip<A: Adapter>(socket: &SocketRef<A>) -> String {
     let parts = socket.req_parts();
 
     // Check X-Forwarded-For header first (for reverse proxies)

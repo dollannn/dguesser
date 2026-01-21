@@ -8,6 +8,7 @@ use axum::{Json, Router, extract::State, http::StatusCode};
 use dguesser_protocol::api::service::ServiceInfo;
 use serde::Serialize;
 use socketioxide::SocketIo;
+use socketioxide_redis::{RedisAdapter, RedisAdapterCtr};
 use tokio::signal;
 use tower::ServiceBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -21,6 +22,7 @@ use tracing_subscriber::{
 
 mod actors;
 mod config;
+mod emitter;
 mod handlers;
 mod rate_limit;
 mod redis_state;
@@ -46,9 +48,14 @@ async fn main() -> anyhow::Result<()> {
     let db = dguesser_db::create_pool(&config.database_url).await?;
     tracing::info!("Connected to database");
 
-    // Create Redis client
-    let redis = redis::Client::open(config.redis_url.as_str())?;
+    // Create Redis client (ensure RESP3 protocol for adapter)
+    let redis_url = ensure_resp3_protocol(&config.redis_url);
+    let redis = redis::Client::open(redis_url.as_str())?;
     tracing::info!("Connected to Redis");
+
+    // Create Redis adapter for Socket.IO (enables cross-process broadcasts)
+    let adapter = RedisAdapterCtr::new_with_redis(&redis).await?;
+    tracing::info!("Redis adapter initialized for Socket.IO");
 
     // Create Redis state manager
     let redis_state = RedisStateManager::new(redis.clone());
@@ -56,17 +63,22 @@ async fn main() -> anyhow::Result<()> {
     // Create app state (async to load maps for R2 provider)
     let state = AppState::new(db, redis.clone(), redis_state, config.clone()).await;
 
-    // Create Socket.IO layer with state
-    let (socket_layer, io) = SocketIo::builder().with_state(state.clone()).build_layer();
+    // Create Socket.IO layer with state and Redis adapter
+    let (socket_layer, io) = SocketIo::builder()
+        .with_state(state.clone())
+        .with_adapter::<RedisAdapter<_>>(adapter)
+        .build_layer();
 
-    // Store IO instance in state for broadcasting
-    state.set_io(io.clone()).await;
+    // Initialize the broadcast emitter with a Redis connection
+    let emitter_conn = redis.get_multiplexed_tokio_connection().await?;
+    state.init_emitter(emitter_conn).await;
+    tracing::info!("Broadcast emitter initialized");
 
     // Recover active games from Redis on startup
     recover_active_games(&state).await;
 
     // Register socket handlers
-    io.ns("/", handlers::on_connect);
+    io.ns("/", handlers::on_connect).await?;
 
     // Build router with health endpoints
     let http_state =
@@ -310,5 +322,19 @@ async fn check_redis(client: &redis::Client) -> CheckResult {
             tracing::error!(error = %e, "Redis connection failed");
             CheckResult::unhealthy(e.to_string())
         }
+    }
+}
+
+/// Ensure Redis URL has RESP3 protocol parameter (required for socketioxide-redis adapter)
+fn ensure_resp3_protocol(url: &str) -> String {
+    if url.contains("protocol=") {
+        // Already has protocol parameter
+        url.to_string()
+    } else if url.contains('?') {
+        // Has other query params, append
+        format!("{}&protocol=resp3", url)
+    } else {
+        // No query params
+        format!("{}?protocol=resp3", url)
     }
 }

@@ -2,6 +2,7 @@
 
 use dguesser_protocol::socket::payloads::ErrorPayload;
 use serde::Deserialize;
+use socketioxide::adapter::Adapter;
 use socketioxide::extract::{Data, SocketRef, State};
 use tokio::sync::oneshot;
 
@@ -26,8 +27,8 @@ pub struct GuessPayload {
 }
 
 /// Handle player joining a game
-pub async fn handle_join(
-    socket: SocketRef,
+pub async fn handle_join<A: Adapter>(
+    socket: SocketRef<A>,
     State(state): State<AppState>,
     Data(payload): Data<JoinPayload>,
 ) {
@@ -91,7 +92,7 @@ pub async fn handle_join(
     match rx.await {
         Ok(Ok(())) => {
             // Join socket.io room
-            socket.join(payload.game_id.clone()).ok();
+            socket.join(payload.game_id.clone());
 
             // Emit success
             socket.emit("game:joined", &serde_json::json!({ "game_id": payload.game_id })).ok();
@@ -108,8 +109,8 @@ pub async fn handle_join(
 }
 
 /// Handle player leaving a game
-pub async fn handle_leave(
-    socket: SocketRef,
+pub async fn handle_leave<A: Adapter>(
+    socket: SocketRef<A>,
     State(state): State<AppState>,
     Data(payload): Data<JoinPayload>,
 ) {
@@ -124,13 +125,13 @@ pub async fn handle_leave(
         if let Some(handle) = state.get_game(&payload.game_id).await {
             let _ = handle.tx.send(GameCommand::Leave { user_id }).await;
         }
-        socket.leave(payload.game_id).ok();
+        socket.leave(payload.game_id);
     }
 }
 
 /// Handle host starting the game
-pub async fn handle_start(
-    socket: SocketRef,
+pub async fn handle_start<A: Adapter>(
+    socket: SocketRef<A>,
     State(state): State<AppState>,
     Data(payload): Data<JoinPayload>,
 ) {
@@ -177,8 +178,8 @@ pub async fn handle_start(
 }
 
 /// Handle guess submission
-pub async fn handle_guess(
-    socket: SocketRef,
+pub async fn handle_guess<A: Adapter>(
+    socket: SocketRef<A>,
     State(state): State<AppState>,
     Data(payload): Data<GuessPayload>,
 ) {
@@ -254,8 +255,8 @@ pub async fn handle_guess(
 }
 
 /// Handle player ready state
-pub async fn handle_ready(
-    socket: SocketRef,
+pub async fn handle_ready<A: Adapter>(
+    socket: SocketRef<A>,
     State(state): State<AppState>,
     Data(payload): Data<JoinPayload>,
 ) {
@@ -289,11 +290,11 @@ pub async fn handle_ready(
 /// Check rate limit for a user and emit error if exceeded
 ///
 /// Returns `true` if the request is allowed, `false` if rate limited.
-async fn check_user_rate_limit(
+async fn check_user_rate_limit<A: Adapter>(
     state: &AppState,
     config: &SocketRateLimitConfig,
     user_id: &str,
-    socket: &SocketRef,
+    socket: &SocketRef<A>,
 ) -> bool {
     match check_rate_limit(state.redis(), config, user_id).await {
         Ok(result) if result.allowed => true,
@@ -315,7 +316,7 @@ async fn check_user_rate_limit(
 }
 
 /// Emit an error to the socket
-pub fn emit_error(socket: &SocketRef, code: &str, message: &str) {
+pub fn emit_error<A: Adapter>(socket: &SocketRef<A>, code: &str, message: &str) {
     socket
         .emit("error", &ErrorPayload { code: code.to_string(), message: message.to_string() })
         .ok();

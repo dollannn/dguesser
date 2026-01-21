@@ -20,13 +20,17 @@ use validator::Validate;
 
 use axum::http::{HeaderMap, header::SET_COOKIE};
 
-use crate::{error::ApiError, middleware::extract_ip_from_headers, state::AppState};
+use crate::{error::ApiError, middleware::extract_ip_from_headers, socket, state::AppState};
 use dguesser_auth::{AuthUser, MaybeAuthUser, build_cookie_header, create_guest_session};
 use dguesser_core::game::{
     GameCommand, GameEvent, GamePhase, GameSettings, GameState, LocationData, PlayerState,
     RoundState, reduce, validate_location_count,
 };
 use dguesser_db::{GameMode, GameStatus};
+use dguesser_protocol::socket::{
+    events::server::SETTINGS_UPDATED,
+    payloads::{GameSettingsPayload, SettingsUpdatedPayload},
+};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -1168,6 +1172,30 @@ pub async fn update_settings(
     // Persist to database
     let settings_json = serde_json::to_value(&new_settings).unwrap_or_default();
     dguesser_db::games::update_game_settings(state.db(), &id, settings_json).await?;
+
+    // Broadcast settings update to connected clients via Socket.IO
+    let socket_payload = SettingsUpdatedPayload {
+        game_id: id.clone(),
+        settings: GameSettingsPayload {
+            rounds: new_settings.rounds,
+            time_limit_seconds: new_settings.time_limit_seconds,
+            map_id: new_settings.map_id.clone(),
+            movement_allowed: new_settings.movement_allowed,
+            zoom_allowed: new_settings.zoom_allowed,
+            rotation_allowed: new_settings.rotation_allowed,
+        },
+    };
+
+    // Emit to game room - fire and forget, don't fail the API call if emit fails
+    if let Err(e) =
+        socket::emit_to_room(state.redis(), &id, SETTINGS_UPDATED, &socket_payload).await
+    {
+        tracing::warn!(
+            game_id = %id,
+            error = %e,
+            "Failed to broadcast settings update to socket room"
+        );
+    }
 
     Ok(Json(UpdateSettingsResponse {
         settings: SettingsDto {

@@ -5,11 +5,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use socketioxide::SocketIo;
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 use crate::actors::GameActor;
 use crate::config::{Config, LocationProviderType};
+use crate::emitter::BroadcastEmitter;
 use crate::redis_state::RedisStateManager;
 use dguesser_core::location::LocationProvider;
 use dguesser_db::{DbPool, LocationRepository};
@@ -28,8 +28,8 @@ struct AppStateInner {
     pub redis_state: RedisStateManager,
     #[allow(dead_code)]
     pub config: Config,
-    /// Socket.IO instance for broadcasting
-    pub io: RwLock<Option<SocketIo>>,
+    /// Broadcast emitter for sending Socket.IO events via Redis
+    pub emitter: BroadcastEmitter,
     /// Active game actors (keyed by game_id: gam_xxxxxxxxxxxx)
     pub games: RwLock<HashMap<String, GameHandle>>,
     /// Socket ID to User ID mapping (user_id: usr_xxxxxxxxxxxx)
@@ -164,7 +164,7 @@ impl AppState {
                 redis,
                 redis_state,
                 config,
-                io: RwLock::new(None),
+                emitter: BroadcastEmitter::new(),
                 games: RwLock::new(HashMap::new()),
                 socket_users: RwLock::new(HashMap::new()),
                 user_sockets: RwLock::new(HashMap::new()),
@@ -173,15 +173,15 @@ impl AppState {
         }
     }
 
-    /// Set the Socket.IO instance (called after creation)
-    pub async fn set_io(&self, io: SocketIo) {
-        *self.inner.io.write().await = Some(io);
+    /// Initialize the broadcast emitter with a Redis connection
+    pub async fn init_emitter(&self, conn: redis::aio::MultiplexedConnection) {
+        self.inner.emitter.set_connection(conn).await;
     }
 
-    /// Get the Socket.IO instance
+    /// Get the broadcast emitter
     #[allow(dead_code)]
-    pub async fn io(&self) -> Option<SocketIo> {
-        self.inner.io.read().await.clone()
+    pub fn emitter(&self) -> &BroadcastEmitter {
+        &self.inner.emitter
     }
 
     pub fn db(&self) -> &DbPool {
@@ -265,12 +265,12 @@ impl AppState {
         // Spawn actor with Redis state manager
         let db = self.inner.db.clone();
         let gid = game_id.to_string();
-        let io = self.inner.io.read().await.clone();
+        let emitter = self.inner.emitter.clone();
         let redis_state = std::sync::Arc::new(RedisStateManager::new(self.inner.redis.clone()));
         let location_provider = self.inner.location_provider.clone();
         tokio::spawn(async move {
             let mut actor =
-                GameActor::new(&gid, db, rx, io, location_provider).with_redis(redis_state);
+                GameActor::new(&gid, db, rx, emitter, location_provider).with_redis(redis_state);
             actor.run().await;
         });
 

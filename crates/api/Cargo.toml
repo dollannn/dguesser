@@ -32,6 +32,7 @@ tracing-subscriber.workspace = true
 dotenvy.workspace = true
 config.workspace = true
 redis.workspace = true
+socketioxide-emitter.workspace = true
 rand.workspace = true
 governor.workspace = true
 validator.workspace = true

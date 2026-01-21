@@ -167,13 +167,23 @@
 
       <!-- Players List (Multiplayer only) -->
       {#if game.mode === 'multiplayer'}
+        {@const displayPlayers = $gameStore.players.size > 0 
+          ? [...$gameStore.players.entries()].map(([id, p]) => ({
+              user_id: id,
+              display_name: p.displayName,
+              avatar_url: p.avatarUrl,
+              is_host: id === $gameStore.hostId,
+              is_guest: false, // Socket state doesn't track this currently
+              connected: p.connected
+            }))
+          : game.players}
         <div>
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-medium text-muted-foreground">Players</h3>
             <Badge variant="secondary">{playerCount} / 8</Badge>
           </div>
           <div class="space-y-2">
-            {#each game.players as player}
+            {#each displayPlayers as player}
               {@const isYou = player.user_id === $user?.id}
               <div
                 class="flex items-center justify-between rounded-lg border bg-card p-3 transition-colors hover:bg-muted/50 {isYou ? 'ring-2 ring-primary/50' : ''}"
@@ -191,6 +201,9 @@
                     <span class="font-medium">{player.display_name}</span>
                     {#if isYou}
                       <Badge variant="outline" class="text-xs py-0">You</Badge>
+                    {/if}
+                    {#if 'connected' in player && player.connected === false}
+                      <Badge variant="destructive" class="text-xs py-0">Disconnected</Badge>
                     {/if}
                   </div>
                 </div>
