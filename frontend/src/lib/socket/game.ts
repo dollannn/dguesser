@@ -262,6 +262,22 @@ function createGameStore() {
         roundStartedAt = Date.now() - (payload.time_remaining_ms ?? 0);
       }
 
+      // Generate liveScores from players for scoreboard display
+      // This ensures the scoreboard shows immediately after join/reconnect
+      const liveScores: PlayerScoreInfo[] = payload.players
+        .map((p) => ({
+          user_id: p.id,
+          display_name: p.display_name,
+          avatar_url: p.avatar_url,
+          total_score: p.score,
+          round_score: 0, // Not available in game state, will be updated by scores:update
+          has_guessed: p.has_guessed,
+          rank: 0, // Will be assigned after sorting
+          connected: p.connected ?? true,
+        }))
+        .sort((a, b) => b.total_score - a.total_score)
+        .map((p, i) => ({ ...p, rank: i + 1 }));
+
       update((s) => ({
         ...s,
         gameId: payload.game_id,
@@ -276,6 +292,7 @@ function createGameStore() {
         // Preserve hasGuessed if we're the one who already guessed
         hasGuessed: payload.players.some((p) => p.has_guessed && p.id === getCurrentUserId()),
         players,
+        liveScores,
       }));
     },
 
