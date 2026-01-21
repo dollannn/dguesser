@@ -39,5 +39,6 @@ utoipa.workspace = true
 utoipa-scalar.workspace = true
 once_cell.workspace = true
 regex.workspace = true
+futures = "0.3"
 
 http = "1"

@@ -29,6 +29,9 @@ lru = "0.12"
 # Bytes for efficient buffer handling
 bytes = "1"
 
+# Futures for parallel async operations
+futures = "0.3"
+
 # Async trait support
 async-trait = "0.1"
 

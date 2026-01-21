@@ -15,7 +15,6 @@
   import BanIcon from '@lucide/svelte/icons/ban';
   import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
   import MapIcon from '@lucide/svelte/icons/map';
-  import LoaderIcon from '@lucide/svelte/icons/loader';
 
   interface Props {
     settings: GameSettings;
@@ -218,9 +217,6 @@
         <MapIcon class="size-4 text-primary" />
         Map
       </Label>
-      {#if mapsLoading}
-        <LoaderIcon class="size-4 animate-spin text-muted-foreground" />
-      {/if}
     </div>
     {#if readonly}
       <div class="flex items-center gap-2 px-3 py-2 rounded-md border bg-muted/50">
@@ -231,16 +227,24 @@
           </span>
         {/if}
       </div>
+    {:else if mapsLoading}
+      <!-- Loading state with skeleton and message -->
+      <div class="space-y-2">
+        <div class="w-full h-10 rounded-md border border-input bg-muted/50 animate-pulse flex items-center px-3">
+          <span class="text-sm text-muted-foreground">Loading maps...</span>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Preparing game data. This may take a moment on first load.
+        </p>
+      </div>
     {:else if mapsError}
       <div class="text-sm text-destructive">{mapsError}</div>
     {:else}
       <select
         value={mapId}
         onchange={handleMapChange}
-        disabled={mapsLoading}
         class="w-full px-3 py-2 rounded-md border border-input bg-background text-sm
-               focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2
-               disabled:cursor-not-allowed disabled:opacity-50"
+               focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
       >
         {#each maps as map}
           <option value={map.id}>

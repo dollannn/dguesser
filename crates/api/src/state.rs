@@ -106,7 +106,7 @@ impl AppState {
                 if let Some(local_path) = r2_config.local_path() {
                     tracing::info!(path = %local_path, version = %r2_config.version, "Using local file location provider");
                     let reader = FileReader::new(local_path, &r2_config.version);
-                    let provider = PackProvider::new(reader, pack_config);
+                    let provider = Arc::new(PackProvider::new(reader, pack_config));
 
                     // Register maps with provider
                     for map in maps {
@@ -115,11 +115,19 @@ impl AppState {
                     }
                     tracing::info!("Registered {} maps with R2 location provider", map_count);
 
-                    Arc::new(provider)
+                    // Spawn background task to warm the cache
+                    let provider_clone = Arc::clone(&provider);
+                    tokio::spawn(async move {
+                        if let Err(e) = provider_clone.warm_cache().await {
+                            tracing::warn!(error = %e, "Location cache warm-up failed");
+                        }
+                    });
+
+                    provider as Arc<dyn LocationProvider>
                 } else {
                     tracing::info!(url = %r2_config.base_url, version = %r2_config.version, "Using R2 HTTP location provider");
                     let reader = HttpReader::new(&r2_config.base_url, &r2_config.version);
-                    let provider = PackProvider::new(reader, pack_config);
+                    let provider = Arc::new(PackProvider::new(reader, pack_config));
 
                     // Register maps with provider
                     for map in maps {
@@ -128,7 +136,15 @@ impl AppState {
                     }
                     tracing::info!("Registered {} maps with R2 location provider", map_count);
 
-                    Arc::new(provider)
+                    // Spawn background task to warm the cache
+                    let provider_clone = Arc::clone(&provider);
+                    tokio::spawn(async move {
+                        if let Err(e) = provider_clone.warm_cache().await {
+                            tracing::warn!(error = %e, "Location cache warm-up failed");
+                        }
+                    });
+
+                    provider as Arc<dyn LocationProvider>
                 }
             }
         };

@@ -138,6 +138,46 @@ impl<R: RangeReader> PackProvider<R> {
         Ok(index)
     }
 
+    /// Pre-warm the cache by loading the manifest and all country indexes.
+    ///
+    /// This should be called at server startup (in a background task) to ensure
+    /// the first user request doesn't have to wait for all the HTTP fetches.
+    pub async fn warm_cache(&self) -> Result<(), LocationPackError> {
+        let start = std::time::Instant::now();
+        tracing::info!("Starting location cache warm-up...");
+
+        // Load the manifest first
+        let manifest = self.manifest().await?;
+        let countries: Vec<String> =
+            manifest.country_codes().iter().map(|s| s.to_string()).collect();
+        let country_count = countries.len();
+
+        tracing::info!(countries = country_count, "Manifest loaded, warming country indexes...");
+
+        // Fetch all country indexes in parallel
+        let futures: Vec<_> = countries.iter().map(|c| self.country_index(c)).collect();
+        let results = futures::future::join_all(futures).await;
+
+        let (ok, failed): (Vec<_>, Vec<_>) = results.into_iter().partition(Result::is_ok);
+        let failed_count = failed.len();
+
+        if failed_count > 0 {
+            tracing::warn!(
+                failed = failed_count,
+                "Some country indexes failed to load during warm-up"
+            );
+        }
+
+        tracing::info!(
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            countries_loaded = ok.len(),
+            countries_failed = failed_count,
+            "Location cache warm-up complete"
+        );
+
+        Ok(())
+    }
+
     /// Select random locations matching the given rules.
     ///
     /// # Arguments

@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use dguesser_auth::{AuthUser, MaybeAuthUser};
 use dguesser_core::location::MapVisibility;
 use dguesser_core::streetview::{StreetViewUrlError, parse_streetview_url};
+use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -278,32 +279,47 @@ pub async fn list_maps(
         .await
         .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
 
-    // Fetch location counts from provider (works for both R2 and PostgreSQL)
-    let mut summaries = Vec::with_capacity(maps.len());
-    for m in maps {
-        // Use location provider for count (R2 reads from manifest, PostgreSQL from DB)
-        // Fall back to database count for user-created maps without R2 packs
-        let location_count = state
-            .location_provider()
-            .get_location_count(&m.id)
-            .await
-            .unwrap_or(m.location_count as i64) as i32;
+    // Fetch location counts from provider in parallel (works for both R2 and PostgreSQL)
+    // This is much faster than sequential fetching when cache is cold
+    let count_futures: Vec<_> = maps
+        .iter()
+        .map(|m| {
+            let state = state.clone();
+            let map_id = m.id.clone();
+            let fallback = m.location_count;
+            async move {
+                state
+                    .location_provider()
+                    .get_location_count(&map_id)
+                    .await
+                    .unwrap_or(fallback as i64) as i32
+            }
+        })
+        .collect();
 
-        let is_system = m.is_system_map();
-        let is_owned = user_id.is_some_and(|uid| m.is_owned_by(uid));
+    let counts = join_all(count_futures).await;
 
-        summaries.push(MapSummary {
-            id: m.id,
-            slug: m.slug,
-            name: m.name,
-            description: m.description,
-            visibility: m.visibility.to_string(),
-            is_system_map: is_system,
-            is_owned,
-            location_count,
-            created_at: m.created_at,
-        });
-    }
+    // Build summaries with the fetched counts
+    let summaries: Vec<MapSummary> = maps
+        .into_iter()
+        .zip(counts)
+        .map(|(m, location_count)| {
+            let is_system = m.is_system_map();
+            let is_owned = user_id.is_some_and(|uid| m.is_owned_by(uid));
+
+            MapSummary {
+                id: m.id,
+                slug: m.slug,
+                name: m.name,
+                description: m.description,
+                visibility: m.visibility.to_string(),
+                is_system_map: is_system,
+                is_owned,
+                location_count,
+                created_at: m.created_at,
+            }
+        })
+        .collect();
 
     Ok(Json(ListMapsResponse { maps: summaries }))
 }
