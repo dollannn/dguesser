@@ -34,19 +34,19 @@ pub struct RateLimitConfig {
 
 impl Default for RateLimitConfig {
     fn default() -> Self {
-        Self { max_requests: 100, window_secs: 60, prefix: "ratelimit:api" }
+        Self { max_requests: 300, window_secs: 60, prefix: "ratelimit:api" }
     }
 }
 
 impl RateLimitConfig {
-    /// Rate limit for authentication endpoints (stricter)
+    /// Rate limit for authentication endpoints
     pub fn auth() -> Self {
-        Self { max_requests: 10, window_secs: 60, prefix: "ratelimit:auth" }
+        Self { max_requests: 60, window_secs: 60, prefix: "ratelimit:auth" }
     }
 
     /// Rate limit for game actions
     pub fn game() -> Self {
-        Self { max_requests: 30, window_secs: 60, prefix: "ratelimit:game" }
+        Self { max_requests: 120, window_secs: 60, prefix: "ratelimit:game" }
     }
 }
 
@@ -277,21 +277,21 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = RateLimitConfig::default();
-        assert_eq!(config.max_requests, 100);
+        assert_eq!(config.max_requests, 300);
         assert_eq!(config.window_secs, 60);
     }
 
     #[test]
     fn test_auth_config() {
         let config = RateLimitConfig::auth();
-        assert_eq!(config.max_requests, 10);
+        assert_eq!(config.max_requests, 60);
         assert_eq!(config.window_secs, 60);
     }
 
     #[test]
     fn test_game_config() {
         let config = RateLimitConfig::game();
-        assert_eq!(config.max_requests, 30);
+        assert_eq!(config.max_requests, 120);
         assert_eq!(config.window_secs, 60);
     }
 
