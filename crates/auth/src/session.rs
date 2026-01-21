@@ -110,11 +110,12 @@ pub fn build_cookie_header(
 /// Build a Set-Cookie header value for deleting a session cookie.
 ///
 /// This sets the cookie to an empty value with Max-Age=0, causing the browser
-/// to immediately delete the cookie.
+/// to immediately delete the cookie. Must include Domain/Secure/SameSite to
+/// match the original cookie attributes, otherwise browsers may not delete it.
 ///
 /// # Arguments
 ///
-/// * `config` - Session configuration for cookie name and path
+/// * `config` - Session configuration for cookie attributes
 ///
 /// # Example
 ///
@@ -126,7 +127,29 @@ pub fn build_cookie_header(
 /// assert!(header.contains("Max-Age=0"));
 /// ```
 pub fn build_delete_cookie_header(config: &SessionConfig) -> String {
-    format!("{}=; Max-Age=0; Path={}; HttpOnly", config.cookie_name, config.path)
+    let mut parts = vec![
+        format!("{}=", config.cookie_name),
+        "Max-Age=0".to_string(),
+        format!("Path={}", config.path),
+        "HttpOnly".to_string(),
+    ];
+
+    if let Some(ref domain) = config.domain {
+        parts.push(format!("Domain={}", domain));
+    }
+
+    if config.secure {
+        parts.push("Secure".to_string());
+    }
+
+    let same_site = match config.same_site {
+        SameSite::Strict => "Strict",
+        SameSite::Lax => "Lax",
+        SameSite::None => "None",
+    };
+    parts.push(format!("SameSite={}", same_site));
+
+    parts.join("; ")
 }
 
 #[cfg(test)]
@@ -185,5 +208,16 @@ mod tests {
         assert!(header.contains("dguesser_sid="));
         assert!(header.contains("Max-Age=0"));
         assert!(header.contains("HttpOnly"));
+        assert!(header.contains("Secure"));
+        assert!(header.contains("SameSite=Lax"));
+    }
+
+    #[test]
+    fn test_build_delete_cookie_header_with_domain() {
+        let config =
+            SessionConfig { domain: Some(".example.com".to_string()), ..Default::default() };
+        let header = build_delete_cookie_header(&config);
+
+        assert!(header.contains("Domain=.example.com"));
     }
 }

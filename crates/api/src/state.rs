@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use dguesser_auth::{GoogleOAuth, MicrosoftOAuth, OAuthStateStore, SameSite, SessionConfig};
+use dguesser_auth::{GoogleOAuth, MicrosoftOAuth, OAuthStateStore, SessionConfig};
 use dguesser_core::location::LocationProvider;
 use dguesser_db::{DbPool, LocationRepository};
 use dguesser_locations::reader::{FileReader, HttpReader};
@@ -60,10 +60,9 @@ impl AppState {
         };
         if let Some(ref domain) = config.cookie_domain {
             session_config.domain = Some(domain.clone());
-            // Cross-subdomain setup requires SameSite=None for cookies to be set
-            // from cross-origin fetch responses (e.g., dguesser.lol → api.dguesser.lol)
-            session_config.same_site = SameSite::None;
-            tracing::info!(cookie_domain = %domain, same_site = "None", "Session cookie configured for cross-subdomain");
+            // SameSite=Lax works for same-site subdomains (dguesser.lol ↔ api.dguesser.lol)
+            // No need for SameSite=None which has stricter browser requirements
+            tracing::info!(cookie_domain = %domain, same_site = "Lax", "Session cookie configured for cross-subdomain");
         }
 
         // Create OAuth clients if configured

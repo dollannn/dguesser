@@ -141,7 +141,8 @@ impl Config {
             microsoft_client_secret: env::var("MICROSOFT_CLIENT_SECRET").unwrap_or_default(),
             microsoft_redirect_uri: env::var("MICROSOFT_REDIRECT_URI")
                 .unwrap_or_else(|_| format!("{}/api/v1/auth/microsoft/callback", api_base_url)),
-            is_production: env::var("RUST_ENV").map(|v| v == "production").unwrap_or(false),
+            is_production: env::var("RUST_ENV").map(|v| v == "production").unwrap_or(false)
+                || env::var("RAILWAY_ENVIRONMENT").is_ok(),
             location_provider_type,
             r2_location_config,
             trusted_proxy_count: env::var("TRUSTED_PROXY_COUNT")
