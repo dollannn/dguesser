@@ -38,6 +38,9 @@
         const unsubscribe = authStore.subscribe(($auth) => {
             if ($auth.user && !socketClient.connected) {
                 socketClient.connect();
+            } else if (!$auth.user && socketClient.connected) {
+                // Disconnect socket when user logs out
+                socketClient.disconnect();
             }
         });
 

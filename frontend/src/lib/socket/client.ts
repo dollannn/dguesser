@@ -92,8 +92,17 @@ class SocketClient {
   }
 
   connect(): void {
+    // Already connected - nothing to do
     if (this.socket?.connected) return;
 
+    // Socket exists but disconnected - just reconnect it
+    if (this.socket) {
+      this.state.update((s) => ({ ...s, status: 'connecting', error: null }));
+      this.socket.connect();
+      return;
+    }
+
+    // No socket exists - create a new one
     this.state.update((s) => ({ ...s, status: 'connecting', error: null }));
 
     this.socket = io(REALTIME_URL, {
