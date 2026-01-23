@@ -30,20 +30,27 @@ pub struct AuthResponse {
 }
 
 /// Extract session ID from cookie header
+///
+/// If multiple cookies with the same name exist (e.g., due to different Domain attributes),
+/// we take the LAST one, which is typically the most recently set cookie.
 fn extract_session_from_cookie<A: Adapter>(socket: &SocketRef<A>) -> Option<String> {
     let req_parts = socket.req_parts();
     let cookie_header = req_parts.headers.get("cookie")?.to_str().ok()?;
 
-    // Parse cookies (format: "name1=value1; name2=value2")
-    for cookie in cookie_header.split(';') {
-        let cookie = cookie.trim();
-        if let Some((name, value)) = cookie.split_once('=')
-            && name.trim() == SESSION_COOKIE_NAME
-        {
-            return Some(value.trim().to_string());
-        }
-    }
-    None
+    // Parse cookies and take the last matching one (most recently set)
+    cookie_header
+        .split(';')
+        .filter_map(|cookie| {
+            let cookie = cookie.trim();
+            cookie.split_once('=').and_then(|(name, value)| {
+                if name.trim() == SESSION_COOKIE_NAME {
+                    Some(value.trim().to_string())
+                } else {
+                    None
+                }
+            })
+        })
+        .last()
 }
 
 /// Handle authentication request
@@ -55,7 +62,7 @@ pub async fn handle_auth<A: Adapter>(
     let socket_id = socket.id.to_string();
 
     // Rate limit by IP (unauthenticated, so we use IP)
-    let client_ip = get_socket_ip(&socket);
+    let client_ip = get_socket_ip(&socket, state.config());
     match check_rate_limit(state.redis(), &SocketRateLimitConfig::AUTH, &client_ip).await {
         Ok(result) if result.allowed => {}
         Ok(_) => {

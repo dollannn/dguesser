@@ -62,16 +62,23 @@ pub trait AuthState: Clone + Send + Sync + 'static {
 }
 
 /// Extract session ID from the Cookie header.
+///
+/// If multiple cookies with the same name exist (e.g., due to different Domain attributes),
+/// we take the LAST one, which is typically the most recently set cookie.
+/// This handles the case where an old cookie without Domain coexists with a new cookie
+/// that has Domain=.example.com for cross-subdomain support.
 fn extract_session_id(parts: &Parts, cookie_name: &str) -> Option<String> {
     let cookie_header = parts.headers.get(COOKIE)?.to_str().ok()?;
+    let prefix = format!("{}=", cookie_name);
 
-    for cookie in cookie_header.split(';') {
-        let cookie = cookie.trim();
-        if let Some(value) = cookie.strip_prefix(&format!("{}=", cookie_name)) {
-            return Some(value.to_string());
-        }
-    }
-    None
+    // Find the last matching cookie (most recently set)
+    cookie_header
+        .split(';')
+        .filter_map(|cookie| {
+            let cookie = cookie.trim();
+            cookie.strip_prefix(&prefix).map(|v| v.to_string())
+        })
+        .last()
 }
 
 impl<S> FromRequestParts<S> for AuthUser
@@ -201,5 +208,19 @@ mod tests {
         let (parts, _body) = req.into_parts();
         let session_id = extract_session_id(&parts, "dguesser_sid");
         assert_eq!(session_id, None);
+    }
+
+    #[test]
+    fn test_extract_session_id_duplicate_cookies_takes_last() {
+        // When multiple cookies with the same name exist (due to different Domain attributes),
+        // we should take the last one (most recently set)
+        let req = Request::builder()
+            .header(COOKIE, "dguesser_sid=ses_old_invalid; other=value; dguesser_sid=ses_new_valid")
+            .body(())
+            .unwrap();
+
+        let (parts, _body) = req.into_parts();
+        let session_id = extract_session_id(&parts, "dguesser_sid");
+        assert_eq!(session_id, Some("ses_new_valid".to_string()));
     }
 }

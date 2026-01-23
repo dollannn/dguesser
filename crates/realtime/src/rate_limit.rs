@@ -3,9 +3,14 @@
 //! Provides per-event rate limiting to prevent abuse and DoS attacks.
 //! Uses Redis sliding window counters, matching the API rate limiting pattern.
 
+use std::net::IpAddr;
+
+use axum::http::HeaderMap;
 use redis::AsyncCommands;
 use socketioxide::adapter::Adapter;
 use socketioxide::extract::SocketRef;
+
+use crate::config::Config;
 
 /// Rate limit configuration for socket events
 #[derive(Debug, Clone)]
@@ -94,36 +99,109 @@ pub async fn check_rate_limit(
     Ok(RateLimitResult { allowed, remaining, count })
 }
 
-/// Extract client IP from socket request headers
+/// Extract client IP from socket request headers using secure methods
 ///
-/// Checks X-Forwarded-For and X-Real-IP headers for proxy setups.
-/// Falls back to "unknown" if no IP can be determined.
-pub fn get_socket_ip<A: Adapter>(socket: &SocketRef<A>) -> String {
-    let parts = socket.req_parts();
+/// Priority order:
+/// 1. CF-Connecting-IP (if trust_cloudflare enabled) - Cloudflare's verified client IP
+/// 2. Rightmost untrusted IP from X-Forwarded-For based on trusted_proxy_count
+/// 3. X-Real-IP header
+/// 4. "unknown" as last resort
+///
+/// This prevents X-Forwarded-For spoofing by using the rightmost-proxy model
+/// instead of trusting the first IP (which can be attacker-controlled).
+pub fn get_socket_ip<A: Adapter>(socket: &SocketRef<A>, config: &Config) -> String {
+    let headers = &socket.req_parts().headers;
 
-    // Check X-Forwarded-For header first (for reverse proxies)
-    if let Some(forwarded) = parts.headers.get("x-forwarded-for")
-        && let Ok(value) = forwarded.to_str()
+    // 1. Check Cloudflare header first (most reliable when behind Cloudflare)
+    if config.trust_cloudflare
+        && let Some(ip) = get_cloudflare_ip(headers)
     {
-        // Take the first IP (original client)
-        if let Some(ip) = value.split(',').next() {
-            return ip.trim().to_string();
-        }
+        return ip;
     }
 
-    // Check X-Real-IP header
-    if let Some(real_ip) = parts.headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str()
-    {
-        return value.to_string();
+    // 2. Extract from X-Forwarded-For using rightmost-proxy model
+    if let Some(ip) = get_forwarded_for_ip(headers, config.trusted_proxy_count) {
+        return ip;
     }
 
+    // 3. Check X-Real-IP header
+    if let Some(ip) = get_real_ip(headers) {
+        return ip;
+    }
+
+    // 4. Last resort
     "unknown".to_string()
+}
+
+/// Extract IP from Cloudflare's CF-Connecting-IP header
+fn get_cloudflare_ip(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|ip| validate_ip(ip.trim()))
+}
+
+/// Extract client IP from X-Forwarded-For using rightmost-proxy model
+///
+/// The X-Forwarded-For header contains a chain of IPs: `client, proxy1, proxy2, ...`
+/// Each proxy appends the IP of the previous hop to the right.
+///
+/// To prevent spoofing, we count from the right (trusted proxies) and take
+/// the first IP that's not from a trusted proxy.
+///
+/// Example with trusted_proxy_count=2:
+/// X-Forwarded-For: spoofed, real-client, proxy1, proxy2
+///                           ↑ we want this (index len-3)
+fn get_forwarded_for_ip(headers: &HeaderMap, trusted_proxy_count: u8) -> Option<String> {
+    let header_value = headers.get("x-forwarded-for")?.to_str().ok()?;
+
+    let ips: Vec<&str> = header_value.split(',').map(|s| s.trim()).collect();
+
+    if ips.is_empty() {
+        return None;
+    }
+
+    // Calculate the index of the client IP
+    // With N trusted proxies, the client IP is at position len - N - 1
+    // But we need at least trusted_proxy_count + 1 IPs to have a client IP
+    let client_index = ips.len().saturating_sub(trusted_proxy_count as usize + 1);
+
+    // Get the IP at the calculated index and validate it
+    ips.get(client_index).and_then(|ip| validate_ip(ip))
+}
+
+/// Extract IP from X-Real-IP header
+fn get_real_ip(headers: &HeaderMap) -> Option<String> {
+    headers.get("x-real-ip").and_then(|v| v.to_str().ok()).and_then(|ip| validate_ip(ip.trim()))
+}
+
+/// Validate that a string is a valid IP address
+fn validate_ip(ip: &str) -> Option<String> {
+    if ip.is_empty() {
+        return None;
+    }
+
+    // Try to parse as IP address
+    let parsed: IpAddr = ip.parse().ok()?;
+
+    // Accept all valid IPs (including loopback for local dev)
+    Some(parsed.to_string())
 }
 
 #[cfg(test)]
 mod tests {
+    use axum::http::{HeaderName, HeaderValue};
+
     use super::*;
+
+    fn make_headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (key, value) in pairs {
+            headers
+                .insert(HeaderName::try_from(*key).unwrap(), HeaderValue::from_str(value).unwrap());
+        }
+        headers
+    }
 
     #[test]
     fn test_config_values() {
@@ -147,5 +225,72 @@ mod tests {
         let config = SocketRateLimitConfig::JOIN;
         let key = format!("ratelimit:socket:{}:{}", config.event, "usr_abc123");
         assert_eq!(key, "ratelimit:socket:game:join:usr_abc123");
+    }
+
+    #[test]
+    fn test_cloudflare_ip_trusted() {
+        let headers = make_headers(&[
+            ("cf-connecting-ip", "203.0.113.50"),
+            ("x-forwarded-for", "spoofed, 203.0.113.50, 10.0.0.1"),
+        ]);
+
+        let ip = get_cloudflare_ip(&headers);
+        assert_eq!(ip, Some("203.0.113.50".to_string()));
+    }
+
+    #[test]
+    fn test_forwarded_for_rightmost_model() {
+        // With 2 trusted proxies: spoofed, real-client, proxy1, proxy2
+        // Index 0: spoofed (attacker added)
+        // Index 1: real-client (we want this)
+        // Index 2: proxy1 (trusted)
+        // Index 3: proxy2 (trusted)
+        let headers =
+            make_headers(&[("x-forwarded-for", "1.1.1.1, 192.0.2.100, 10.0.0.1, 10.0.0.2")]);
+
+        let ip = get_forwarded_for_ip(&headers, 2);
+        assert_eq!(ip, Some("192.0.2.100".to_string()));
+    }
+
+    #[test]
+    fn test_forwarded_for_single_proxy() {
+        // With 1 trusted proxy: client, proxy
+        let headers = make_headers(&[("x-forwarded-for", "192.0.2.50, 10.0.0.1")]);
+
+        let ip = get_forwarded_for_ip(&headers, 1);
+        assert_eq!(ip, Some("192.0.2.50".to_string()));
+    }
+
+    #[test]
+    fn test_forwarded_for_no_proxies() {
+        // With 0 trusted proxies, take the rightmost IP (direct connection)
+        let headers = make_headers(&[("x-forwarded-for", "192.0.2.1, 192.0.2.2")]);
+
+        let ip = get_forwarded_for_ip(&headers, 0);
+        assert_eq!(ip, Some("192.0.2.2".to_string()));
+    }
+
+    #[test]
+    fn test_real_ip_fallback() {
+        let headers = make_headers(&[("x-real-ip", "192.0.2.75")]);
+
+        let ip = get_real_ip(&headers);
+        assert_eq!(ip, Some("192.0.2.75".to_string()));
+    }
+
+    #[test]
+    fn test_invalid_ip_rejected() {
+        let headers = make_headers(&[("cf-connecting-ip", "not-an-ip")]);
+
+        let ip = get_cloudflare_ip(&headers);
+        assert_eq!(ip, None);
+    }
+
+    #[test]
+    fn test_ipv6_supported() {
+        let headers = make_headers(&[("cf-connecting-ip", "2001:db8::1")]);
+
+        let ip = get_cloudflare_ip(&headers);
+        assert_eq!(ip, Some("2001:db8::1".to_string()));
     }
 }
