@@ -163,8 +163,8 @@ impl AppState {
             "Configured client IP extraction"
         );
 
-        // Create fallback rate limiter (150 req/min per IP, per instance)
-        let fallback_rate_limiter = create_fallback_limiter(300);
+        // Create fallback rate limiter (50 req/min per IP, per instance)
+        let fallback_rate_limiter = create_fallback_limiter(100);
         tracing::info!("Created fallback rate limiter");
 
         Ok(Self {

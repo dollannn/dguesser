@@ -24,29 +24,29 @@ pub struct SocketRateLimitConfig {
 }
 
 impl SocketRateLimitConfig {
-    /// Auth event: 60 requests per minute per IP
-    pub const AUTH: Self = Self { event: "auth", max_requests: 60, window_secs: 60 };
+    /// Auth event: 10 requests per minute per IP
+    pub const AUTH: Self = Self { event: "auth", max_requests: 10, window_secs: 60 };
 
-    /// Game join: 30 requests per minute per user
-    pub const JOIN: Self = Self { event: "game:join", max_requests: 30, window_secs: 60 };
+    /// Game join: 10 requests per minute per user
+    pub const JOIN: Self = Self { event: "game:join", max_requests: 10, window_secs: 60 };
 
-    /// Game leave: 60 requests per minute per user
-    pub const LEAVE: Self = Self { event: "game:leave", max_requests: 60, window_secs: 60 };
+    /// Game leave: 10 requests per minute per user
+    pub const LEAVE: Self = Self { event: "game:leave", max_requests: 10, window_secs: 60 };
 
-    /// Game start: 20 requests per minute per user
-    pub const START: Self = Self { event: "game:start", max_requests: 20, window_secs: 60 };
+    /// Game start: 10 requests per minute per user
+    pub const START: Self = Self { event: "game:start", max_requests: 10, window_secs: 60 };
 
-    /// Guess submit: 120 requests per minute per user
-    /// Main game action, needs reasonable headroom
-    pub const GUESS: Self = Self { event: "guess:submit", max_requests: 120, window_secs: 60 };
+    /// Guess submit: 60 requests per minute per user
+    /// Main game action, allows one guess per second
+    pub const GUESS: Self = Self { event: "guess:submit", max_requests: 60, window_secs: 60 };
 
-    /// Guess submit burst: 5 requests per second per user
+    /// Guess submit burst: 3 requests per second per user
     /// Prevents rapid-fire guessing
     pub const GUESS_BURST: Self =
-        Self { event: "guess:submit:burst", max_requests: 5, window_secs: 1 };
+        Self { event: "guess:submit:burst", max_requests: 3, window_secs: 1 };
 
-    /// Player ready: 30 requests per minute per user
-    pub const READY: Self = Self { event: "player:ready", max_requests: 30, window_secs: 60 };
+    /// Player ready: 10 requests per minute per user
+    pub const READY: Self = Self { event: "player:ready", max_requests: 10, window_secs: 60 };
 }
 
 /// Result of a rate limit check
@@ -205,11 +205,11 @@ mod tests {
 
     #[test]
     fn test_config_values() {
-        assert_eq!(SocketRateLimitConfig::AUTH.max_requests, 60);
+        assert_eq!(SocketRateLimitConfig::AUTH.max_requests, 10);
         assert_eq!(SocketRateLimitConfig::AUTH.window_secs, 60);
 
-        assert_eq!(SocketRateLimitConfig::GUESS.max_requests, 120);
-        assert_eq!(SocketRateLimitConfig::GUESS_BURST.max_requests, 5);
+        assert_eq!(SocketRateLimitConfig::GUESS.max_requests, 60);
+        assert_eq!(SocketRateLimitConfig::GUESS_BURST.max_requests, 3);
         assert_eq!(SocketRateLimitConfig::GUESS_BURST.window_secs, 1);
     }
 
