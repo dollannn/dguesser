@@ -33,13 +33,13 @@
   let timeDisplay = $derived(`${minutes}:${seconds.toString().padStart(2, '0')}`);
 
   // Color based on remaining time
-  let strokeColor = $derived(() => {
+  let strokeColor = $derived.by(() => {
     if (progress > 0.5) return 'stroke-green-500';
     if (progress > 0.2) return 'stroke-yellow-500';
     return 'stroke-red-500';
   });
 
-  let textColor = $derived(() => {
+  let textColor = $derived.by(() => {
     if (progress > 0.5) return 'text-foreground';
     if (progress > 0.2) return 'text-yellow-600 dark:text-yellow-400';
     return 'text-red-500';
@@ -113,13 +113,13 @@
       fill="none"
       stroke-width={strokeWidth}
       stroke-linecap="round"
-      class="transition-all duration-100 {strokeColor()}"
+      class="transition-all duration-100 {strokeColor}"
       style="stroke-dasharray: {circumference}; stroke-dashoffset: {strokeDashoffset};"
     />
   </svg>
 
   <!-- Time display -->
-  <span class="font-mono text-sm font-bold {textColor()} z-10">
+  <span class="font-mono text-sm font-bold {textColor} z-10">
     {timeDisplay}
   </span>
 </div>

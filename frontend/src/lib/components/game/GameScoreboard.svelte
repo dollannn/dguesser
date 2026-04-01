@@ -1,7 +1,10 @@
 <script lang="ts">
   import type { PlayerScoreInfo } from '$lib/socket/game';
   import { getRankDisplay, getRankClass, formatScore } from '$lib/utils.js';
-  import { ChevronLeft, Trophy, Users, Wifi, WifiOff } from '@lucide/svelte';
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+  import Trophy from '@lucide/svelte/icons/trophy';
+  import Users from '@lucide/svelte/icons/users';
+  import WifiOff from '@lucide/svelte/icons/wifi-off';
   import * as Avatar from '$lib/components/ui/avatar';
 
   interface Props {
@@ -23,7 +26,7 @@
   let prevScores = $state<Map<string, { rank: number; score: number }>>(new Map());
 
   // Calculate rank changes when scores update
-  let rankChanges = $derived(() => {
+  let rankChanges = $derived.by(() => {
     const changes = new Map<string, number>();
     for (const player of scores) {
       const prev = prevScores.get(player.user_id);
@@ -75,7 +78,7 @@
       <ul class="divide-y divide-border/30">
         {#each scores as player (player.user_id)}
           {@const isCurrentUser = currentUserId === player.user_id}
-          {@const rankChange = rankChanges().get(player.user_id)}
+          {@const rankChange = rankChanges.get(player.user_id)}
           <li
             class="px-3 py-2.5 flex items-center gap-2.5 transition-colors {isCurrentUser
               ? 'bg-primary/10'

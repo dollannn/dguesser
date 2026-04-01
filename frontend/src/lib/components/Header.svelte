@@ -17,7 +17,6 @@
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import PlayIcon from '@lucide/svelte/icons/play';
   import SettingsIcon from '@lucide/svelte/icons/settings';
-  import MenuIcon from '@lucide/svelte/icons/menu';
   import MapIcon from '@lucide/svelte/icons/map';
 
   // Game state detection for pill header

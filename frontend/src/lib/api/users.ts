@@ -60,11 +60,6 @@ export interface RevokeSessionResponse {
 }
 
 export const usersApi = {
-  /** Get current user's profile */
-  async getProfile(): Promise<UserProfile> {
-    return api.get<UserProfile>('/users/me');
-  },
-
   /** Update current user's profile */
   async updateProfile(data: UpdateProfileRequest): Promise<UserProfile> {
     return api.put<UserProfile>('/users/me', data);
@@ -73,16 +68,6 @@ export const usersApi = {
   /** Delete current user's account (soft delete) */
   async deleteAccount(): Promise<DeleteAccountResponse> {
     return api.delete<DeleteAccountResponse>('/users/me');
-  },
-
-  /** Get a user's public profile by ID */
-  async getUserById(id: string): Promise<UserProfile> {
-    return api.get<UserProfile>(`/users/${id}`);
-  },
-
-  /** Get a user's public profile by username */
-  async getUserByUsername(username: string): Promise<UserProfile> {
-    return api.get<UserProfile>(`/users/u/${username}`);
   },
 };
 

@@ -19,7 +19,7 @@
   let { data }: { data: PageData } = $props();
 
   // Profile is now available immediately from SSR
-  let profile = $state<UserProfile | null>(data.profile as UserProfile);
+  let profile = $state<UserProfile | null>(data.profile ?? null);
   let loading = $state(false);
   let error = $state('');
 

@@ -1,5 +1,8 @@
 import { api } from './client';
 
+export type GameMode = 'solo' | 'multiplayer';
+export type GameStatus = 'lobby' | 'active' | 'finished';
+
 export interface GameSettings {
   rounds: number;
   time_limit_seconds: number;
@@ -10,7 +13,7 @@ export interface GameSettings {
 }
 
 export interface CreateGameRequest {
-  mode: 'solo' | 'multiplayer';
+  mode: GameMode;
   settings?: Partial<GameSettings>;
 }
 
@@ -39,8 +42,8 @@ export interface Player {
 export interface GameDetails {
   /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   id: string;
-  mode: string;
-  status: string;
+  mode: GameMode;
+  status: GameStatus;
   /** Join code for multiplayer games (6 alphanumeric chars) */
   join_code: string | null;
   created_at: string;
@@ -94,8 +97,8 @@ export interface GuessResult {
 export interface GameSummary {
   /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   id: string;
-  mode: string;
-  status: string;
+  mode: GameMode;
+  status: GameStatus;
   score: number;
   played_at: string;
 }
@@ -112,16 +115,6 @@ export interface UpdateSettingsRequest {
 export interface UpdateSettingsResponse {
   settings: GameSettings;
 }
-
-export interface GamePreset {
-  id: string;
-  name: string;
-  description: string;
-  settings: GameSettings;
-}
-
-/** Well-known preset IDs */
-export type PresetId = 'classic' | 'nomove' | 'speedround' | 'explorer' | 'custom';
 
 export const gamesApi = {
   /** Create a new game */
@@ -177,10 +170,5 @@ export const gamesApi = {
   /** Update game settings (host only, lobby only) */
   async updateSettings(gameId: string, settings: UpdateSettingsRequest): Promise<UpdateSettingsResponse> {
     return api.patch<UpdateSettingsResponse>(`/games/${gameId}/settings`, settings);
-  },
-
-  /** Get available game presets */
-  async getPresets(): Promise<GamePreset[]> {
-    return api.get<GamePreset[]>('/games/presets');
   },
 };

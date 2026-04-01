@@ -20,7 +20,7 @@
   let { data }: { data: PageData } = $props();
 
   // Initialize from server data
-  let map = $state<MapDetails | null>(data.map as MapDetails);
+  let map = $state<MapDetails | null>(data.map ?? null);
   let locations = $state<MapLocationItem[]>([]);
   let loading = $state(false);
   let loadingLocations = $state(false);
@@ -156,7 +156,7 @@
 
 <div class="max-w-4xl mx-auto px-4 py-8">
   <!-- Back link -->
-  <a href="/maps" class="inline-flex items-center gap-1 text-gray-500 hover:text-gray-700 mb-6">
+  <a href="/maps" class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground mb-6">
     <ChevronLeftIcon class="w-4 h-4" />
     Back to Maps
   </a>
@@ -180,26 +180,26 @@
 
   <!-- Loading -->
   {#if loading}
-    <div class="bg-white rounded-xl shadow p-8 animate-pulse">
+    <div class="bg-card rounded-xl shadow p-8 animate-pulse">
       <div class="flex items-start justify-between mb-6">
         <div class="flex items-center gap-4">
-          <div class="w-14 h-14 bg-gray-200 rounded-xl"></div>
+          <div class="w-14 h-14 bg-border rounded-xl"></div>
           <div>
-            <div class="w-48 h-7 bg-gray-200 rounded mb-2"></div>
-            <div class="w-32 h-4 bg-gray-200 rounded"></div>
+            <div class="w-48 h-7 bg-border rounded mb-2"></div>
+            <div class="w-32 h-4 bg-border rounded"></div>
           </div>
         </div>
-        <div class="w-20 h-8 bg-gray-200 rounded-full"></div>
+        <div class="w-20 h-8 bg-border rounded-full"></div>
       </div>
-      <div class="w-full h-16 bg-gray-200 rounded mb-6"></div>
+      <div class="w-full h-16 bg-border rounded mb-6"></div>
       <div class="flex gap-4">
-        <div class="w-32 h-10 bg-gray-200 rounded-lg"></div>
-        <div class="w-32 h-10 bg-gray-200 rounded-lg"></div>
+        <div class="w-32 h-10 bg-border rounded-lg"></div>
+        <div class="w-32 h-10 bg-border rounded-lg"></div>
       </div>
     </div>
   {:else if map}
     <!-- Map details card -->
-    <div class="bg-white rounded-xl shadow overflow-hidden mb-8">
+    <div class="bg-card rounded-xl shadow overflow-hidden mb-8">
       <div class="p-6">
         <!-- Header -->
         <div class="flex items-start justify-between mb-6">
@@ -215,8 +215,8 @@
               {/if}
             </div>
             <div>
-              <h1 class="text-2xl font-bold text-gray-900">{map.name}</h1>
-              <p class="text-gray-500 text-sm">
+              <h1 class="text-2xl font-bold text-foreground">{map.name}</h1>
+              <p class="text-muted-foreground text-sm">
                 {map.is_system_map ? 'System Map' : 'Custom Map'} &middot; Created {formatDate(
                   map.created_at
                 )}
@@ -224,29 +224,35 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <svelte:component this={getVisibilityIcon(map.visibility)} class="w-4 h-4 text-gray-400" />
-            <span class="text-sm text-gray-500">{getVisibilityLabel(map.visibility)}</span>
+            {#if map.visibility === 'public'}
+              <GlobeIcon class="w-4 h-4 text-muted-foreground" />
+            {:else if map.visibility === 'unlisted'}
+              <LinkIcon class="w-4 h-4 text-muted-foreground" />
+            {:else}
+              <LockIcon class="w-4 h-4 text-muted-foreground" />
+            {/if}
+            <span class="text-sm text-muted-foreground">{getVisibilityLabel(map.visibility)}</span>
           </div>
         </div>
 
         <!-- Description -->
         {#if map.description}
-          <p class="text-gray-600 mb-6">{map.description}</p>
+          <p class="text-muted-foreground mb-6">{map.description}</p>
         {:else}
-          <p class="text-gray-400 italic mb-6">No description</p>
+          <p class="text-muted-foreground italic mb-6">No description</p>
         {/if}
 
         <!-- Stats -->
         <div class="flex items-center gap-6 mb-6 text-sm">
           <div>
-            <span class="text-gray-500">Locations:</span>
-            <span class="font-semibold text-gray-900 ml-1"
+            <span class="text-muted-foreground">Locations:</span>
+            <span class="font-semibold text-foreground ml-1"
               >{map.location_count.toLocaleString()}</span
             >
           </div>
           <div>
-            <span class="text-gray-500">Last updated:</span>
-            <span class="font-semibold text-gray-900 ml-1">{formatDate(map.updated_at)}</span>
+            <span class="text-muted-foreground">Last updated:</span>
+            <span class="font-semibold text-foreground ml-1">{formatDate(map.updated_at)}</span>
           </div>
         </div>
 
@@ -266,7 +272,7 @@
           {#if map.is_owned}
             <a
               href="/maps/{map.id}/edit"
-              class="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg
+              class="inline-flex items-center gap-2 px-4 py-2 bg-muted text-foreground rounded-lg
                      font-medium hover:bg-gray-200 transition-colors"
             >
               <EditIcon class="w-4 h-4" />
@@ -303,9 +309,15 @@
       </div>
 
       <!-- Visibility info bar -->
-      <div class="px-6 py-3 bg-gray-50 border-t border-gray-100">
-        <p class="text-sm text-gray-500 flex items-center gap-2">
-          <svelte:component this={getVisibilityIcon(map.visibility)} class="w-4 h-4" />
+      <div class="px-6 py-3 bg-muted/50 border-t border-border">
+        <p class="text-sm text-muted-foreground flex items-center gap-2">
+          {#if map.visibility === 'public'}
+            <GlobeIcon class="w-4 h-4" />
+          {:else if map.visibility === 'unlisted'}
+            <LinkIcon class="w-4 h-4" />
+          {:else}
+            <LockIcon class="w-4 h-4" />
+          {/if}
           {getVisibilityDescription(map.visibility)}
         </p>
       </div>
@@ -313,57 +325,57 @@
 
     <!-- Locations section -->
     {#if map.location_count > 0}
-      <div class="bg-white rounded-xl shadow overflow-hidden">
-        <div class="p-4 border-b border-gray-100">
-          <h2 class="font-semibold text-gray-900">Locations ({totalLocations.toLocaleString()})</h2>
+      <div class="bg-card rounded-xl shadow overflow-hidden">
+        <div class="p-4 border-b border-border">
+          <h2 class="font-semibold text-foreground">Locations ({totalLocations.toLocaleString()})</h2>
         </div>
 
         {#if loadingLocations}
           <div class="p-8 text-center">
-            <div class="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full mx-auto"></div>
+            <div class="animate-spin w-8 h-8 border-2 border-muted-foreground/50 border-t-muted-foreground rounded-full mx-auto"></div>
           </div>
         {:else}
-          <div class="divide-y divide-gray-100">
+          <div class="divide-y divide-border">
             {#each locations as location (location.id)}
               <div class="px-4 py-3 flex items-center justify-between text-sm">
                 <div class="flex items-center gap-3">
-                  <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400">
+                  <div class="w-8 h-8 bg-muted rounded-lg flex items-center justify-center text-muted-foreground">
                     <MapIcon class="w-4 h-4" />
                   </div>
                   <div>
-                    <span class="text-gray-900">
+                    <span class="text-foreground">
                       {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
                     </span>
                     {#if location.country_code}
-                      <span class="text-gray-400 ml-2">({location.country_code})</span>
+                      <span class="text-muted-foreground ml-2">({location.country_code})</span>
                     {/if}
                   </div>
                 </div>
-                <span class="text-gray-400 font-mono text-xs">{location.id}</span>
+                <span class="text-muted-foreground font-mono text-xs">{location.id}</span>
               </div>
             {/each}
           </div>
 
           <!-- Pagination -->
           {#if totalPages > 1}
-            <div class="p-4 border-t border-gray-100 flex items-center justify-between">
+            <div class="p-4 border-t border-border flex items-center justify-between">
               <button
                 onclick={() => (currentPage = Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
-                class="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600
-                       hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                class="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-muted-foreground
+                       hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ChevronLeftIcon class="w-4 h-4" />
                 Previous
               </button>
-              <span class="text-sm text-gray-500">
+              <span class="text-sm text-muted-foreground">
                 Page {currentPage} of {totalPages}
               </span>
               <button
                 onclick={() => (currentPage = Math.min(totalPages, currentPage + 1))}
                 disabled={currentPage === totalPages}
-                class="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600
-                       hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                class="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-muted-foreground
+                       hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Next
                 <ChevronRightIcon class="w-4 h-4" />
@@ -373,13 +385,13 @@
         {/if}
       </div>
     {:else}
-      <div class="bg-white rounded-xl shadow p-8 text-center">
-        <MapIcon class="w-12 h-12 mx-auto text-gray-300 mb-3" />
-        <p class="text-gray-500">This map has no locations yet</p>
+      <div class="bg-card rounded-xl shadow p-8 text-center">
+        <MapIcon class="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
+        <p class="text-muted-foreground">This map has no locations yet</p>
         {#if map.is_owned}
           <a
             href="/maps/{map.id}/edit"
-            class="inline-flex items-center gap-2 mt-4 text-blue-600 hover:text-blue-700"
+            class="inline-flex items-center gap-2 mt-4 text-primary hover:text-primary/80"
           >
             <EditIcon class="w-4 h-4" />
             Add locations

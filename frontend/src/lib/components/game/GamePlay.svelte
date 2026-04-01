@@ -4,7 +4,9 @@
   import { gameStore } from '$lib/socket/game';
   import { gamesApi } from '$lib/api/games';
   import { user } from '$lib/stores/auth';
-  import { Send, CheckCircle, Loader2 } from '@lucide/svelte';
+  import Send from '@lucide/svelte/icons/send';
+  import CheckCircle from '@lucide/svelte/icons/check-circle';
+  import Loader2 from '@lucide/svelte/icons/loader-2';
 
   import StreetView from './StreetView.svelte';
   import LeafletMap from './LeafletMap.svelte';

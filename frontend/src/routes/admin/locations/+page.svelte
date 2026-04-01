@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { adminApi, type ReviewQueueResponse } from '$lib/api/admin';
   import { toast } from 'svelte-sonner';
   import * as Table from '$lib/components/ui/table';
@@ -60,11 +59,7 @@
     window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
   }
 
-  onMount(() => {
-    loadData();
-  });
-
-  // Reload when page or filter changes
+  // Load on mount and reload when page or filter changes
   $effect(() => {
     page;
     statusFilter;

@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, API_BASE } from './client';
 
 /**
  * User role for access control
@@ -43,15 +43,13 @@ export const authApi = {
 
   /** Get Google OAuth URL */
   getGoogleAuthUrl(redirectTo?: string): string {
-    const base = import.meta.env.VITE_API_URL || 'http://localhost:3001';
     const params = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : '';
-    return `${base}/api/v1/auth/google${params}`;
+    return `${API_BASE}/api/v1/auth/google${params}`;
   },
 
   /** Get Microsoft OAuth URL */
   getMicrosoftAuthUrl(redirectTo?: string): string {
-    const base = import.meta.env.VITE_API_URL || 'http://localhost:3001';
     const params = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : '';
-    return `${base}/api/v1/auth/microsoft${params}`;
+    return `${API_BASE}/api/v1/auth/microsoft${params}`;
   },
 };

@@ -1,22 +1,6 @@
 import { serverApi } from '$lib/server/api';
+import type { LeaderboardResponse } from '$lib/api/leaderboard';
 import type { PageServerLoad } from './$types';
-
-interface LeaderboardEntry {
-  user_id: string;
-  display_name: string;
-  avatar_url: string | null;
-  rank: number;
-  score: number;
-  games_played: number;
-  is_current_user: boolean;
-}
-
-interface LeaderboardResponse {
-  entries: LeaderboardEntry[];
-  total_players: number;
-  current_user_rank: number | null;
-  current_user_score: number | null;
-}
 
 export const load: PageServerLoad = async ({ request }) => {
   try {

@@ -137,7 +137,7 @@
               size="icon"
               onclick={copyCode}
               class="shrink-0"
-              disabled={game.status === 'waiting'}
+              disabled={game.status === 'lobby'}
             >
               {#if copied}
                 <CheckIcon class="size-4 text-green-500" />

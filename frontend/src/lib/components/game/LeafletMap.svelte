@@ -3,7 +3,7 @@
   import { browser } from '$app/environment';
   import type L from 'leaflet';
   import { MAP_TILES, MAP_DEFAULTS, MARKER_CONFIG } from '$lib/config/map';
-  import { createMapPinIcon, MAP_PIN_STYLES } from '$lib/components/map';
+  import { createMapPinIcon } from '$lib/components/map';
 
   interface Props {
     guessLat?: number | null;
@@ -174,65 +174,4 @@
   class:cursor-not-allowed={disabled}
 ></div>
 
-<style>
-  /* Map pin styles */
-  :global(.map-pin-icon) {
-    background: transparent !important;
-    border: none !important;
-  }
-
-  @keyframes map-pin-pulse {
-    0% {
-      transform: translateX(-50%) scale(0.8);
-      opacity: 0.6;
-    }
-    100% {
-      transform: translateX(-50%) scale(2);
-      opacity: 0;
-    }
-  }
-
-  @keyframes map-pin-bounce {
-    0% {
-      transform: translateY(-8px);
-      opacity: 0;
-    }
-    60% {
-      transform: translateY(2px);
-    }
-    100% {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  }
-
-  /* Zoom control styles */
-  :global(.leaflet-control-zoom) {
-    border: none !important;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15) !important;
-  }
-
-  :global(.leaflet-control-zoom a) {
-    background: rgba(255, 255, 255, 0.95) !important;
-    backdrop-filter: blur(8px);
-    color: #374151 !important;
-    border: none !important;
-    width: 32px !important;
-    height: 32px !important;
-    line-height: 32px !important;
-    font-size: 16px !important;
-  }
-
-  :global(.leaflet-control-zoom a:hover) {
-    background: rgba(255, 255, 255, 1) !important;
-    color: #111827 !important;
-  }
-
-  :global(.leaflet-control-zoom-in) {
-    border-radius: 8px 8px 0 0 !important;
-  }
-
-  :global(.leaflet-control-zoom-out) {
-    border-radius: 0 0 8px 8px !important;
-  }
-</style>
+<!-- Leaflet map styles are in app.css -->

@@ -1,20 +1,8 @@
-import { serverApi, ServerApiError } from '$lib/server/api';
 import { error } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types';
 
-interface MapDetails {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  visibility: 'private' | 'unlisted' | 'public';
-  is_system_map: boolean;
-  is_owned: boolean;
-  is_default: boolean;
-  location_count: number;
-  created_at: string;
-  updated_at: string;
-}
+import { serverApi, ServerApiError } from '$lib/server/api';
+import type { MapDetails } from '$lib/api/maps';
+import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, request }) => {
   try {

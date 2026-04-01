@@ -71,7 +71,7 @@ export interface PlayerInfo {
 /** Full game state payload (sent on join/reconnect) */
 export interface GameStatePayload {
   game_id: string;
-  status: string;
+  status: 'lobby' | 'active' | 'finished';
   current_round: number;
   total_rounds: number;
   settings: GameSettings;

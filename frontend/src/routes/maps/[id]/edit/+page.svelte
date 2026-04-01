@@ -270,19 +270,19 @@
   <!-- Back link -->
   <a
     href="/maps/{mapId}"
-    class="inline-flex items-center gap-1 text-gray-500 hover:text-gray-700 mb-6"
+    class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground mb-6"
   >
     <ChevronLeftIcon class="w-4 h-4" />
     Back to Map
   </a>
 
   {#if loading}
-    <div class="bg-white rounded-xl shadow p-8 animate-pulse">
-      <div class="w-48 h-8 bg-gray-200 rounded mb-6"></div>
+    <div class="bg-card rounded-xl shadow p-8 animate-pulse">
+      <div class="w-48 h-8 bg-border rounded mb-6"></div>
       <div class="space-y-4">
-        <div class="w-full h-10 bg-gray-200 rounded"></div>
-        <div class="w-full h-20 bg-gray-200 rounded"></div>
-        <div class="w-full h-10 bg-gray-200 rounded"></div>
+        <div class="w-full h-10 bg-border rounded"></div>
+        <div class="w-full h-20 bg-border rounded"></div>
+        <div class="w-full h-10 bg-border rounded"></div>
       </div>
     </div>
   {:else if error}
@@ -294,15 +294,15 @@
     <div class="space-y-6">
       <!-- Header -->
       <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-gray-900">Edit Map</h1>
+        <h1 class="text-2xl font-bold text-foreground">Edit Map</h1>
         <Button onclick={() => goto(`/maps/${mapId}`)} variant="outline">
           View Map
         </Button>
       </div>
 
       <!-- Map details form -->
-      <div class="bg-white rounded-xl shadow p-6">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Map Details</h2>
+      <div class="bg-card rounded-xl shadow p-6">
+        <h2 class="text-lg font-semibold text-foreground mb-4">Map Details</h2>
 
         <div class="space-y-4">
           <!-- Name -->
@@ -326,8 +326,8 @@
               id="description"
               bind:value={description}
               rows="2"
-              class="mt-1.5 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
-                     focus:outline-none focus:ring-2 focus:ring-gray-900"
+              class="mt-1.5 w-full px-3 py-2 border border-border rounded-lg text-sm
+                     focus:outline-none focus:ring-2 focus:ring-foreground"
             ></textarea>
           </div>
 
@@ -336,17 +336,17 @@
             <Label>Visibility</Label>
             <div class="mt-1.5 flex gap-2">
               {#each visibilityOptions as option}
+                {@const OptIcon = option.icon}
                 <button
                   type="button"
                   onclick={() => (visibility = option.value as MapVisibility)}
                   class="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all
                          {visibility === option.value
-                    ? 'border-gray-900 bg-gray-50'
-                    : 'border-gray-200 hover:border-gray-300'}"
+                    ? 'border-foreground bg-muted/50'
+                    : 'border-border hover:border-gray-300'}"
                 >
-                  <svelte:component
-                    this={option.icon}
-                    class="w-4 h-4 {visibility === option.value ? 'text-gray-900' : 'text-gray-400'}"
+                  <OptIcon
+                    class="w-4 h-4 {visibility === option.value ? 'text-foreground' : 'text-muted-foreground'}"
                   />
                   {option.label}
                 </button>
@@ -373,7 +373,7 @@
       <!-- Location builder -->
       <div class="grid gap-6 lg:grid-cols-2">
         <!-- Left: Search and add -->
-        <div class="bg-white rounded-xl shadow overflow-hidden">
+        <div class="bg-card rounded-xl shadow overflow-hidden">
           <Tabs.Root value="search" class="w-full">
             <Tabs.List class="w-full border-b">
               <Tabs.Trigger value="search" class="flex-1">
@@ -392,7 +392,7 @@
                 <select
                   id="country"
                   bind:value={selectedCountry}
-                  class="mt-1.5 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  class="mt-1.5 w-full px-3 py-2 border border-border rounded-lg text-sm"
                 >
                   <option value="">Select a country...</option>
                   {#each countries as country}
@@ -405,13 +405,13 @@
 
               {#if searching}
                 <div class="py-8 text-center">
-                  <div class="animate-spin w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full mx-auto"></div>
+                  <div class="animate-spin w-6 h-6 border-2 border-muted-foreground/50 border-t-muted-foreground rounded-full mx-auto"></div>
                 </div>
               {:else if searchResults.length > 0}
                 <div class="space-y-2 max-h-64 overflow-y-auto">
                   {#each searchResults as location (location.id)}
-                    <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 text-sm">
-                      <span class="text-gray-700">
+                    <div class="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 text-sm">
+                      <span class="text-foreground">
                         {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
                       </span>
                       <Button variant="ghost" size="icon-sm" onclick={() => addLocation(location)}>
@@ -421,9 +421,9 @@
                   {/each}
                 </div>
               {:else if selectedCountry}
-                <p class="text-gray-500 text-sm text-center py-8">No locations found</p>
+                <p class="text-muted-foreground text-sm text-center py-8">No locations found</p>
               {:else}
-                <p class="text-gray-500 text-sm text-center py-8">Select a country</p>
+                <p class="text-muted-foreground text-sm text-center py-8">Select a country</p>
               {/if}
             </Tabs.Content>
 
@@ -436,7 +436,7 @@
                     bind:value={urlInput}
                     placeholder="https://www.google.com/maps/@48.8584,2.2945,3a..."
                     rows="5"
-                    class="mt-1.5 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"
+                    class="mt-1.5 w-full px-3 py-2 border border-border rounded-lg text-sm font-mono"
                   ></textarea>
                 </div>
 
@@ -467,25 +467,25 @@
         </div>
 
         <!-- Right: Selected locations -->
-        <div class="bg-white rounded-xl shadow overflow-hidden">
-          <div class="p-4 border-b border-gray-100">
-            <h3 class="font-semibold text-gray-900">
+        <div class="bg-card rounded-xl shadow overflow-hidden">
+          <div class="p-4 border-b border-border">
+            <h3 class="font-semibold text-foreground">
               Locations ({map.location_count.toLocaleString()})
             </h3>
           </div>
 
           {#if selectedLocations.length === 0}
             <div class="p-8 text-center">
-              <MapIcon class="w-10 h-10 mx-auto text-gray-300 mb-2" />
-              <p class="text-gray-500 text-sm">No locations yet</p>
+              <MapIcon class="w-10 h-10 mx-auto text-muted-foreground/50 mb-2" />
+              <p class="text-muted-foreground text-sm">No locations yet</p>
             </div>
           {:else}
-            <div class="divide-y divide-gray-100 max-h-80 overflow-y-auto">
+            <div class="divide-y divide-border max-h-80 overflow-y-auto">
               {#each selectedLocations as location (location.id)}
                 <div class="flex items-center justify-between px-4 py-2 text-sm">
                   <div>
-                    <span class="font-mono text-xs text-gray-400">{location.country_code || '??'}</span>
-                    <span class="ml-2 text-gray-700">
+                    <span class="font-mono text-xs text-muted-foreground">{location.country_code || '??'}</span>
+                    <span class="ml-2 text-foreground">
                       {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
                     </span>
                   </div>

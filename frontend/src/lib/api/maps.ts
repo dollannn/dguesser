@@ -152,55 +152,58 @@ export const mapsApi = {
   /**
    * List maps visible to the current user.
    */
-  list(): Promise<ListMapsResponse> {
+  async list(): Promise<ListMapsResponse> {
     return api.get<ListMapsResponse>('/maps');
   },
 
   /**
    * Get a map by ID.
    */
-  get(id: string): Promise<MapDetails> {
+  async get(id: string): Promise<MapDetails> {
     return api.get<MapDetails>(`/maps/${id}`);
   },
 
   /**
    * Create a new map.
    */
-  create(data: CreateMapRequest): Promise<CreateMapResponse> {
+  async create(data: CreateMapRequest): Promise<CreateMapResponse> {
     return api.post<CreateMapResponse>('/maps', data);
   },
 
   /**
    * Update a map.
    */
-  update(id: string, data: UpdateMapRequest): Promise<MapDetails> {
+  async update(id: string, data: UpdateMapRequest): Promise<MapDetails> {
     return api.put<MapDetails>(`/maps/${id}`, data);
   },
 
   /**
    * Delete a map.
    */
-  delete(id: string): Promise<void> {
+  async delete(id: string): Promise<void> {
     return api.delete<void>(`/maps/${id}`);
   },
 
   /**
    * Get locations in a map.
    */
-  getLocations(
+  async getLocations(
     mapId: string,
     page = 1,
     perPage = 50
   ): Promise<MapLocationsResponse> {
+    const params = new URLSearchParams();
+    params.set('page', page.toString());
+    params.set('per_page', perPage.toString());
     return api.get<MapLocationsResponse>(
-      `/maps/${mapId}/locations?page=${page}&per_page=${perPage}`
+      `/maps/${mapId}/locations?${params.toString()}`
     );
   },
 
   /**
    * Add locations to a map by IDs.
    */
-  addLocations(
+  async addLocations(
     mapId: string,
     locationIds: string[]
   ): Promise<AddLocationsResponse> {
@@ -212,7 +215,7 @@ export const mapsApi = {
   /**
    * Add locations from Street View URLs.
    */
-  addLocationsFromUrls(
+  async addLocationsFromUrls(
     mapId: string,
     urls: string[]
   ): Promise<AddLocationsFromUrlsResponse> {
@@ -225,7 +228,7 @@ export const mapsApi = {
   /**
    * Remove a location from a map.
    */
-  removeLocation(mapId: string, locationId: string): Promise<void> {
+  async removeLocation(mapId: string, locationId: string): Promise<void> {
     return api.delete<void>(`/maps/${mapId}/locations/${locationId}`);
   },
 };
@@ -238,7 +241,7 @@ export const locationsApi = {
   /**
    * Search locations with filters.
    */
-  search(filters: LocationSearchFilters = {}): Promise<SearchLocationsResponse> {
+  async search(filters: LocationSearchFilters = {}): Promise<SearchLocationsResponse> {
     const params = new URLSearchParams();
 
     if (filters.country_code) params.set('country_code', filters.country_code);
@@ -261,14 +264,14 @@ export const locationsApi = {
   /**
    * Get available countries for filtering.
    */
-  getCountries(): Promise<CountriesResponse> {
+  async getCountries(): Promise<CountriesResponse> {
     return api.get<CountriesResponse>('/locations/countries');
   },
 
   /**
    * Get available subdivisions for a country.
    */
-  getSubdivisions(countryCode: string): Promise<SubdivisionsResponse> {
+  async getSubdivisions(countryCode: string): Promise<SubdivisionsResponse> {
     return api.get<SubdivisionsResponse>(
       `/locations/countries/${countryCode}/subdivisions`
     );

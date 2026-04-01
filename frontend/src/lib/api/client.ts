@@ -1,6 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+/** Base URL for the backend API, configurable via VITE_API_URL env var */
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-interface ApiError {
+interface ApiErrorBody {
   code: string;
   message: string;
 }
@@ -18,11 +19,8 @@ class ApiClient {
     body?: unknown
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-    };
 
+    const headers: HeadersInit = {};
     const options: RequestInit = {
       method,
       headers,
@@ -30,22 +28,30 @@ class ApiClient {
     };
 
     if (body) {
+      headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(body);
     }
 
-    const response = await fetch(url, options);
+    let response: Response;
+    try {
+      response = await fetch(url, options);
+    } catch (err) {
+      // Wrap network errors (DNS failure, offline, CORS) in ApiClientError
+      const message = err instanceof Error ? err.message : 'Network request failed';
+      throw new ApiClientError(0, 'NETWORK_ERROR', message);
+    }
 
     if (!response.ok) {
-      const error: ApiError = await response.json().catch(() => ({
+      const error: ApiErrorBody = await response.json().catch(() => ({
         code: 'UNKNOWN',
-        message: 'An unknown error occurred',
+        message: response.statusText || 'An unknown error occurred',
       }));
       throw new ApiClientError(response.status, error.code, error.message);
     }
 
-    // Handle 204 No Content
+    // Handle 204 No Content — callers expecting void will get undefined
     if (response.status === 204) {
-      return undefined as T;
+      return undefined as unknown as T;
     }
 
     return response.json();

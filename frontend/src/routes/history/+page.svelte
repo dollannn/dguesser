@@ -75,7 +75,7 @@
       case 'challenge':
         return 'bg-amber-100 text-amber-700';
       default:
-        return 'bg-gray-100 text-gray-700';
+        return 'bg-muted text-foreground';
     }
   }
 
@@ -101,7 +101,7 @@
       case 'active':
         return 'bg-yellow-100 text-yellow-700';
       default:
-        return 'bg-gray-100 text-gray-700';
+        return 'bg-muted text-foreground';
     }
   }
 
@@ -124,15 +124,15 @@
 <div class="max-w-4xl mx-auto px-4 py-8">
   <!-- Header -->
   <div class="mb-8">
-    <h1 class="text-4xl font-bold text-gray-900 mb-2">Game History</h1>
-    <p class="text-gray-600">Review your past games and scores</p>
+    <h1 class="text-4xl font-bold text-foreground mb-2">Game History</h1>
+    <p class="text-muted-foreground">Review your past games and scores</p>
   </div>
 
   <!-- Not authenticated -->
   {#if !$user}
-    <div class="text-center py-16 bg-white rounded-xl shadow">
+    <div class="text-center py-16 bg-card rounded-xl shadow">
       <svg
-        class="w-16 h-16 mx-auto text-gray-300 mb-4"
+        class="w-16 h-16 mx-auto text-muted-foreground/50 mb-4"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
@@ -144,11 +144,11 @@
           d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
         />
       </svg>
-      <p class="text-lg text-gray-700 font-medium">Sign in to view your game history</p>
-      <p class="text-sm text-gray-500 mt-2">
+      <p class="text-lg text-foreground font-medium">Sign in to view your game history</p>
+      <p class="text-sm text-muted-foreground mt-2">
         Your game history is saved when you're logged in
       </p>
-      <a href="/auth" class="btn-primary mt-6 inline-block">Sign In</a>
+      <a href="/auth" class="mt-6 inline-block px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Sign In</a>
     </div>
   {:else}
     <!-- Mode filter -->
@@ -158,8 +158,8 @@
           onclick={() => (selectedMode = option.value)}
           class="px-4 py-2 rounded-lg text-sm font-medium transition-all {selectedMode ===
           option.value
-            ? 'bg-gray-900 text-white shadow-md'
-            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+            ? 'bg-foreground text-background shadow-md'
+            : 'bg-muted text-foreground hover:bg-muted/80'}"
         >
           {option.label}
         </button>
@@ -185,26 +185,26 @@
 
     <!-- Loading skeleton -->
     {#if loading}
-      <div class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="bg-card rounded-xl shadow overflow-hidden">
         <div class="animate-pulse">
-          <div class="h-12 bg-gray-100 border-b"></div>
+          <div class="h-12 bg-muted border-b"></div>
           {#each Array(5) as _}
-            <div class="flex items-center gap-4 px-6 py-4 border-b border-gray-100">
-              <div class="w-24 h-4 bg-gray-200 rounded"></div>
-              <div class="w-20 h-6 bg-gray-200 rounded-full"></div>
+            <div class="flex items-center gap-4 px-6 py-4 border-b border-border">
+              <div class="w-24 h-4 bg-muted rounded"></div>
+              <div class="w-20 h-6 bg-muted rounded-full"></div>
               <div class="flex-1"></div>
-              <div class="w-16 h-4 bg-gray-200 rounded"></div>
-              <div class="w-20 h-6 bg-gray-200 rounded-full"></div>
-              <div class="w-6 h-6 bg-gray-200 rounded"></div>
+              <div class="w-16 h-4 bg-muted rounded"></div>
+              <div class="w-20 h-6 bg-muted rounded-full"></div>
+              <div class="w-6 h-6 bg-muted rounded"></div>
             </div>
           {/each}
         </div>
       </div>
     {:else if filteredGames.length === 0}
       <!-- Empty state -->
-      <div class="text-center py-16 bg-white rounded-xl shadow">
+      <div class="text-center py-16 bg-card rounded-xl shadow">
         <svg
-          class="w-16 h-16 mx-auto text-gray-300 mb-4"
+          class="w-16 h-16 mx-auto text-muted-foreground/50 mb-4"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -217,58 +217,58 @@
           />
         </svg>
         {#if selectedMode === 'all'}
-          <p class="text-lg text-gray-700 font-medium">No games played yet</p>
-          <p class="text-sm text-gray-500 mt-2">Start playing to build your history!</p>
-          <a href="/play" class="btn-primary mt-6 inline-block">Play Now</a>
+          <p class="text-lg text-foreground font-medium">No games played yet</p>
+          <p class="text-sm text-muted-foreground mt-2">Start playing to build your history!</p>
+          <a href="/play" class="mt-6 inline-block px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Play Now</a>
         {:else}
-          <p class="text-lg text-gray-700 font-medium">
+          <p class="text-lg text-foreground font-medium">
             No {getModeLabel(selectedMode).toLowerCase()} games found
           </p>
-          <p class="text-sm text-gray-500 mt-2">Try a different filter or play more games</p>
-          <button onclick={() => (selectedMode = 'all')} class="btn-secondary mt-6">
+          <p class="text-sm text-muted-foreground mt-2">Try a different filter or play more games</p>
+          <button onclick={() => (selectedMode = 'all')} class="mt-6 px-4 py-2 rounded-md border border-border bg-background text-sm font-medium hover:bg-muted transition-colors">
             Show All Games
           </button>
         {/if}
       </div>
     {:else}
       <!-- Games table -->
-      <div class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="bg-card rounded-xl shadow overflow-hidden">
         <table class="w-full">
           <thead>
-            <tr class="bg-gray-50 border-b border-gray-200">
-              <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-gray-600">
+            <tr class="bg-muted/50 border-b border-border">
+              <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-muted-foreground">
                 Date
               </th>
-              <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-gray-600">
+              <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-muted-foreground">
                 Mode
               </th>
-              <th class="px-4 sm:px-6 py-4 text-right text-sm font-semibold text-gray-600">
+              <th class="px-4 sm:px-6 py-4 text-right text-sm font-semibold text-muted-foreground">
                 Score
               </th>
               <th
-                class="hidden sm:table-cell px-6 py-4 text-center text-sm font-semibold text-gray-600"
+                class="hidden sm:table-cell px-6 py-4 text-center text-sm font-semibold text-muted-foreground"
               >
                 Status
               </th>
-              <th class="px-4 sm:px-6 py-4 text-right text-sm font-semibold text-gray-600">
+              <th class="px-4 sm:px-6 py-4 text-right text-sm font-semibold text-muted-foreground">
                 <span class="sr-only">Actions</span>
               </th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-100">
+          <tbody class="divide-y divide-border">
             {#each filteredGames as game (game.id)}
               <tr
-                class="transition-colors hover:bg-gray-50 cursor-pointer"
+                class="transition-colors hover:bg-muted/50 cursor-pointer"
                 onclick={() => viewGame(game.id)}
                 onkeydown={(e) => e.key === 'Enter' && viewGame(game.id)}
                 tabindex="0"
                 role="button"
               >
                 <td class="px-4 sm:px-6 py-4">
-                  <div class="text-gray-900 font-medium">
+                  <div class="text-foreground font-medium">
                     {formatDate(game.played_at)}
                   </div>
-                  <div class="text-gray-500 text-sm">
+                  <div class="text-muted-foreground text-sm">
                     {formatTime(game.played_at)}
                   </div>
                 </td>
@@ -282,7 +282,7 @@
                   </span>
                 </td>
                 <td class="px-4 sm:px-6 py-4 text-right">
-                  <span class="font-bold text-gray-900 text-lg">
+                  <span class="font-bold text-foreground text-lg">
                     {formatScore(game.score)}
                   </span>
                 </td>
@@ -297,7 +297,7 @@
                 </td>
                 <td class="px-4 sm:px-6 py-4 text-right">
                   <svg
-                    class="w-5 h-5 text-gray-400 inline-block"
+                    class="w-5 h-5 text-muted-foreground inline-block"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -318,7 +318,7 @@
 
       <!-- Stats footer -->
       <div class="mt-6 text-center">
-        <p class="text-sm text-gray-500">
+        <p class="text-sm text-muted-foreground">
           Showing {filteredGames.length}
           {filteredGames.length === 1 ? 'game' : 'games'}
           {#if selectedMode !== 'all'}

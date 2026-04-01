@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { user, isGuest, authStore } from '$lib/stores/auth';
   import { authModalOpen } from '$lib/stores/authModal';
-  import { usersApi, sessionsApi, type SessionInfo } from '$lib/api';
+  import { usersApi, sessionsApi, ApiClientError, type SessionInfo } from '$lib/api';
   import { toast } from 'svelte-sonner';
   import { formatScore } from '$lib/utils';
   import { Button } from '$lib/components/ui/button';
@@ -108,13 +108,17 @@
         toast.success('Profile updated successfully');
       }
       isEditingProfile = false;
-    } catch (e: any) {
-      if (e.code === 'USERNAME_TAKEN') {
-        usernameError = 'This username is already taken';
-      } else if (e.code === 'RESERVED_USERNAME') {
-        usernameError = 'This username is reserved';
+    } catch (e: unknown) {
+      if (e instanceof ApiClientError) {
+        if (e.code === 'USERNAME_TAKEN') {
+          usernameError = 'This username is already taken';
+        } else if (e.code === 'RESERVED_USERNAME') {
+          usernameError = 'This username is reserved';
+        } else {
+          toast.error(e.message || 'Failed to update profile');
+        }
       } else {
-        toast.error(e.message || 'Failed to update profile');
+        toast.error('Failed to update profile');
       }
     } finally {
       isSavingProfile = false;
@@ -134,8 +138,9 @@
       await sessionsApi.revokeSession(sessionId);
       sessions = sessions.filter(s => s.id !== sessionId);
       toast.success('Session revoked');
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to revoke session');
+    } catch (e: unknown) {
+      const msg = e instanceof ApiClientError ? e.message : 'Failed to revoke session';
+      toast.error(msg);
     } finally {
       revokingSession = null;
     }
@@ -146,8 +151,9 @@
       const result = await sessionsApi.revokeOtherSessions();
       sessions = sessions.filter(s => s.is_current);
       toast.success(result.message);
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to revoke sessions');
+    } catch (e: unknown) {
+      const msg = e instanceof ApiClientError ? e.message : 'Failed to revoke sessions';
+      toast.error(msg);
     }
   }
 
@@ -158,8 +164,9 @@
       await authStore.logout();
       toast.success('Your account has been scheduled for deletion');
       goto('/');
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to delete account');
+    } catch (e: unknown) {
+      const msg = e instanceof ApiClientError ? e.message : 'Failed to delete account';
+      toast.error(msg);
     } finally {
       isDeleting = false;
       showDeleteDialog = false;
@@ -198,17 +205,17 @@
 
 {#if !$user}
   <div class="max-w-2xl mx-auto px-4 py-16 text-center">
-    <UserIcon class="w-16 h-16 mx-auto text-gray-300 mb-4" />
-    <h1 class="text-2xl font-bold text-gray-900 mb-2">Sign in to access your account</h1>
-    <p class="text-gray-600 mb-6">Create an account to track your progress and customize your profile.</p>
+    <UserIcon class="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
+    <h1 class="text-2xl font-bold text-foreground mb-2">Sign in to access your account</h1>
+    <p class="text-muted-foreground mb-6">Create an account to track your progress and customize your profile.</p>
     <Button onclick={() => authModalOpen.open()}>Sign In</Button>
   </div>
 {:else}
   <div class="max-w-4xl mx-auto px-4 py-8">
     <!-- Header -->
     <div class="mb-8">
-      <h1 class="text-4xl font-bold text-gray-900 mb-2">Account Settings</h1>
-      <p class="text-gray-600">Manage your profile, sessions, and account</p>
+      <h1 class="text-4xl font-bold text-foreground mb-2">Account Settings</h1>
+      <p class="text-muted-foreground">Manage your profile, sessions, and account</p>
     </div>
 
     <div class="space-y-6">

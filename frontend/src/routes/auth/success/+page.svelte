@@ -19,7 +19,7 @@
 
 <div class="flex items-center justify-center min-h-[60vh]">
   <div class="text-center">
-    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
-    <p class="text-gray-600">Completing sign in...</p>
+    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+    <p class="text-muted-foreground">Completing sign in...</p>
   </div>
 </div>

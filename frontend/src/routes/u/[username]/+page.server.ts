@@ -1,17 +1,8 @@
-import { serverApi, ServerApiError } from '$lib/server/api';
 import { error } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types';
 
-interface UserProfile {
-  id: string;
-  username: string;
-  display_name: string;
-  avatar_url: string | null;
-  is_guest: boolean;
-  games_played: number;
-  total_score: number;
-  best_score: number;
-}
+import { serverApi, ServerApiError } from '$lib/server/api';
+import type { UserProfile } from '$lib/api/users';
+import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, request }) => {
   try {

@@ -1,5 +1,9 @@
 import { io, Socket } from 'socket.io-client';
 import { writable, get, type Writable } from 'svelte/store';
+import { toastStore } from '$lib/stores/toast';
+
+// Re-export for backward compatibility
+export { toastStore, type Toast, type ToastType } from '$lib/stores/toast';
 
 const REALTIME_URL = import.meta.env.VITE_REALTIME_URL || 'http://localhost:3002';
 
@@ -33,45 +37,6 @@ export interface SocketState {
   /** Game phase - used to determine if auto-rejoin is allowed */
   activeGamePhase: GamePhase;
 }
-
-/** Toast notification types */
-export type ToastType = 'info' | 'success' | 'warning' | 'error';
-
-export interface Toast {
-  id: string;
-  type: ToastType;
-  message: string;
-  duration?: number;
-}
-
-/** Toast store for connection notifications */
-function createToastStore() {
-  const { subscribe, update } = writable<Toast[]>([]);
-
-  let toastId = 0;
-
-  return {
-    subscribe,
-    add(type: ToastType, message: string, duration = 4000): void {
-      const id = `toast-${++toastId}`;
-      update((toasts) => [...toasts, { id, type, message, duration }]);
-
-      if (duration > 0) {
-        setTimeout(() => {
-          update((toasts) => toasts.filter((t) => t.id !== id));
-        }, duration);
-      }
-    },
-    remove(id: string): void {
-      update((toasts) => toasts.filter((t) => t.id !== id));
-    },
-    clear(): void {
-      update(() => []);
-    },
-  };
-}
-
-export const toastStore = createToastStore();
 
 class SocketClient {
   private socket: Socket | null = null;

@@ -79,7 +79,7 @@
   });
   
   // Sort results by score (highest first) and assign ranks
-  let rankedResults = $derived(() => {
+  let rankedResults = $derived.by(() => {
     return results
       .toSorted((a, b) => b.score - a.score)
       .map((result, index) => ({
@@ -144,7 +144,7 @@
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {#each rankedResults() as result (result.user_id)}
+            {#each rankedResults as result (result.user_id)}
               {@const isTop3 = result.rank <= 3}
               <Table.Row 
                 class={result.isCurrentUser ? 'bg-primary/5' : ''}

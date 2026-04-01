@@ -17,7 +17,7 @@
   type FilterType = 'all' | 'mine' | 'public';
 
   // Initialize from server data
-  let maps = $state<MapSummary[]>(data.maps as MapSummary[]);
+  let maps = $state<MapSummary[]>(data.maps ?? []);
   let loading = $state(false);
   let error = $state(data.error || '');
   let filter = $state<FilterType>('all');
@@ -29,7 +29,7 @@
   ];
 
   // Filter maps based on selection
-  let filteredMaps = $derived(() => {
+  let filteredMaps = $derived.by(() => {
     switch (filter) {
       case 'mine':
         return maps.filter((m) => m.is_owned);
@@ -92,7 +92,7 @@
       case 'unlisted':
         return 'bg-yellow-100 text-yellow-700';
       default:
-        return 'bg-gray-100 text-gray-700';
+        return 'bg-muted text-foreground';
     }
   }
 
@@ -107,8 +107,8 @@
   <!-- Header -->
   <div class="flex items-center justify-between mb-8">
     <div>
-      <h1 class="text-4xl font-bold text-gray-900 mb-2">Maps</h1>
-      <p class="text-gray-600">Browse maps or create your own custom maps</p>
+      <h1 class="text-4xl font-bold text-foreground mb-2">Maps</h1>
+      <p class="text-muted-foreground">Browse maps or create your own custom maps</p>
     </div>
     {#if $user}
       <a
@@ -129,7 +129,7 @@
         onclick={() => (filter = option.value)}
         class="px-4 py-2 rounded-lg text-sm font-medium transition-all {filter === option.value
           ? 'bg-gray-900 text-white shadow-md'
-          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+          : 'bg-muted text-foreground hover:bg-gray-200'}"
       >
         {option.label}
       </button>
@@ -157,46 +157,46 @@
   {#if loading}
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {#each Array(6) as _}
-        <div class="bg-white rounded-xl shadow p-6 animate-pulse">
+        <div class="bg-card rounded-xl shadow p-6 animate-pulse">
           <div class="flex items-start justify-between mb-4">
-            <div class="w-10 h-10 bg-gray-200 rounded-lg"></div>
-            <div class="w-16 h-6 bg-gray-200 rounded-full"></div>
+            <div class="w-10 h-10 bg-border rounded-lg"></div>
+            <div class="w-16 h-6 bg-border rounded-full"></div>
           </div>
-          <div class="w-3/4 h-5 bg-gray-200 rounded mb-2"></div>
-          <div class="w-1/2 h-4 bg-gray-200 rounded mb-4"></div>
+          <div class="w-3/4 h-5 bg-border rounded mb-2"></div>
+          <div class="w-1/2 h-4 bg-border rounded mb-4"></div>
           <div class="flex items-center justify-between">
-            <div class="w-20 h-4 bg-gray-200 rounded"></div>
-            <div class="w-24 h-4 bg-gray-200 rounded"></div>
+            <div class="w-20 h-4 bg-border rounded"></div>
+            <div class="w-24 h-4 bg-border rounded"></div>
           </div>
         </div>
       {/each}
     </div>
-  {:else if filteredMaps().length === 0}
+  {:else if filteredMaps.length === 0}
     <!-- Empty state -->
-    <div class="text-center py-16 bg-white rounded-xl shadow">
-      <MapIcon class="w-16 h-16 mx-auto text-gray-300 mb-4" />
+    <div class="text-center py-16 bg-card rounded-xl shadow">
+      <MapIcon class="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
       {#if filter === 'mine'}
-        <p class="text-lg text-gray-700 font-medium">You haven't created any maps yet</p>
-        <p class="text-sm text-gray-500 mt-2">Create your first custom map to get started!</p>
+        <p class="text-lg text-foreground font-medium">You haven't created any maps yet</p>
+        <p class="text-sm text-muted-foreground mt-2">Create your first custom map to get started!</p>
         {#if $user}
-          <a href="/maps/new" class="btn-primary mt-6 inline-flex items-center gap-2">
+          <a href="/maps/new" class="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">
             <PlusIcon class="w-5 h-5" />
             Create Map
           </a>
         {/if}
       {:else}
-        <p class="text-lg text-gray-700 font-medium">No maps found</p>
-        <p class="text-sm text-gray-500 mt-2">Try a different filter</p>
-        <button onclick={() => (filter = 'all')} class="btn-secondary mt-6"> Show All Maps </button>
+        <p class="text-lg text-foreground font-medium">No maps found</p>
+        <p class="text-sm text-muted-foreground mt-2">Try a different filter</p>
+        <button onclick={() => (filter = 'all')} class="mt-6 px-4 py-2 rounded-md border border-border bg-background text-sm font-medium hover:bg-muted transition-colors"> Show All Maps </button>
       {/if}
     </div>
   {:else}
     <!-- Maps grid -->
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {#each filteredMaps() as map (map.id)}
+      {#each filteredMaps as map (map.id)}
         <a
           href="/maps/{map.id}"
-          class="bg-white rounded-xl shadow p-6 hover:shadow-lg transition-shadow group"
+          class="bg-card rounded-xl shadow p-6 hover:shadow-lg transition-shadow group"
         >
           <div class="flex items-start justify-between mb-4">
             <div
@@ -214,34 +214,40 @@
                 map.visibility
               )}"
             >
-              <svelte:component this={getVisibilityIcon(map.visibility)} class="w-3 h-3" />
+              {#if map.visibility === 'public'}
+                <GlobeIcon class="w-3 h-3" />
+              {:else if map.visibility === 'unlisted'}
+                <LinkIcon class="w-3 h-3" />
+              {:else}
+                <LockIcon class="w-3 h-3" />
+              {/if}
               {getVisibilityLabel(map.visibility)}
             </span>
           </div>
 
           <h3
-            class="text-lg font-semibold text-gray-900 mb-1 group-hover:text-blue-600 transition-colors"
+            class="text-lg font-semibold text-foreground mb-1 group-hover:text-primary transition-colors"
           >
             {map.name}
           </h3>
 
           {#if map.description}
-            <p class="text-sm text-gray-500 mb-4 line-clamp-2">{map.description}</p>
+            <p class="text-sm text-muted-foreground mb-4 line-clamp-2">{map.description}</p>
           {:else}
-            <p class="text-sm text-gray-400 mb-4 italic">No description</p>
+            <p class="text-sm text-muted-foreground mb-4 italic">No description</p>
           {/if}
 
           <div class="flex items-center justify-between text-sm">
-            <span class="text-gray-500">
+            <span class="text-muted-foreground">
               {map.location_count.toLocaleString()} locations
             </span>
-            <span class="text-gray-400">
+            <span class="text-muted-foreground">
               {formatDate(map.created_at)}
             </span>
           </div>
 
           {#if map.is_owned}
-            <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+            <div class="mt-4 pt-4 border-t border-border flex items-center justify-between">
               <span class="text-xs text-purple-600 font-medium flex items-center gap-1">
                 <UsersIcon class="w-3 h-3" />
                 Your Map
@@ -251,7 +257,7 @@
                   e.preventDefault();
                   goto(`/maps/${map.id}/edit`);
                 }}
-                class="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
               >
                 <EditIcon class="w-3 h-3" />
                 Edit
@@ -264,9 +270,9 @@
 
     <!-- Stats footer -->
     <div class="mt-6 text-center">
-      <p class="text-sm text-gray-500">
-        Showing {filteredMaps().length}
-        {filteredMaps().length === 1 ? 'map' : 'maps'}
+      <p class="text-sm text-muted-foreground">
+        Showing {filteredMaps.length}
+        {filteredMaps.length === 1 ? 'map' : 'maps'}
         {#if filter !== 'all'}
           ({maps.length} total)
         {/if}

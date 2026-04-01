@@ -1,21 +1,6 @@
 import { serverApi, ServerApiError } from '$lib/server/api';
+import type { ListMapsResponse } from '$lib/api/maps';
 import type { PageServerLoad } from './$types';
-
-interface MapSummary {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  visibility: 'private' | 'unlisted' | 'public';
-  is_system_map: boolean;
-  is_owned: boolean;
-  location_count: number;
-  created_at: string;
-}
-
-interface ListMapsResponse {
-  maps: MapSummary[];
-}
 
 export const load: PageServerLoad = async ({ request }) => {
   try {

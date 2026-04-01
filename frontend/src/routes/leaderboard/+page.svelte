@@ -18,7 +18,7 @@
   let { data }: { data: PageData } = $props();
 
   // Initialize from server data
-  let entries = $state<LeaderboardEntry[]>(data.initialEntries as LeaderboardEntry[]);
+  let entries = $state<LeaderboardEntry[]>(data.initialEntries ?? []);
   let loading = $state(false);
   let loadingMore = $state(false);
   let error = $state('');
@@ -138,8 +138,8 @@
 <div class="max-w-4xl mx-auto px-4 py-8">
   <!-- Header -->
   <div class="mb-8">
-    <h1 class="text-4xl font-bold text-gray-900 mb-2">Leaderboard</h1>
-    <p class="text-gray-600">See how you stack up against other players</p>
+    <h1 class="text-4xl font-bold text-foreground mb-2">Leaderboard</h1>
+    <p class="text-muted-foreground">See how you stack up against other players</p>
   </div>
 
   <!-- Filters -->
@@ -150,8 +150,8 @@
         <button
           onclick={() => (selectedType = option.value)}
           class="px-3 py-2 rounded-lg text-sm font-medium transition-all {selectedType === option.value
-            ? 'bg-gray-900 text-white shadow-md'
-            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+            ? 'bg-foreground text-background shadow-md'
+            : 'bg-muted text-foreground hover:bg-muted/80'}"
         >
           {option.label}
         </button>
@@ -164,8 +164,8 @@
         <button
           onclick={() => (selectedPeriod = option.value)}
           class="px-3 py-2 rounded-lg text-sm font-medium transition-all {selectedPeriod === option.value
-            ? 'bg-gray-900 text-white shadow-md'
-            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+            ? 'bg-foreground text-background shadow-md'
+            : 'bg-muted text-foreground hover:bg-muted/80'}"
         >
           {option.label}
         </button>
@@ -207,53 +207,53 @@
 
   <!-- Loading skeleton (initial load or loading with no data) -->
   {#if showSkeleton || (loading && entries.length === 0)}
-    <div class="bg-white rounded-xl shadow overflow-hidden">
+    <div class="bg-card rounded-xl shadow overflow-hidden">
       <div class="animate-pulse">
-        <div class="h-12 bg-gray-100 border-b"></div>
+        <div class="h-12 bg-muted border-b"></div>
         {#each Array(10) as _}
-          <div class="flex items-center gap-4 px-6 py-4 border-b border-gray-100">
-            <div class="w-12 h-6 bg-gray-200 rounded"></div>
-            <div class="w-10 h-10 bg-gray-200 rounded-full"></div>
-            <div class="flex-1 h-4 bg-gray-200 rounded w-32"></div>
-            <div class="w-20 h-4 bg-gray-200 rounded"></div>
-            <div class="w-12 h-4 bg-gray-200 rounded"></div>
+          <div class="flex items-center gap-4 px-6 py-4 border-b border-border">
+            <div class="w-12 h-6 bg-muted rounded"></div>
+            <div class="w-10 h-10 bg-muted rounded-full"></div>
+            <div class="flex-1 h-4 bg-muted rounded w-32"></div>
+            <div class="w-20 h-4 bg-muted rounded"></div>
+            <div class="w-12 h-4 bg-muted rounded"></div>
           </div>
         {/each}
       </div>
     </div>
   {:else if entries.length === 0}
-    <div class="text-center py-16 bg-white rounded-xl shadow">
-      <svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="text-center py-16 bg-card rounded-xl shadow">
+      <svg class="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
       </svg>
-      <p class="text-lg text-gray-700 font-medium">No players on the leaderboard yet</p>
-      <p class="text-sm text-gray-500 mt-2">Be the first to play and claim your spot!</p>
-      <a href="/play" class="btn-primary mt-6 inline-block">Start Playing</a>
+      <p class="text-lg text-foreground font-medium">No players on the leaderboard yet</p>
+      <p class="text-sm text-muted-foreground mt-2">Be the first to play and claim your spot!</p>
+      <a href="/play" class="mt-6 inline-block px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Start Playing</a>
     </div>
   {:else}
     <!-- Leaderboard table -->
-    <div class="bg-white rounded-xl shadow overflow-hidden {loading ? 'opacity-60' : ''}">
+    <div class="bg-card rounded-xl shadow overflow-hidden {loading ? 'opacity-60' : ''}">
       <table class="w-full">
         <thead>
-          <tr class="bg-gray-50 border-b border-gray-200">
-            <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-gray-600 w-20">
+          <tr class="bg-muted/50 border-b border-border">
+            <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-muted-foreground w-20">
               Rank
             </th>
-            <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-gray-600">
+            <th class="px-4 sm:px-6 py-4 text-left text-sm font-semibold text-muted-foreground">
               Player
             </th>
-            <th class="px-4 sm:px-6 py-4 text-right text-sm font-semibold text-gray-600">
+            <th class="px-4 sm:px-6 py-4 text-right text-sm font-semibold text-muted-foreground">
               {getScoreLabel(selectedType)}
             </th>
-            <th class="hidden sm:table-cell px-6 py-4 text-right text-sm font-semibold text-gray-600">
+            <th class="hidden sm:table-cell px-6 py-4 text-right text-sm font-semibold text-muted-foreground">
               Games
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody class="divide-y divide-border">
           {#each entries as entry (entry.user_id + entry.rank)}
             <tr
-              class="transition-colors hover:bg-gray-50 {getRankRowClass(entry.rank, entry.is_current_user)}"
+              class="transition-colors hover:bg-muted/50 {getRankRowClass(entry.rank, entry.is_current_user)}"
             >
               <td class="px-4 sm:px-6 py-4">
                 <span class="text-lg font-semibold {getRankClass(entry.rank)}">
@@ -266,13 +266,13 @@
                     <img
                       src={entry.avatar_url}
                       alt=""
-                      class="w-10 h-10 rounded-full ring-2 ring-white shadow"
+                      class="w-10 h-10 rounded-full ring-2 ring-background shadow"
                     />
                   {:else}
                     <div
-                      class="w-10 h-10 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center ring-2 ring-white shadow"
+                      class="w-10 h-10 rounded-full bg-gradient-to-br from-muted to-muted-foreground/30 flex items-center justify-center ring-2 ring-background shadow"
                     >
-                      <span class="text-gray-600 text-sm font-bold">
+                      <span class="text-muted-foreground text-sm font-bold">
                         {entry.display_name.charAt(0).toUpperCase()}
                       </span>
                     </div>
@@ -281,7 +281,7 @@
                     <span
                       class="font-medium {entry.is_current_user
                         ? 'text-primary-700'
-                        : 'text-gray-900'}"
+                        : 'text-foreground'}"
                     >
                       {entry.display_name}
                     </span>
@@ -291,18 +291,18 @@
                       </span>
                     {/if}
                     <!-- Show games on mobile under the name -->
-                    <div class="sm:hidden text-xs text-gray-500 mt-0.5">
+                    <div class="sm:hidden text-xs text-muted-foreground mt-0.5">
                       {entry.games_played} games
                     </div>
                   </div>
                 </div>
               </td>
               <td class="px-4 sm:px-6 py-4 text-right">
-                <span class="font-bold text-gray-900 text-lg">
+                <span class="font-bold text-foreground text-lg">
                   {formatDisplayScore(entry.score, selectedType)}
                 </span>
               </td>
-              <td class="hidden sm:table-cell px-6 py-4 text-right text-gray-600">
+              <td class="hidden sm:table-cell px-6 py-4 text-right text-muted-foreground">
                 {entry.games_played}
               </td>
             </tr>
@@ -317,7 +317,7 @@
         <button
           onclick={loadMore}
           disabled={loadingMore}
-          class="btn-secondary px-6 py-2.5 {loadingMore ? 'opacity-50 cursor-not-allowed' : ''}"
+          class="px-6 py-2.5 rounded-md border border-border bg-background text-sm font-medium hover:bg-muted transition-colors {loadingMore ? 'opacity-50 cursor-not-allowed' : ''}"
         >
           {#if loadingMore}
             <svg class="inline-block w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -331,7 +331,7 @@
         </button>
       {/if}
       
-      <p class="text-sm text-gray-500">
+      <p class="text-sm text-muted-foreground">
         Showing {entries.length} of {totalPlayers.toLocaleString()} players
       </p>
     </div>

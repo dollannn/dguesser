@@ -133,3 +133,90 @@
 .street-view-container .gm-style-cc {
   display: none !important;
 }
+
+/* =============================================================================
+ * Shared Leaflet Map Styles
+ * Used by LeafletMap.svelte and ResultsMap.svelte
+ * ============================================================================= */
+
+/* Map pin icon base */
+.map-pin-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+@keyframes map-pin-pulse {
+  0% {
+    transform: translateX(-50%) scale(0.8);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateX(-50%) scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes map-pin-bounce {
+  0% {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+  60% {
+    transform: translateY(2px);
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Leaflet zoom controls */
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.leaflet-control-zoom a {
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(8px);
+  color: hsl(var(--foreground)) !important;
+  border: none !important;
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  font-size: 16px !important;
+  transition: background 0.15s ease;
+}
+
+.leaflet-control-zoom a:hover {
+  background: rgba(255, 255, 255, 1) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.leaflet-control-zoom-in {
+  border-radius: 8px 8px 0 0 !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+.leaflet-control-zoom-out {
+  border-radius: 0 0 8px 8px !important;
+}
+
+/* Results map tooltip */
+.results-tooltip {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.results-tooltip::before {
+  border-top-color: rgba(255, 255, 255, 0.95) !important;
+}

@@ -3,6 +3,8 @@ export { api, ApiClientError } from './client';
 export { authApi, type User } from './auth';
 export {
   gamesApi,
+  type GameMode,
+  type GameStatus,
   type GameSettings,
   type CreateGameRequest,
   type CreateGameResponse,

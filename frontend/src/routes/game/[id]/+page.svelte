@@ -1,11 +1,10 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
-  import { goto } from '$app/navigation';
-import { gamesApi, type GameDetails } from '$lib/api/games';
-import { gameStore } from '$lib/socket/game';
-import { authStore, user } from '$lib/stores/auth';
-
+  import { gamesApi, type GameDetails } from '$lib/api/games';
+  import { gameStore } from '$lib/socket/game';
+  import { authStore, user } from '$lib/stores/auth';
   import GameLoading from '$lib/components/game/GameLoading.svelte';
   import GameLobby from '$lib/components/game/GameLobby.svelte';
   import GamePlay from '$lib/components/game/GamePlay.svelte';
@@ -179,7 +178,7 @@ import { authStore, user } from '$lib/stores/auth';
   <div class="max-w-lg mx-auto mt-12 p-6 bg-red-50 rounded-xl text-center">
     <h2 class="text-xl font-semibold text-red-700 mb-2">Error</h2>
     <p class="text-red-600 mb-4">{error}</p>
-    <a href="/" class="btn-primary">Back to Home</a>
+    <a href="/" class="inline-block px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Back to Home</a>
   </div>
 {:else if game}
   {#if gameState.status === 'idle' || gameState.status === 'lobby'}
