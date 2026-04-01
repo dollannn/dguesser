@@ -254,6 +254,108 @@ pub async fn handle_guess<A: Adapter>(
     }
 }
 
+/// Payload for updating game settings
+#[derive(Debug, Deserialize)]
+pub struct UpdateSettingsPayload {
+    /// Game ID (prefixed nanoid: gam_xxxxxxxxxxxx)
+    pub game_id: String,
+    pub rounds: Option<u8>,
+    pub time_limit_seconds: Option<u32>,
+    pub map_id: Option<String>,
+    pub movement_allowed: Option<bool>,
+    pub zoom_allowed: Option<bool>,
+    pub rotation_allowed: Option<bool>,
+}
+
+/// Handle settings update from the host (lobby only)
+pub async fn handle_update_settings<A: Adapter>(
+    socket: SocketRef<A>,
+    State(state): State<AppState>,
+    Data(payload): Data<UpdateSettingsPayload>,
+) {
+    let socket_id = socket.id.to_string();
+
+    let user_id = match state.get_user_for_socket(&socket_id).await {
+        Some(id) => id,
+        None => {
+            emit_error(&socket, "NOT_AUTHENTICATED", "Please authenticate first");
+            return;
+        }
+    };
+
+    // Rate limit by user
+    if !check_user_rate_limit(&state, &SocketRateLimitConfig::UPDATE_SETTINGS, &user_id, &socket)
+        .await
+    {
+        return;
+    }
+
+    let handle = match state.get_game(&payload.game_id).await {
+        Some(h) => h,
+        None => {
+            emit_error(&socket, "GAME_NOT_FOUND", "Game not active");
+            return;
+        }
+    };
+
+    // Load current settings from DB to merge partial update
+    let current_settings =
+        match dguesser_db::games::get_game_by_id(state.db(), &payload.game_id).await {
+            Ok(Some(game)) => {
+                serde_json::from_value::<dguesser_core::game::GameSettings>(game.settings)
+                    .unwrap_or_default()
+            }
+            Ok(None) => {
+                emit_error(&socket, "GAME_NOT_FOUND", "Game not found");
+                return;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Database error loading game settings");
+                emit_error(&socket, "INTERNAL_ERROR", "An internal error occurred");
+                return;
+            }
+        };
+
+    // Merge partial update with current settings
+    let merged = dguesser_core::game::GameSettings {
+        rounds: payload.rounds.unwrap_or(current_settings.rounds),
+        time_limit_seconds: payload
+            .time_limit_seconds
+            .unwrap_or(current_settings.time_limit_seconds),
+        map_id: payload.map_id.unwrap_or_else(|| current_settings.map_id.clone()),
+        movement_allowed: payload.movement_allowed.unwrap_or(current_settings.movement_allowed),
+        zoom_allowed: payload.zoom_allowed.unwrap_or(current_settings.zoom_allowed),
+        rotation_allowed: payload.rotation_allowed.unwrap_or(current_settings.rotation_allowed),
+    };
+
+    let (tx, rx) = oneshot::channel();
+    if handle
+        .tx
+        .send(GameCommand::UpdateSettings {
+            user_id: user_id.clone(),
+            settings: merged,
+            respond: tx,
+        })
+        .await
+        .is_err()
+    {
+        emit_error(&socket, "GAME_ERROR", "Failed to update settings");
+        return;
+    }
+
+    match rx.await {
+        Ok(Ok(())) => {
+            tracing::info!("Settings updated for game {} by user {}", payload.game_id, user_id);
+        }
+        Ok(Err(err)) => {
+            emit_error(&socket, "SETTINGS_FAILED", &err);
+        }
+        Err(_) => {
+            emit_error(&socket, "GAME_ERROR", "Game actor unavailable");
+        }
+    }
+}
+
 /// Handle player ready state
 pub async fn handle_ready<A: Adapter>(
     socket: SocketRef<A>,

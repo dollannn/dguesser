@@ -29,6 +29,7 @@ pub async fn on_connect<A: Adapter>(socket: SocketRef<A>, State(state): State<Ap
     socket.on("game:join", game::handle_join::<A>);
     socket.on("game:leave", game::handle_leave::<A>);
     socket.on("game:start", game::handle_start::<A>);
+    socket.on("game:update_settings", game::handle_update_settings::<A>);
     socket.on("guess:submit", game::handle_guess::<A>);
     socket.on("player:ready", game::handle_ready::<A>);
 

@@ -47,6 +47,10 @@ impl SocketRateLimitConfig {
 
     /// Player ready: 10 requests per minute per user
     pub const READY: Self = Self { event: "player:ready", max_requests: 10, window_secs: 60 };
+
+    /// Settings update: 30 requests per minute per user (debounced on frontend)
+    pub const UPDATE_SETTINGS: Self =
+        Self { event: "game:update_settings", max_requests: 30, window_secs: 60 };
 }
 
 /// Result of a rate limit check

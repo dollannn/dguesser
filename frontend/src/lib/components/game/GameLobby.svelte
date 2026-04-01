@@ -80,17 +80,23 @@
   // Handle settings changes from the form
   let isUpdatingSettings = $state(false);
   async function handleSettingsChange(changes: Partial<GameSettings>) {
-    if (isUpdatingSettings || !isHost) return;
-    
-    isUpdatingSettings = true;
-    try {
-      await gamesApi.updateSettings(game.id, changes);
-      // Socket will broadcast the update to all players
-    } catch (error) {
-      console.error('Failed to update settings:', error);
-      toast.error('Failed to update settings');
-    } finally {
-      isUpdatingSettings = false;
+    if (!isHost) return;
+
+    if (game.mode === 'multiplayer') {
+      // Multiplayer: send via socket so the game actor's in-memory state stays in sync
+      gameStore.updateSettings(changes);
+    } else {
+      // Solo: no socket room, use REST API (backend reloads from DB on start)
+      if (isUpdatingSettings) return;
+      isUpdatingSettings = true;
+      try {
+        await gamesApi.updateSettings(game.id, changes);
+      } catch (error) {
+        console.error('Failed to update settings:', error);
+        toast.error('Failed to update settings');
+      } finally {
+        isUpdatingSettings = false;
+      }
     }
   }
 </script>

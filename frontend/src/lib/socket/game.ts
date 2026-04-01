@@ -220,6 +220,17 @@ function createGameStore() {
       }
     },
 
+    /** Update game settings via socket (multiplayer) */
+    updateSettings(settings: Partial<GameSettings>): void {
+      const currentState = get({ subscribe });
+      if (currentState.gameId) {
+        socketClient.emit('game:update_settings', {
+          game_id: currentState.gameId,
+          ...settings,
+        });
+      }
+    },
+
     submitGuess(lat: number, lng: number, timeTakenMs?: number): void {
       update((s) => {
         if (s.gameId && !s.hasGuessed) {
