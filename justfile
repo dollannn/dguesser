@@ -57,7 +57,7 @@ dev:
     echo "[dguesser] logs      .logs/web.log"
     tmux attach -t "$SESSION"
 
-# Kill the tmux dev session
+# Kill the tmux dev session and stop infrastructure
 kill:
     #!/usr/bin/env bash
     if tmux has-session -t dguesser 2>/dev/null; then
@@ -66,6 +66,8 @@ kill:
     else
         echo "No session running."
     fi
+    docker compose down
+    echo "Stopped infrastructure containers."
 
 # Restart a specific service window (api, realtime, web)
 restart service:
