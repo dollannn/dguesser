@@ -20,6 +20,9 @@ dist/
 # SQLx offline mode cache is tracked for CI/CD builds
 # Run `cargo sqlx prepare --workspace` to regenerate
 
+# Dev logs
+.logs/
+
 # macOS
 .DS_Store
 
