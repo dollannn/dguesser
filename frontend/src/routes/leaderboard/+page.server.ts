@@ -13,7 +13,8 @@ export const load: PageServerLoad = async ({ request }) => {
       initialEntries: response.entries,
       totalPlayers: response.total_players,
       currentUserRank: response.current_user_rank,
-      currentUserScore: response.current_user_score
+      currentUserScore: response.current_user_score,
+      ssrError: false
     };
   } catch (e) {
     console.error('Failed to load leaderboard:', e);
@@ -21,7 +22,8 @@ export const load: PageServerLoad = async ({ request }) => {
       initialEntries: [],
       totalPlayers: 0,
       currentUserRank: null,
-      currentUserScore: null
+      currentUserScore: null,
+      ssrError: true
     };
   }
 };

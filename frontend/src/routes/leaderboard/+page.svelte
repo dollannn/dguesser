@@ -53,7 +53,6 @@
     } else {
       loading = true;
       offset = 0;
-      // Don't clear entries here - keep showing old data until new data arrives
     }
     error = '';
 
@@ -107,24 +106,28 @@
     return formatScore(score);
   }
 
-  // Show skeleton only on initial load, not on filter changes
-  let hasLoadedOnce = $state(true); // Already loaded via SSR
+  // Track whether SSR provided real data
+  let hasLoadedOnce = $state(!data.ssrError && (data.initialEntries?.length ?? 0) > 0);
   let showSkeleton = $derived(loading && !hasLoadedOnce);
 
-  // Track previous filter values to detect changes
-  let prevType = selectedType;
-  let prevPeriod = selectedPeriod;
-
-  // Load on filter change (skip initial since we have SSR data)
+  // Fallback: if SSR failed or returned no data, fetch client-side on mount
   $effect(() => {
-    // Track dependencies
+    if (data.ssrError) {
+      loadLeaderboard();
+    }
+  });
+
+  // Track filter state for change detection using an object
+  // that gets compared by value inside the effect
+  let lastFilter = $state({ type: selectedType, period: selectedPeriod });
+
+  // Reload when filters change (skip initial since we handle that above)
+  $effect(() => {
     const currentType = selectedType;
     const currentPeriod = selectedPeriod;
 
-    // Only reload if filters changed
-    if (currentType !== prevType || currentPeriod !== prevPeriod) {
-      prevType = currentType;
-      prevPeriod = currentPeriod;
+    if (currentType !== lastFilter.type || currentPeriod !== lastFilter.period) {
+      lastFilter = { type: currentType, period: currentPeriod };
       loadLeaderboard();
     }
   });
@@ -175,18 +178,18 @@
 
   <!-- Current user rank (when not in top entries) -->
   {#if currentUserRank && !entries.some((e) => e.is_current_user)}
-    <div class="mb-6 p-4 bg-primary-50 rounded-xl border border-primary-200">
+    <div class="mb-6 p-4 bg-primary/10 rounded-xl border border-primary/20">
       <div class="flex items-center justify-between">
         <div>
-          <span class="text-sm text-primary-600 font-medium">Your Rank</span>
-          <div class="text-2xl font-bold text-primary-800">
+          <span class="text-sm text-muted-foreground font-medium">Your Rank</span>
+          <div class="text-2xl font-bold text-foreground">
             {getRankDisplay(currentUserRank)}
           </div>
         </div>
         {#if currentUserScore !== null}
           <div class="text-right">
-            <span class="text-sm text-primary-600 font-medium">{getScoreLabel(selectedType)}</span>
-            <div class="text-2xl font-bold text-primary-800">
+            <span class="text-sm text-muted-foreground font-medium">{getScoreLabel(selectedType)}</span>
+            <div class="text-2xl font-bold text-foreground">
               {formatDisplayScore(currentUserScore, selectedType)}
             </div>
           </div>
@@ -197,11 +200,17 @@
 
   <!-- Error -->
   {#if error}
-    <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-center gap-3">
+    <div class="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-destructive flex items-center gap-3">
       <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
-      {error}
+      <span>{error}</span>
+      <button
+        onclick={() => loadLeaderboard()}
+        class="ml-auto text-sm font-medium underline hover:no-underline"
+      >
+        Retry
+      </button>
     </div>
   {/if}
 
@@ -221,7 +230,7 @@
         {/each}
       </div>
     </div>
-  {:else if entries.length === 0}
+  {:else if entries.length === 0 && !error}
     <div class="text-center py-16 bg-card rounded-xl shadow">
       <svg class="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
@@ -230,7 +239,7 @@
       <p class="text-sm text-muted-foreground mt-2">Be the first to play and claim your spot!</p>
       <a href="/play" class="mt-6 inline-block px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Start Playing</a>
     </div>
-  {:else}
+  {:else if entries.length > 0}
     <!-- Leaderboard table -->
     <div class="bg-card rounded-xl shadow overflow-hidden {loading ? 'opacity-60' : ''}">
       <table class="w-full">
@@ -280,13 +289,13 @@
                   <div>
                     <span
                       class="font-medium {entry.is_current_user
-                        ? 'text-primary-700'
+                        ? 'text-primary'
                         : 'text-foreground'}"
                     >
                       {entry.display_name}
                     </span>
                     {#if entry.is_current_user}
-                      <span class="ml-1.5 text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">
+                      <span class="ml-1.5 text-xs bg-primary/15 text-primary px-2 py-0.5 rounded-full font-medium">
                         You
                       </span>
                     {/if}
