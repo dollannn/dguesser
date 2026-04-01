@@ -72,15 +72,16 @@ impl OAuthStateStore {
 
         let key = format!("{}{}", KEY_PREFIX, state_param);
 
-        // Atomically get and delete the state (one-time use)
-        // Using GET + DEL since GETDEL requires Redis 6.2+
-        let value: Option<String> = conn
-            .get(&key)
-            .await
-            .map_err(|e| OAuthError::StateStorage(format!("Failed to retrieve state: {}", e)))?;
-
-        // Delete regardless of whether we found it (cleanup)
-        let _: () = conn.del(&key).await.unwrap_or(());
+        // Atomically get and delete the state (one-time use) via Lua script.
+        // This prevents a TOCTOU race where two concurrent requests could both
+        // consume the same state between separate GET and DEL commands.
+        let value: Option<String> = redis::Script::new(
+            r#"local v = redis.call('GET', KEYS[1]); redis.call('DEL', KEYS[1]); return v"#,
+        )
+        .key(&key)
+        .invoke_async(&mut conn)
+        .await
+        .map_err(|e| OAuthError::StateStorage(format!("Failed to retrieve state: {}", e)))?;
 
         let value = value.ok_or_else(|| {
             tracing::warn!(state = %state_param, "OAuth state not found or already consumed");

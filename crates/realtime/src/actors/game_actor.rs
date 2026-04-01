@@ -54,6 +54,8 @@ pub struct GameActor {
     last_redis_save: Option<std::time::Instant>,
     /// Location provider for selecting game locations
     location_provider: Arc<dyn LocationProvider>,
+    /// Channel to signal the AppState to remove this game from the HashMap
+    cleanup_tx: Option<mpsc::Sender<String>>,
 }
 
 impl GameActor {
@@ -75,11 +77,17 @@ impl GameActor {
             redis_state: None,
             last_redis_save: None,
             location_provider,
+            cleanup_tx: None,
         }
     }
 
     pub fn with_redis(mut self, redis_state: Arc<RedisStateManager>) -> Self {
         self.redis_state = Some(redis_state);
+        self
+    }
+
+    pub fn with_cleanup(mut self, cleanup_tx: mpsc::Sender<String>) -> Self {
+        self.cleanup_tx = Some(cleanup_tx);
         self
     }
 
@@ -585,7 +593,9 @@ impl GameActor {
         .await
         .map_err(|e| e.to_string())?;
 
-        dguesser_db::games::start_round(&self.db, &db_round.id).await.ok();
+        if let Err(e) = dguesser_db::games::start_round(&self.db, &db_round.id).await {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to mark round as started in DB");
+        }
         self.current_round_db_id = Some(db_round.id);
 
         // Update state and broadcast
@@ -640,8 +650,8 @@ impl GameActor {
         let score = guess.score;
 
         // Persist to database
-        if let Some(round_id) = &self.current_round_db_id {
-            dguesser_db::games::create_guess(
+        if let Some(round_id) = &self.current_round_db_id
+            && let Err(e) = dguesser_db::games::create_guess(
                 &self.db,
                 round_id,
                 user_id,
@@ -652,13 +662,17 @@ impl GameActor {
                 time_ms.map(|t| t as i32),
             )
             .await
-            .ok();
+        {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to persist guess to DB");
         }
 
         // Update player score in database
-        dguesser_db::games::update_player_score(&self.db, &self.game_id, user_id, score as i32)
-            .await
-            .ok();
+        if let Err(e) =
+            dguesser_db::games::update_player_score(&self.db, &self.game_id, user_id, score as i32)
+                .await
+        {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to update player score in DB");
+        }
 
         // Check if all connected players have guessed (auto-end round)
         let connected_ids = result.state.connected_player_ids();
@@ -737,8 +751,10 @@ impl GameActor {
     /// Handle round ended by tick (timeout)
     async fn handle_round_ended_by_tick(&mut self) {
         // End round in database
-        if let Some(round_id) = &self.current_round_db_id {
-            dguesser_db::games::end_round(&self.db, round_id).await.ok();
+        if let Some(round_id) = &self.current_round_db_id
+            && let Err(e) = dguesser_db::games::end_round(&self.db, round_id).await
+        {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to end round in DB (tick)");
         }
 
         // Broadcast round end
@@ -890,7 +906,9 @@ impl GameActor {
         .await
         .map_err(|e| e.to_string())?;
 
-        dguesser_db::games::start_round(&self.db, &db_round.id).await.ok();
+        if let Err(e) = dguesser_db::games::start_round(&self.db, &db_round.id).await {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to mark round as started in DB (next round)");
+        }
         self.current_round_db_id = Some(db_round.id);
 
         // Update state and broadcast
@@ -915,8 +933,10 @@ impl GameActor {
         let result = reduce(state, CoreCommand::EndRound, now);
 
         // End round in database
-        if let Some(round_id) = &self.current_round_db_id {
-            dguesser_db::games::end_round(&self.db, round_id).await.ok();
+        if let Some(round_id) = &self.current_round_db_id
+            && let Err(e) = dguesser_db::games::end_round(&self.db, round_id).await
+        {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to end round in DB");
         }
 
         // Update state
@@ -946,21 +966,36 @@ impl GameActor {
         let result = reduce(state, CoreCommand::EndGame, now);
 
         // Update database
-        dguesser_db::games::update_game_status(
+        if let Err(e) = dguesser_db::games::update_game_status(
             &self.db,
             &self.game_id,
             dguesser_db::GameStatus::Finished,
         )
         .await
-        .ok();
+        {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to update game status to Finished");
+        }
 
-        dguesser_db::games::set_final_rankings(&self.db, &self.game_id).await.ok();
+        if let Err(e) = dguesser_db::games::set_final_rankings(&self.db, &self.game_id).await {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to set final rankings");
+        }
 
         // Update player stats
         for player in result.state.players.values() {
-            dguesser_db::users::update_stats(&self.db, &player.user_id, player.total_score as i32)
-                .await
-                .ok();
+            if let Err(e) = dguesser_db::users::update_stats(
+                &self.db,
+                &player.user_id,
+                player.total_score as i32,
+            )
+            .await
+            {
+                tracing::error!(
+                    error = %e,
+                    game_id = %self.game_id,
+                    user_id = %player.user_id,
+                    "Failed to update player stats"
+                );
+            }
         }
 
         // Update state and broadcast
@@ -969,6 +1004,12 @@ impl GameActor {
 
         // Delete from Redis
         self.delete_state_from_redis().await;
+
+        // Signal cleanup so the AppState removes this game from the HashMap
+        // and the tick timer stops (channel closes when the handle is dropped)
+        if let Some(cleanup_tx) = &self.cleanup_tx {
+            let _ = cleanup_tx.send(self.game_id.clone()).await;
+        }
 
         Ok(())
     }
@@ -1300,16 +1341,23 @@ impl GameActor {
             .ok();
 
         // Also update database status to Abandoned
-        dguesser_db::games::update_game_status(
+        if let Err(e) = dguesser_db::games::update_game_status(
             &self.db,
             &self.game_id,
             dguesser_db::GameStatus::Abandoned,
         )
         .await
-        .ok();
+        {
+            tracing::error!(error = %e, game_id = %self.game_id, "Failed to update game status to Abandoned");
+        }
 
         // Delete from Redis
         self.delete_state_from_redis().await;
+
+        // Signal cleanup
+        if let Some(cleanup_tx) = &self.cleanup_tx {
+            let _ = cleanup_tx.send(self.game_id.clone()).await;
+        }
     }
 
     /// Broadcast live scores update

@@ -112,24 +112,45 @@ pub async fn cleanup_expired(pool: &DbPool) -> Result<u64, sqlx::Error> {
     Ok(result.rows_affected())
 }
 
-/// Rotate session (create new, revoke old)
+/// Rotate session (create new, revoke old) in a single transaction.
+///
+/// This ensures that the old session is only revoked if the new session is
+/// successfully created, preventing the user from being locked out.
 pub async fn rotate(
     pool: &DbPool,
     old_session_id: &str,
     ttl_hours: i64,
 ) -> Result<Session, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
     // Get old session info
-    let old = get_valid(pool, old_session_id).await?.ok_or(sqlx::Error::RowNotFound)?;
+    let old = sqlx::query_as!(
+        Session,
+        r#"
+        SELECT id, user_id, created_at, expires_at, last_accessed_at,
+               ip_address::text, user_agent, revoked_at, rotated_from
+        FROM sessions
+        WHERE id = $1
+          AND expires_at > NOW()
+          AND revoked_at IS NULL
+        "#,
+        old_session_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(sqlx::Error::RowNotFound)?;
 
     // Revoke old
-    revoke(pool, old_session_id).await?;
+    sqlx::query!("UPDATE sessions SET revoked_at = NOW() WHERE id = $1", old_session_id)
+        .execute(&mut *tx)
+        .await?;
 
     // Create new with reference to old
     let new_session_id = dguesser_core::generate_session_id();
     let expires_at = Utc::now() + Duration::hours(ttl_hours);
     let ip_network: Option<IpNetwork> = old.ip_address.as_deref().and_then(|s| s.parse().ok());
 
-    sqlx::query_as!(
+    let new_session = sqlx::query_as!(
         Session,
         r#"
         INSERT INTO sessions (id, user_id, expires_at, ip_address, user_agent, rotated_from)
@@ -144,8 +165,11 @@ pub async fn rotate(
         old.user_agent.as_deref(),
         old_session_id
     )
-    .fetch_one(pool)
-    .await
+    .fetch_one(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(new_session)
 }
 
 /// Get all active sessions for a user

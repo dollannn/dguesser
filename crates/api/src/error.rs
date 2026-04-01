@@ -193,6 +193,26 @@ impl From<dguesser_auth::OAuthError> for ApiError {
     }
 }
 
+impl From<dguesser_core::location::LocationError> for ApiError {
+    fn from(err: dguesser_core::location::LocationError) -> Self {
+        match &err {
+            dguesser_core::location::LocationError::MapNotFound(_)
+            | dguesser_core::location::LocationError::LocationNotFound(_) => {
+                Self::not_found("Resource")
+            }
+            dguesser_core::location::LocationError::NoLocationsAvailable(_) => {
+                Self::bad_request("NO_LOCATIONS", err.to_string())
+            }
+            dguesser_core::location::LocationError::ValidationFailed(msg) => {
+                Self::bad_request("VALIDATION_ERROR", msg.clone())
+            }
+            dguesser_core::location::LocationError::Database(_) => {
+                Self::internal().with_internal(err.to_string())
+            }
+        }
+    }
+}
+
 impl From<validator::ValidationErrors> for ApiError {
     fn from(err: validator::ValidationErrors) -> Self {
         let details = serde_json::to_value(&err).ok();

@@ -275,9 +275,7 @@ pub async fn list_maps(
 ) -> Result<Json<ListMapsResponse>, ApiError> {
     let user_id = auth.as_ref().map(|a| a.user_id.as_str());
 
-    let maps = dguesser_db::locations::list_visible_maps(state.db(), user_id)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let maps = dguesser_db::locations::list_visible_maps(state.db(), user_id).await?;
 
     // Fetch location counts from provider in parallel (works for both R2 and PostgreSQL)
     // This is much faster than sequential fetching when cache is cold
@@ -381,9 +379,7 @@ pub async fn create_map(
     };
 
     // Check user's map count
-    let map_count = dguesser_db::locations::get_user_map_count(state.db(), &auth.user_id)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let map_count = dguesser_db::locations::get_user_map_count(state.db(), &auth.user_id).await?;
 
     if map_count >= MAX_MAPS_PER_USER {
         return Err(ApiError::conflict(
@@ -396,9 +392,7 @@ pub async fn create_map(
     let slug = generate_slug(name);
 
     // Check if slug is available
-    let is_available = dguesser_db::locations::is_map_slug_available(state.db(), &slug)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let is_available = dguesser_db::locations::is_map_slug_available(state.db(), &slug).await?;
 
     if !is_available {
         return Err(ApiError::conflict(
@@ -415,9 +409,7 @@ pub async fn create_map(
         visibility,
     };
 
-    let map = dguesser_db::locations::create_user_map(state.db(), &auth.user_id, &params)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let map = dguesser_db::locations::create_user_map(state.db(), &auth.user_id, &params).await?;
 
     Ok((StatusCode::CREATED, Json(CreateMapResponse { id: map.id, slug: map.slug })))
 }
@@ -443,8 +435,7 @@ pub async fn get_map(
     let user_id = auth.as_ref().map(|a| a.user_id.as_str());
 
     let map = dguesser_db::locations::get_map_if_visible(state.db(), &id, user_id)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+        .await?
         .ok_or_else(|| ApiError::not_found("Map"))?;
 
     let is_system = map.is_system_map();
@@ -497,8 +488,7 @@ pub async fn update_map(
 ) -> Result<Json<MapDetails>, ApiError> {
     // Get the map and check ownership
     let map = dguesser_db::locations::get_map_if_visible(state.db(), &id, Some(&auth.user_id))
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+        .await?
         .ok_or_else(|| ApiError::not_found("Map"))?;
 
     if !map.is_owned_by(&auth.user_id) {
@@ -552,9 +542,7 @@ pub async fn update_map(
         visibility,
     };
 
-    let updated = dguesser_db::locations::update_map(state.db(), &id, &params)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let updated = dguesser_db::locations::update_map(state.db(), &id, &params).await?;
 
     let is_system = updated.is_system_map();
 
@@ -595,8 +583,7 @@ pub async fn delete_map(
 ) -> Result<StatusCode, ApiError> {
     // Get the map and check ownership
     let map = dguesser_db::locations::get_map_if_visible(state.db(), &id, Some(&auth.user_id))
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+        .await?
         .ok_or_else(|| ApiError::not_found("Map"))?;
 
     if !map.is_owned_by(&auth.user_id) {
@@ -604,9 +591,7 @@ pub async fn delete_map(
     }
 
     // Delete (soft delete)
-    dguesser_db::locations::delete_map(state.db(), &id)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    dguesser_db::locations::delete_map(state.db(), &id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -636,17 +621,15 @@ pub async fn get_map_locations(
 
     // Check map exists and is visible
     let map = dguesser_db::locations::get_map_if_visible(state.db(), &id, user_id)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+        .await?
         .ok_or_else(|| ApiError::not_found("Map"))?;
 
     let page = query.page.max(1);
     let per_page = query.per_page.clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    let locations = dguesser_db::locations::get_map_locations(state.db(), &id, per_page, offset)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let locations =
+        dguesser_db::locations::get_map_locations(state.db(), &id, per_page, offset).await?;
 
     let items = locations
         .into_iter()
@@ -688,8 +671,7 @@ pub async fn add_locations(
 ) -> Result<Json<AddLocationsResponse>, ApiError> {
     // Get the map and check ownership
     let map = dguesser_db::locations::get_map_if_visible(state.db(), &id, Some(&auth.user_id))
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+        .await?
         .ok_or_else(|| ApiError::not_found("Map"))?;
 
     if !map.is_owned_by(&auth.user_id) {
@@ -713,14 +695,12 @@ pub async fn add_locations(
     // Add locations
     let added =
         dguesser_db::locations::add_locations_to_map_batch(state.db(), &id, &body.location_ids)
-            .await
-            .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+            .await?;
 
     // Get updated count
     let updated_map =
         dguesser_db::locations::get_map_if_visible(state.db(), &id, Some(&auth.user_id))
-            .await
-            .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+            .await?
             .ok_or_else(|| ApiError::not_found("Map"))?;
 
     Ok(Json(AddLocationsResponse { added, total: updated_map.location_count }))
@@ -759,8 +739,7 @@ pub async fn add_locations_from_urls(
 
     // Get the map and check ownership
     let map = dguesser_db::locations::get_map_if_visible(state.db(), &id, Some(&auth.user_id))
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+        .await?
         .ok_or_else(|| ApiError::not_found("Map"))?;
 
     if !map.is_owned_by(&auth.user_id) {
@@ -871,14 +850,12 @@ pub async fn add_locations_from_urls(
     // Add locations to map
     let added =
         dguesser_db::locations::add_locations_to_map_batch(state.db(), &id, &location_ids_to_add)
-            .await
-            .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+            .await?;
 
     // Get updated count
     let updated_map =
         dguesser_db::locations::get_map_if_visible(state.db(), &id, Some(&auth.user_id))
-            .await
-            .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+            .await?
             .ok_or_else(|| ApiError::not_found("Map"))?;
 
     Ok(Json(AddLocationsFromUrlsResponse { results, added, total: updated_map.location_count }))
@@ -907,8 +884,7 @@ pub async fn remove_location(
 ) -> Result<StatusCode, ApiError> {
     // Get the map and check ownership
     let map = dguesser_db::locations::get_map_if_visible(state.db(), &id, Some(&auth.user_id))
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?
+        .await?
         .ok_or_else(|| ApiError::not_found("Map"))?;
 
     if !map.is_owned_by(&auth.user_id) {
@@ -916,9 +892,8 @@ pub async fn remove_location(
     }
 
     // Remove the location
-    let removed = dguesser_db::locations::remove_location_from_map(state.db(), &id, &location_id)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let removed =
+        dguesser_db::locations::remove_location_from_map(state.db(), &id, &location_id).await?;
 
     if !removed {
         return Err(ApiError::not_found("Location in map"));

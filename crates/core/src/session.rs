@@ -3,14 +3,14 @@
 //! Session tokens use ChaCha20 via `rand_chacha` for cryptographic security,
 //! providing 256 bits of entropy for session identifiers.
 
-use once_cell::sync::Lazy;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rand_core::RngCore;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 /// Thread-safe ChaCha20 RNG seeded from system entropy.
-static CHACHA_RNG: Lazy<Mutex<ChaCha20Rng>> = Lazy::new(|| Mutex::new(ChaCha20Rng::from_entropy()));
+static CHACHA_RNG: LazyLock<Mutex<ChaCha20Rng>> =
+    LazyLock::new(|| Mutex::new(ChaCha20Rng::from_entropy()));
 
 /// URL-safe base64 alphabet for token encoding.
 const BASE64_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";

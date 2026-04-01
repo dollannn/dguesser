@@ -159,11 +159,11 @@ pub struct ApiDoc;
 /// * `cors` - CORS layer configuration
 /// * `is_production` - If true, API docs are disabled for security
 pub fn create_router(state: AppState, cors: CorsLayer, is_production: bool) -> Router {
-    // Auth routes with stricter rate limiting (10/min)
+    // Auth routes with stricter rate limiting (20/min)
     let auth_routes =
         auth::router().layer(middleware::from_fn_with_state(state.clone(), rate_limit_auth));
 
-    // Game routes with game-specific rate limiting (30/min)
+    // Game routes with game-specific rate limiting (60/min)
     let game_routes =
         games::router().layer(middleware::from_fn_with_state(state.clone(), rate_limit_game));
 

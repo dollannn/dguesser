@@ -5,7 +5,8 @@ use axum::{
     extract::{Path, State},
     routing::{delete, get, put},
 };
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -51,8 +52,8 @@ const RESERVED_USERNAMES: &[&str] = &[
 
 /// Username validation regex: 3-30 chars, lowercase alphanumeric + underscores
 /// Cannot start/end with underscore, no consecutive underscores
-static USERNAME_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-z0-9][a-z0-9_]*[a-z0-9]$|^[a-z0-9]{1,2}$").unwrap());
+static USERNAME_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9_]*[a-z0-9]$|^[a-z0-9]{1,2}$").unwrap());
 
 /// Allowed avatar URL domains (OAuth providers and common avatar services)
 const ALLOWED_AVATAR_DOMAINS: &[&str] = &[

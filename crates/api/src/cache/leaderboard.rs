@@ -113,13 +113,31 @@ impl LeaderboardCache {
 
         // Use SCAN to find all leaderboard keys and delete them
         let pattern = "leaderboard:*";
-        let keys: Vec<String> = match redis::cmd("KEYS").arg(pattern).query_async(&mut conn).await {
-            Ok(keys) => keys,
-            Err(e) => {
-                tracing::warn!("Failed to scan leaderboard keys: {}", e);
-                return;
+        let mut keys: Vec<String> = Vec::new();
+        let mut cursor: u64 = 0;
+        loop {
+            let result: Result<(u64, Vec<String>), _> = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(pattern)
+                .arg("COUNT")
+                .arg(100)
+                .query_async(&mut conn)
+                .await;
+            match result {
+                Ok((next_cursor, batch)) => {
+                    keys.extend(batch);
+                    cursor = next_cursor;
+                    if cursor == 0 {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to scan leaderboard keys: {}", e);
+                    return;
+                }
             }
-        };
+        }
 
         if keys.is_empty() {
             return;

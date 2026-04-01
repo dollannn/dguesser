@@ -42,10 +42,7 @@ async fn get_stats(
     State(state): State<AppState>,
     RequireAdmin(_auth): RequireAdmin,
 ) -> Result<Json<AdminStatsResponse>, ApiError> {
-    let stats = dguesser_db::locations::get_location_stats(state.db()).await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to get location stats");
-        ApiError::internal().with_internal(e.to_string())
-    })?;
+    let stats = dguesser_db::locations::get_location_stats(state.db()).await?;
 
     Ok(Json(AdminStatsResponse {
         total_locations: stats.total_locations,
@@ -110,11 +107,7 @@ async fn get_review_queue(
         per_page,
         status_filter,
     )
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to get review queue");
-        ApiError::internal().with_internal(e.to_string())
-    })?;
+    .await?;
 
     // Get report counts for each location
     let mut items = Vec::with_capacity(locations.len());
@@ -164,19 +157,11 @@ async fn get_location_detail(
     Path(location_id): Path<String>,
 ) -> Result<Json<LocationDetailResponse>, ApiError> {
     let location = dguesser_db::locations::get_location_by_id(state.db(), &location_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, location_id = %location_id, "Failed to get location");
-            ApiError::internal().with_internal(e.to_string())
-        })?
+        .await?
         .ok_or_else(|| ApiError::not_found("Location"))?;
 
-    let reports = dguesser_db::locations::get_reports_for_location(state.db(), &location_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, location_id = %location_id, "Failed to get reports");
-            ApiError::internal().with_internal(e.to_string())
-        })?;
+    let reports =
+        dguesser_db::locations::get_reports_for_location(state.db(), &location_id).await?;
 
     let report_items: Vec<LocationReportItem> = reports
         .into_iter()
@@ -257,11 +242,7 @@ async fn update_review_status(
 
     // Verify location exists
     let location = dguesser_db::locations::get_location_by_id(state.db(), &location_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, location_id = %location_id, "Failed to get location");
-            ApiError::internal().with_internal(e.to_string())
-        })?
+        .await?
         .ok_or_else(|| ApiError::not_found("Location"))?;
 
     // Update the review status
@@ -271,11 +252,7 @@ async fn update_review_status(
         &body.status,
         Some(&auth.user_id),
     )
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, location_id = %location_id, "Failed to update review status");
-        ApiError::internal().with_internal(e.to_string())
-    })?;
+    .await?;
 
     // Determine if location is now active (rejected = inactive)
     let active = body.status != "rejected" && location.active;
@@ -349,11 +326,7 @@ async fn get_reports(
         params.reason.as_deref(),
         params.location_status.as_deref(),
     )
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to get reports");
-        ApiError::internal().with_internal(e.to_string())
-    })?;
+    .await?;
 
     let items: Vec<LocationReportWithLocation> = reports
         .into_iter()

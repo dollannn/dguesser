@@ -78,7 +78,7 @@ fn extract_session_id(parts: &Parts, cookie_name: &str) -> Option<String> {
             let cookie = cookie.trim();
             cookie.strip_prefix(&prefix).map(|v| v.to_string())
         })
-        .last()
+        .next_back()
 }
 
 impl<S> FromRequestParts<S> for AuthUser

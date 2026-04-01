@@ -640,11 +640,10 @@ pub async fn get_game(
     let players = dguesser_db::games::get_players(state.db(), &id).await?;
     let rounds = dguesser_db::games::get_rounds_for_game(state.db(), &id).await?;
 
-    // Check if user is a player (for non-solo games that have started)
-    // Allow viewing lobby for multiplayer games so users can join
+    // Check if user is a player or has access to this game
     let is_player = players.iter().any(|p| p.user_id == auth.user_id);
     let is_joinable_lobby = game.mode == GameMode::Multiplayer && game.status == GameStatus::Lobby;
-    if !is_player && game.mode != GameMode::Solo && !is_joinable_lobby {
+    if !is_player && !is_joinable_lobby {
         return Err(ApiError::forbidden("Not a player in this game"));
     }
 

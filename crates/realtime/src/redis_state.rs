@@ -165,16 +165,32 @@ impl RedisStateManager {
         Ok(())
     }
 
-    /// Get all active game IDs from Redis
+    /// Get all active game IDs from Redis using SCAN (safe for production).
     pub async fn get_active_game_ids(&self) -> Result<Vec<String>, redis::RedisError> {
         let mut conn = self.client.get_multiplexed_async_connection().await?;
         let pattern = format!("{}*", GAME_STATE_PREFIX);
-        let keys: Vec<String> = conn.keys(&pattern).await?;
 
-        let game_ids: Vec<String> = keys
-            .into_iter()
-            .filter_map(|key| key.strip_prefix(GAME_STATE_PREFIX).map(|s| s.to_string()))
-            .collect();
+        let mut game_ids = Vec::new();
+        let mut cursor: u64 = 0;
+        loop {
+            let (next_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(&pattern)
+                .arg("COUNT")
+                .arg(100)
+                .query_async(&mut conn)
+                .await?;
+            for key in keys {
+                if let Some(id) = key.strip_prefix(GAME_STATE_PREFIX) {
+                    game_ids.push(id.to_string());
+                }
+            }
+            cursor = next_cursor;
+            if cursor == 0 {
+                break;
+            }
+        }
 
         Ok(game_ids)
     }

@@ -50,7 +50,7 @@ fn extract_session_from_cookie<A: Adapter>(socket: &SocketRef<A>) -> Option<Stri
                 }
             })
         })
-        .last()
+        .next_back()
 }
 
 /// Handle authentication request

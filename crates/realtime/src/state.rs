@@ -38,6 +38,8 @@ struct AppStateInner {
     pub user_sockets: RwLock<HashMap<String, String>>,
     /// Location provider for game location selection
     pub location_provider: Arc<dyn LocationProvider>,
+    /// Channel for game actors to request cleanup when they finish
+    pub game_cleanup_tx: mpsc::Sender<String>,
 }
 
 /// Handle to communicate with a game actor
@@ -159,7 +161,10 @@ impl AppState {
             }
         };
 
-        Self {
+        // Create cleanup channel for game actors to signal when they finish
+        let (game_cleanup_tx, game_cleanup_rx) = mpsc::channel::<String>(100);
+
+        let state = Self {
             inner: Arc::new(AppStateInner {
                 db,
                 redis,
@@ -170,7 +175,24 @@ impl AppState {
                 socket_users: RwLock::new(HashMap::new()),
                 user_sockets: RwLock::new(HashMap::new()),
                 location_provider,
+                game_cleanup_tx,
             }),
+        };
+
+        // Spawn background task that removes finished games from the HashMap
+        let cleanup_state = state.clone();
+        tokio::spawn(async move {
+            Self::run_game_cleanup(cleanup_state, game_cleanup_rx).await;
+        });
+
+        state
+    }
+
+    /// Background task that removes finished game actors from the HashMap
+    async fn run_game_cleanup(state: AppState, mut rx: mpsc::Receiver<String>) {
+        while let Some(game_id) = rx.recv().await {
+            state.inner.games.write().await.remove(&game_id);
+            tracing::info!(game_id = %game_id, "Cleaned up finished game actor");
         }
     }
 
@@ -204,22 +226,33 @@ impl AppState {
         &self.inner.redis_state
     }
 
-    /// Register a socket connection for a user
+    /// Register a socket connection for a user.
+    ///
+    /// A user can have multiple sockets (e.g., multiple browser tabs).
+    /// The `user_sockets` map tracks the most recent socket for targeted messages.
     pub async fn register_socket(&self, socket_id: &str, user_id: &str) {
         let mut socket_users = self.inner.socket_users.write().await;
         let mut user_sockets = self.inner.user_sockets.write().await;
 
         socket_users.insert(socket_id.to_string(), user_id.to_string());
+        // Always point to the latest socket for this user
         user_sockets.insert(user_id.to_string(), socket_id.to_string());
     }
 
-    /// Unregister a socket connection
+    /// Unregister a socket connection.
+    ///
+    /// Only removes the `user_sockets` entry if it still points to this socket,
+    /// preventing a stale tab disconnect from removing an active tab's mapping.
     pub async fn unregister_socket(&self, socket_id: &str) -> Option<String> {
         let mut socket_users = self.inner.socket_users.write().await;
         let mut user_sockets = self.inner.user_sockets.write().await;
 
         if let Some(user_id) = socket_users.remove(socket_id) {
-            user_sockets.remove(&user_id);
+            // Only remove the user->socket mapping if it still points to this socket.
+            // If the user opened a new tab, user_sockets already points to the new socket.
+            if user_sockets.get(&user_id).is_some_and(|sid| sid == socket_id) {
+                user_sockets.remove(&user_id);
+            }
             Some(user_id) // Returns usr_xxxxxxxxxxxx
         } else {
             None
@@ -263,15 +296,17 @@ impl AppState {
         let (tx, rx) = mpsc::channel(100);
         let handle = GameHandle { game_id: game_id.to_string(), tx };
 
-        // Spawn actor with Redis state manager
+        // Spawn actor with Redis state manager and cleanup channel
         let db = self.inner.db.clone();
         let gid = game_id.to_string();
         let emitter = self.inner.emitter.clone();
         let redis_state = std::sync::Arc::new(RedisStateManager::new(self.inner.redis.clone()));
         let location_provider = self.inner.location_provider.clone();
+        let cleanup_tx = self.inner.game_cleanup_tx.clone();
         tokio::spawn(async move {
-            let mut actor =
-                GameActor::new(&gid, db, rx, emitter, location_provider).with_redis(redis_state);
+            let mut actor = GameActor::new(&gid, db, rx, emitter, location_provider)
+                .with_redis(redis_state)
+                .with_cleanup(cleanup_tx);
             actor.run().await;
         });
 
@@ -298,7 +333,10 @@ impl AppState {
         self.inner.games.read().await.get(game_id).cloned()
     }
 
-    /// Remove a game actor (when game ends)
+    /// Remove a game actor (when game ends).
+    ///
+    /// Note: This is also triggered automatically via the cleanup channel
+    /// when a game actor signals it has finished.
     #[allow(dead_code)]
     pub async fn remove_game(&self, game_id: &str) {
         self.inner.games.write().await.remove(game_id);

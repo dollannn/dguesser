@@ -5,14 +5,6 @@
 //! - URL-safe characters (no encoding needed)
 //! - ~71 bits entropy for entities, 256 bits for sessions
 
-use once_cell::sync::Lazy;
-use rand::Rng;
-use rand::rngs::OsRng;
-use std::sync::Mutex;
-
-/// Thread-safe RNG for ID generation.
-static RNG: Lazy<Mutex<OsRng>> = Lazy::new(|| Mutex::new(OsRng));
-
 /// Alphabet for nanoid generation (URL-safe).
 const ALPHABET: &[char] = &[
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I',
@@ -28,8 +20,11 @@ const ENTITY_ID_LEN: usize = 12;
 const SESSION_ID_LEN: usize = 43;
 
 /// Generate a random string of the specified length using the nanoid alphabet.
+///
+/// Uses `rand::thread_rng()` which is already thread-safe (no Mutex needed).
 fn generate_id(len: usize) -> String {
-    let mut rng = RNG.lock().expect("RNG lock poisoned");
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
     (0..len)
         .map(|_| {
             let idx = rng.gen_range(0..ALPHABET.len());

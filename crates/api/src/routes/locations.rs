@@ -7,7 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Datelike;
-use dguesser_auth::{AuthUser, MaybeAuthUser};
+use dguesser_auth::AuthUser;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -195,9 +195,7 @@ pub async fn search_locations(
     let offset = (page - 1) * per_page;
 
     let (locations, total) =
-        dguesser_db::locations::search_locations(state.db(), &filters, per_page, offset)
-            .await
-            .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+        dguesser_db::locations::search_locations(state.db(), &filters, per_page, offset).await?;
 
     let items = locations
         .into_iter()
@@ -229,9 +227,7 @@ pub async fn get_countries(
     State(state): State<AppState>,
     _auth: AuthUser,
 ) -> Result<Json<CountriesResponse>, ApiError> {
-    let countries = dguesser_db::locations::get_available_countries(state.db())
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let countries = dguesser_db::locations::get_available_countries(state.db()).await?;
 
     let items = countries.into_iter().map(|(code, count)| CountryInfo { code, count }).collect();
 
@@ -256,9 +252,8 @@ pub async fn get_subdivisions(
     Path(code): Path<String>,
     _auth: AuthUser,
 ) -> Result<Json<SubdivisionsResponse>, ApiError> {
-    let subdivisions = dguesser_db::locations::get_available_subdivisions(state.db(), &code)
-        .await
-        .map_err(|e| ApiError::internal().with_internal(e.to_string()))?;
+    let subdivisions =
+        dguesser_db::locations::get_available_subdivisions(state.db(), &code).await?;
 
     let items =
         subdivisions.into_iter().map(|(code, count)| SubdivisionInfo { code, count }).collect();
@@ -287,7 +282,7 @@ pub async fn get_subdivisions(
 async fn report_location(
     State(state): State<AppState>,
     Path(location_id): Path<String>,
-    MaybeAuthUser(auth): MaybeAuthUser,
+    auth: AuthUser,
     Json(body): Json<ReportLocationRequest>,
 ) -> Result<StatusCode, ApiError> {
     // Validate reason
@@ -304,8 +299,7 @@ async fn report_location(
         ));
     }
 
-    // Get user ID if authenticated
-    let user_id = auth.as_ref().map(|u| u.user_id.as_str());
+    let user_id = Some(auth.user_id.as_str());
 
     // Report the location
     dguesser_db::locations::report_location_failure(
@@ -317,15 +311,15 @@ async fn report_location(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, location_id = %location_id, "Failed to report location");
-        ApiError::internal().with_internal(e.to_string())
+        ApiError::from(e)
     })?;
 
     // Check if we should auto-flag the location
     if let Ok(Some(location)) =
         dguesser_db::locations::get_location_by_id(state.db(), &location_id).await
-        && location.failure_count >= 3
+        && location.failure_count >= 5
     {
-        // Auto-flag after 3 reports
+        // Auto-flag after 5 reports (requires authenticated users)
         if let Err(e) = dguesser_db::locations::update_location_review_status(
             state.db(),
             &location_id,

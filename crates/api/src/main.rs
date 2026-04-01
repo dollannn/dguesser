@@ -12,7 +12,7 @@ mod error;
 mod logging;
 mod middleware;
 mod routes;
-pub mod socket;
+mod socket;
 mod state;
 
 use config::Config;
@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
     // Start server with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     tracing::info!(address = %addr, "API server listening");
-    tracing::info!(url = "http://localhost:{}/docs", config.port, "Swagger UI available");
+    tracing::info!(url = %format!("http://localhost:{}/docs", config.port), "Swagger UI available");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
