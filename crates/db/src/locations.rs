@@ -1681,6 +1681,86 @@ pub struct LocationSearchFilters {
     pub exclude_map_id: Option<String>,
 }
 
+/// Helper enum for dynamic bind parameter values in search queries.
+enum FilterBindValue {
+    Text(String),
+    Int(i32),
+}
+
+/// Build WHERE clause and bind values from search filters.
+///
+/// `param_start` is the first `$N` index to use (e.g., 1 for count queries,
+/// 3 for data queries where $1/$2 are limit/offset).
+/// Returns `(where_clause, bind_values)`.
+fn build_search_filter_clause(
+    filters: &LocationSearchFilters,
+    param_start: usize,
+) -> (String, Vec<FilterBindValue>) {
+    let mut conditions = vec![
+        "l.active = TRUE".to_string(),
+        "(l.review_status IS NULL OR l.review_status = 'approved')".to_string(),
+    ];
+    let mut bind_values: Vec<FilterBindValue> = Vec::new();
+    let mut idx = param_start;
+
+    if let Some(ref country) = filters.country_code {
+        conditions.push(format!("l.country_code = ${idx}"));
+        bind_values.push(FilterBindValue::Text(country.clone()));
+        idx += 1;
+    }
+
+    if let Some(ref subdivision) = filters.subdivision_code {
+        conditions.push(format!("l.subdivision_code = ${idx}"));
+        bind_values.push(FilterBindValue::Text(subdivision.clone()));
+        idx += 1;
+    }
+
+    if let Some(min_year) = filters.min_year {
+        conditions.push(format!(
+            "(l.capture_date IS NULL OR EXTRACT(YEAR FROM l.capture_date) >= ${idx})"
+        ));
+        bind_values.push(FilterBindValue::Int(min_year));
+        idx += 1;
+    }
+
+    if let Some(max_year) = filters.max_year {
+        conditions.push(format!(
+            "(l.capture_date IS NULL OR EXTRACT(YEAR FROM l.capture_date) <= ${idx})"
+        ));
+        bind_values.push(FilterBindValue::Int(max_year));
+        idx += 1;
+    }
+
+    if filters.outdoor_only {
+        conditions.push("(l.is_scout IS NULL OR l.is_scout = FALSE)".to_string());
+    }
+
+    if let Some(ref map_id) = filters.exclude_map_id {
+        conditions.push(format!(
+            "NOT EXISTS (SELECT 1 FROM map_locations ml WHERE ml.location_id = l.id AND ml.map_id = ${idx})"
+        ));
+        bind_values.push(FilterBindValue::Text(map_id.clone()));
+        idx += 1;
+    }
+
+    let _ = idx;
+    (conditions.join(" AND "), bind_values)
+}
+
+/// Helper: bind `FilterBindValue`s to a sqlx query in order.
+fn bind_filter_values<'q, O>(
+    mut query: sqlx::query::QueryAs<'q, sqlx::Postgres, O, sqlx::postgres::PgArguments>,
+    values: &'q [FilterBindValue],
+) -> sqlx::query::QueryAs<'q, sqlx::Postgres, O, sqlx::postgres::PgArguments> {
+    for val in values {
+        query = match val {
+            FilterBindValue::Text(s) => query.bind(s.as_str()),
+            FilterBindValue::Int(i) => query.bind(*i),
+        };
+    }
+    query
+}
+
 /// Search locations with filters for the map builder.
 ///
 /// All filter values are passed as bind parameters to prevent SQL injection.
@@ -1690,104 +1770,11 @@ pub async fn search_locations(
     limit: i64,
     offset: i64,
 ) -> Result<(Vec<Location>, i64), LocationError> {
-    // Build WHERE conditions with numbered bind parameters.
-    // $1 = limit, $2 = offset (used in the data query only), so filter params start at $3.
-    let mut conditions = vec![
-        "l.active = TRUE".to_string(),
-        "(l.review_status IS NULL OR l.review_status = 'approved')".to_string(),
-    ];
-    // Track bind parameter values in order. Limit/offset ($1/$2) are bound separately.
-    let mut bind_values: Vec<FilterBindValue> = Vec::new();
-    let mut param_index: usize = 3; // $1 = limit, $2 = offset
-
-    if let Some(ref country) = filters.country_code {
-        conditions.push(format!("l.country_code = ${param_index}"));
-        bind_values.push(FilterBindValue::Text(country.clone()));
-        param_index += 1;
-    }
-
-    if let Some(ref subdivision) = filters.subdivision_code {
-        conditions.push(format!("l.subdivision_code = ${param_index}"));
-        bind_values.push(FilterBindValue::Text(subdivision.clone()));
-        param_index += 1;
-    }
-
-    if let Some(min_year) = filters.min_year {
-        conditions.push(format!(
-            "(l.capture_date IS NULL OR EXTRACT(YEAR FROM l.capture_date) >= ${param_index})"
-        ));
-        bind_values.push(FilterBindValue::Int(min_year));
-        param_index += 1;
-    }
-
-    if let Some(max_year) = filters.max_year {
-        conditions.push(format!(
-            "(l.capture_date IS NULL OR EXTRACT(YEAR FROM l.capture_date) <= ${param_index})"
-        ));
-        bind_values.push(FilterBindValue::Int(max_year));
-        param_index += 1;
-    }
-
-    if filters.outdoor_only {
-        conditions.push("(l.is_scout IS NULL OR l.is_scout = FALSE)".to_string());
-    }
-
-    if let Some(ref map_id) = filters.exclude_map_id {
-        conditions.push(format!(
-            "NOT EXISTS (SELECT 1 FROM map_locations ml WHERE ml.location_id = l.id AND ml.map_id = ${param_index})"
-        ));
-        bind_values.push(FilterBindValue::Text(map_id.clone()));
-        param_index += 1;
-    }
-
-    let _ = param_index; // suppress unused warning
-
-    let where_clause = conditions.join(" AND ");
-
-    // Get total count — count query uses params starting at $1
-    // We need to re-number for the count query since it has no limit/offset
-    let count_conditions = {
-        let mut conds = vec![
-            "l.active = TRUE".to_string(),
-            "(l.review_status IS NULL OR l.review_status = 'approved')".to_string(),
-        ];
-        let mut idx: usize = 1;
-        if filters.country_code.is_some() {
-            conds.push(format!("l.country_code = ${idx}"));
-            idx += 1;
-        }
-        if filters.subdivision_code.is_some() {
-            conds.push(format!("l.subdivision_code = ${idx}"));
-            idx += 1;
-        }
-        if filters.min_year.is_some() {
-            conds.push(format!(
-                "(l.capture_date IS NULL OR EXTRACT(YEAR FROM l.capture_date) >= ${idx})"
-            ));
-            idx += 1;
-        }
-        if filters.max_year.is_some() {
-            conds.push(format!(
-                "(l.capture_date IS NULL OR EXTRACT(YEAR FROM l.capture_date) <= ${idx})"
-            ));
-            idx += 1;
-        }
-        if filters.outdoor_only {
-            conds.push("(l.is_scout IS NULL OR l.is_scout = FALSE)".to_string());
-        }
-        if filters.exclude_map_id.is_some() {
-            conds.push(format!(
-                "NOT EXISTS (SELECT 1 FROM map_locations ml WHERE ml.location_id = l.id AND ml.map_id = ${idx})"
-            ));
-            idx += 1;
-        }
-        let _ = idx;
-        conds.join(" AND ")
-    };
-
-    let count_query = format!("SELECT COUNT(*)::bigint FROM locations l WHERE {count_conditions}");
-    let mut count_q = sqlx::query_scalar::<_, i64>(&count_query);
-    for val in &bind_values {
+    // Count query: filter params start at $1
+    let (count_where, count_binds) = build_search_filter_clause(filters, 1);
+    let count_sql = format!("SELECT COUNT(*)::bigint FROM locations l WHERE {count_where}");
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
+    for val in &count_binds {
         count_q = match val {
             FilterBindValue::Text(s) => count_q.bind(s.as_str()),
             FilterBindValue::Int(i) => count_q.bind(*i),
@@ -1796,35 +1783,25 @@ pub async fn search_locations(
     let total: i64 =
         count_q.fetch_one(pool).await.map_err(|e| LocationError::Database(e.to_string()))?;
 
-    // Get paginated results ($1 = limit, $2 = offset, $3+ = filters)
-    let query = format!(
+    // Data query: $1 = limit, $2 = offset, filter params start at $3
+    let (data_where, data_binds) = build_search_filter_clause(filters, 3);
+    let data_sql = format!(
         r#"
         SELECT {LOCATION_COLUMNS}
         FROM locations l
-        WHERE {where_clause}
+        WHERE {data_where}
         ORDER BY l.country_code ASC, l.created_at DESC
         LIMIT $1 OFFSET $2
         "#
     );
 
-    let mut data_q = sqlx::query_as::<_, LocationRow>(&query).bind(limit).bind(offset);
-    for val in &bind_values {
-        data_q = match val {
-            FilterBindValue::Text(s) => data_q.bind(s.as_str()),
-            FilterBindValue::Int(i) => data_q.bind(*i),
-        };
-    }
+    let base_q = sqlx::query_as::<_, LocationRow>(&data_sql).bind(limit).bind(offset);
+    let data_q = bind_filter_values(base_q, &data_binds);
 
     let rows = data_q.fetch_all(pool).await.map_err(|e| LocationError::Database(e.to_string()))?;
 
     let locations: Result<Vec<Location>, _> = rows.into_iter().map(|r| r.try_into()).collect();
     Ok((locations?, total))
-}
-
-/// Helper enum for dynamic bind parameter values in search queries.
-enum FilterBindValue {
-    Text(String),
-    Int(i32),
 }
 
 /// Get available countries for location filtering.

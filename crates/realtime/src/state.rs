@@ -189,9 +189,15 @@ impl AppState {
     }
 
     /// Background task that removes finished game actors from the HashMap
+    /// and sends Shutdown to the actor so it stops processing commands
+    /// (which also causes the tick timer to stop when the channel closes).
     async fn run_game_cleanup(state: AppState, mut rx: mpsc::Receiver<String>) {
         while let Some(game_id) = rx.recv().await {
-            state.inner.games.write().await.remove(&game_id);
+            if let Some(handle) = state.inner.games.write().await.remove(&game_id) {
+                // Send Shutdown to stop the actor's run loop; this also closes
+                // the channel (handle is dropped), which stops the tick timer.
+                let _ = handle.tx.try_send(GameCommand::Shutdown);
+            }
             tracing::info!(game_id = %game_id, "Cleaned up finished game actor");
         }
     }
@@ -241,19 +247,24 @@ impl AppState {
 
     /// Unregister a socket connection.
     ///
-    /// Only removes the `user_sockets` entry if it still points to this socket,
-    /// preventing a stale tab disconnect from removing an active tab's mapping.
+    /// Returns `Some(user_id)` only if this was the user's **last active socket**,
+    /// meaning they are now fully offline and should be treated as disconnected.
+    /// Returns `None` if the socket was unknown or the user still has another
+    /// active socket (e.g., another browser tab).
     pub async fn unregister_socket(&self, socket_id: &str) -> Option<String> {
         let mut socket_users = self.inner.socket_users.write().await;
         let mut user_sockets = self.inner.user_sockets.write().await;
 
         if let Some(user_id) = socket_users.remove(socket_id) {
-            // Only remove the user->socket mapping if it still points to this socket.
-            // If the user opened a new tab, user_sockets already points to the new socket.
+            // Only treat as "user went offline" if user_sockets still points to
+            // this socket. If a newer tab replaced it, the user is still connected.
             if user_sockets.get(&user_id).is_some_and(|sid| sid == socket_id) {
                 user_sockets.remove(&user_id);
+                Some(user_id)
+            } else {
+                // User has another active socket — don't trigger Leave
+                None
             }
-            Some(user_id) // Returns usr_xxxxxxxxxxxx
         } else {
             None
         }

@@ -1006,10 +1006,14 @@ impl GameActor {
         self.delete_state_from_redis().await;
 
         // Signal cleanup so the AppState removes this game from the HashMap
-        // and the tick timer stops (channel closes when the handle is dropped)
+        // and sends Shutdown to stop the run loop and tick timer.
         if let Some(cleanup_tx) = &self.cleanup_tx {
             let _ = cleanup_tx.send(self.game_id.clone()).await;
         }
+
+        // Close receiver immediately so the run loop exits even before
+        // the cleanup task processes the message (belt-and-suspenders).
+        self.rx.close();
 
         Ok(())
     }
@@ -1354,7 +1358,7 @@ impl GameActor {
         // Delete from Redis
         self.delete_state_from_redis().await;
 
-        // Signal cleanup
+        // Signal cleanup — the cleanup task will send Shutdown to stop the actor
         if let Some(cleanup_tx) = &self.cleanup_tx {
             let _ = cleanup_tx.send(self.game_id.clone()).await;
         }

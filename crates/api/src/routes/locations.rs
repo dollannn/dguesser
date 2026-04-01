@@ -330,7 +330,7 @@ async fn report_location(
         {
             tracing::warn!(error = %e, location_id = %location_id, "Failed to flag location");
         } else {
-            tracing::warn!(location_id = %location_id, "Location flagged after 3 reports");
+            tracing::warn!(location_id = %location_id, "Location auto-flagged after 5+ reports");
         }
     }
 
