@@ -44,19 +44,45 @@ export const MAP_DEFAULTS = {
  * Marker appearance settings
  */
 export const MARKER_CONFIG = {
-  /** Base size of marker icon in pixels */
+  /** Base size of marker icon in pixels (used for guess minimap) */
   size: 32,
+
+  /** Marker sizes for results map - visual hierarchy */
+  resultSizes: {
+    /** Correct location target marker */
+    correct: 44,
+    /** Current user's guess - prominent */
+    currentUser: 36,
+    /** Other players' guesses - smaller to reduce clutter */
+    otherPlayer: 26,
+  },
 
   /** Marker colors by type */
   colors: {
-    /** Color for guess markers (Tailwind blue-500) */
+    /** Color for guess markers during gameplay (Tailwind blue-500) */
     guess: '#3b82f6',
     /** Color for correct location markers (Tailwind green-500) */
     correct: '#22c55e',
-    /** Colors for multiplayer guess markers - cycles through array */
-    players: ['#3b82f6', '#a855f7', '#f59e0b', '#ec4899', '#06b6d4', '#14b8a6'],
+    /** Dedicated color for current user's guess (Tailwind blue-500) */
+    currentUser: '#3b82f6',
+    /** Colors for other players' guess markers - cycles through array */
+    players: ['#a855f7', '#f59e0b', '#ec4899', '#06b6d4', '#14b8a6', '#f97316'],
   },
 
   /** Hover preview opacity */
   hoverOpacity: 0.5,
+};
+
+/**
+ * Animation timing for the results reveal sequence (milliseconds)
+ */
+export const RESULTS_ANIMATION = {
+  /** Delay before correct location marker appears */
+  correctDelay: 100,
+  /** Delay before current user's guess appears (after correct) */
+  currentUserDelay: 500,
+  /** Delay between each subsequent player's guess appearing */
+  playerStagger: 300,
+  /** Duration of the line drawing animation */
+  lineDuration: 400,
 };

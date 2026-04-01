@@ -8,11 +8,13 @@
   import * as Card from '$lib/components/ui/card';
   import * as Table from '$lib/components/ui/table';
   import { Confetti } from 'svelte-confetti';
+  import GameSummaryMap from './GameSummaryMap.svelte';
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import CrownIcon from '@lucide/svelte/icons/crown';
   import HomeIcon from '@lucide/svelte/icons/home';
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
   import TargetIcon from '@lucide/svelte/icons/target';
+  import MapIcon from '@lucide/svelte/icons/map';
   import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
   import TrendingDownIcon from '@lucide/svelte/icons/trending-down';
   import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -35,8 +37,11 @@
   let winner = $derived(standings[0]);
   let isWinner = $derived(myRank === 1);
 
-  // Solo mode: round history and statistics
+  // Solo mode: round history, locations, and statistics
   let roundHistory = $derived($gameStore.roundHistory);
+  let roundLocations = $derived($gameStore.roundLocations);
+  let currentUserId = $derived($user?.id ?? '');
+  let hasSummaryMapData = $derived(roundLocations.length > 0 && roundHistory.length > 0);
   let finalScore = $derived(myStanding?.total_score ?? winner?.total_score ?? 0);
   let previousBest = $derived($user?.best_score ?? 0);
   let isNewPersonalBest = $derived(finalScore > previousBest);
@@ -248,6 +253,27 @@
           </Card.Content>
         </div>
       </Card.Root>
+
+      <!-- Game Summary Map -->
+      {#if hasSummaryMapData}
+        <Card.Root class="overflow-hidden">
+          <Card.Header class="pb-3">
+            <Card.Title class="flex items-center gap-2">
+              <MapIcon class="h-5 w-5 text-primary" />
+              Your Journey
+            </Card.Title>
+          </Card.Header>
+          <Card.Content class="p-0">
+            <div class="h-[300px] md:h-[350px]">
+              <GameSummaryMap
+                {roundLocations}
+                {roundHistory}
+                {currentUserId}
+              />
+            </div>
+          </Card.Content>
+        </Card.Root>
+      {/if}
 
       <!-- Round-by-Round Breakdown -->
       {#if myRoundStats.length > 0}
@@ -489,6 +515,27 @@
           </Table.Root>
         </Card.Content>
       </Card.Root>
+
+      <!-- Game Summary Map (multiplayer) -->
+      {#if hasSummaryMapData}
+        <Card.Root class="overflow-hidden">
+          <Card.Header class="pb-3">
+            <Card.Title class="flex items-center gap-2">
+              <MapIcon class="h-5 w-5 text-primary" />
+              Your Journey
+            </Card.Title>
+          </Card.Header>
+          <Card.Content class="p-0">
+            <div class="h-[300px] md:h-[350px]">
+              <GameSummaryMap
+                {roundLocations}
+                {roundHistory}
+                {currentUserId}
+              />
+            </div>
+          </Card.Content>
+        </Card.Root>
+      {/if}
 
       <!-- Your result highlight -->
       {#if myRank && myRank > 1 && myStanding}

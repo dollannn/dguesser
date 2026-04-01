@@ -160,6 +160,8 @@ export interface GameState {
   results: RoundResult[];
   /** All rounds' results for end-of-game statistics (solo mode) */
   roundHistory: RoundResult[][];
+  /** Correct locations for each round (parallel array with roundHistory) */
+  roundLocations: RoundLocation[];
   finalStandings: FinalStanding[];
   /** Map keyed by user_id (usr_xxxxxxxxxxxx) */
   players: Map<string, PlayerState>;
@@ -182,6 +184,7 @@ function createGameStore() {
     hasGuessed: false,
     results: [],
     roundHistory: [],
+    roundLocations: [],
     finalStandings: [],
     players: new Map(),
     liveScores: [],
@@ -372,8 +375,9 @@ function createGameStore() {
           ...s,
           status: 'round_end',
           results: payload.results,
-          // Accumulate round history for end-of-game statistics
+          // Accumulate round history and locations for end-of-game statistics & summary map
           roundHistory: [...s.roundHistory, payload.results],
+          roundLocations: [...s.roundLocations, payload.correct_location],
           location: payload.correct_location,
           players,
         };

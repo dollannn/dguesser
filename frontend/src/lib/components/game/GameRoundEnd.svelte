@@ -4,6 +4,7 @@
   import { gameStore } from '$lib/socket/game';
   import { user } from '$lib/stores/auth';
   import { getRankDisplay, getRankClass, formatScore, formatDistance } from '$lib/utils.js';
+  import { MARKER_CONFIG } from '$lib/config/map';
   import { Button } from '$lib/components/ui/button';
   import { Badge } from '$lib/components/ui/badge';
   import * as Card from '$lib/components/ui/card';
@@ -85,9 +86,33 @@
       .map((result, index) => ({
         ...result,
         rank: index + 1,
-        isCurrentUser: result.user_id === $user?.id,
+        isCurrentUser: result.user_id === $user?.id || (result.user_id === '' && game.mode === 'solo'),
       }));
   });
+
+  // Build color map for each player (matches ResultsMap logic)
+  // Current user always gets blue, others get cycling colors from players palette
+  let playerColorMap = $derived.by(() => {
+    const colorMap = new Map<string, string>();
+    let otherIndex = 0;
+    
+    for (const result of rankedResults) {
+      if (result.isCurrentUser) {
+        colorMap.set(result.user_id, MARKER_CONFIG.colors.currentUser);
+      } else {
+        colorMap.set(
+          result.user_id,
+          MARKER_CONFIG.colors.players[otherIndex % MARKER_CONFIG.colors.players.length]
+        );
+        otherIndex++;
+      }
+    }
+    
+    return colorMap;
+  });
+
+  // Current user's ID for the map component
+  let currentUserId = $derived($user?.id ?? '');
 </script>
 
 <div class="min-h-screen bg-background p-4 md:p-6 pt-20 md:pt-24">
@@ -115,7 +140,10 @@
                 lat: r.guess_lat,
                 lng: r.guess_lng,
                 displayName: r.display_name,
+                userId: r.user_id,
+                distanceMeters: r.distance_meters,
               }))}
+            {currentUserId}
           />
         {/if}
       </div>
@@ -145,7 +173,7 @@
           </Table.Header>
           <Table.Body>
             {#each rankedResults as result (result.user_id)}
-              {@const isTop3 = result.rank <= 3}
+              {@const markerColor = playerColorMap.get(result.user_id)}
               <Table.Row 
                 class={result.isCurrentUser ? 'bg-primary/5' : ''}
               >
@@ -156,6 +184,13 @@
                 </Table.Cell>
                 <Table.Cell>
                   <div class="flex items-center gap-2">
+                    <!-- Color dot matching the map marker -->
+                    {#if markerColor && result.distance_meters >= 0}
+                      <span
+                        class="inline-block w-3 h-3 rounded-full shrink-0 ring-2 ring-background"
+                        style="background-color: {markerColor};"
+                      ></span>
+                    {/if}
                     <span class={result.isCurrentUser ? 'font-medium text-primary' : 'font-medium'}>
                       {result.display_name || 'You'}
                     </span>
@@ -164,7 +199,7 @@
                     {/if}
                   </div>
                   <!-- Mobile total -->
-                  <div class="sm:hidden text-xs text-muted-foreground mt-0.5">
+                  <div class="sm:hidden text-xs text-muted-foreground mt-0.5 ml-5">
                     Total: {formatScore(result.total_score)}
                   </div>
                 </Table.Cell>
