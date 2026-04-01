@@ -1,7 +1,7 @@
 import { api } from './client';
 
-export type GameMode = 'solo' | 'multiplayer';
-export type GameStatus = 'lobby' | 'active' | 'finished';
+export type GameMode = 'solo' | 'multiplayer' | 'challenge';
+export type GameStatus = 'lobby' | 'active' | 'finished' | 'abandoned';
 
 export interface GameSettings {
   rounds: number;

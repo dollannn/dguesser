@@ -27,7 +27,7 @@ class ApiClient {
       credentials: 'include', // Send cookies
     };
 
-    if (body) {
+    if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(body);
     }
@@ -49,12 +49,17 @@ class ApiClient {
       throw new ApiClientError(response.status, error.code, error.message);
     }
 
-    // Handle 204 No Content — callers expecting void will get undefined
+    // Handle empty responses (204 No Content or empty body)
     if (response.status === 204) {
       return undefined as unknown as T;
     }
 
-    return response.json();
+    const text = await response.text();
+    if (!text) {
+      return undefined as unknown as T;
+    }
+
+    return JSON.parse(text);
   }
 
   get<T>(path: string): Promise<T> {
