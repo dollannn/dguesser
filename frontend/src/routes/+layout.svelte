@@ -4,6 +4,7 @@
   import { authStore, isLoading } from '$lib/stores/auth';
   import { socketClient } from '$lib/socket/client';
   import { initGameSocketListeners } from '$lib/socket/game';
+  import { initPartySocketListeners } from '$lib/socket/party';
   import Header from '$lib/components/Header.svelte';
   import AuthModal from '$lib/components/AuthModal.svelte';
   import ReconnectingOverlay from '$lib/components/ReconnectingOverlay.svelte';
@@ -34,6 +35,7 @@
     authStore.initialize();
 
     const cleanupListeners = initGameSocketListeners();
+    initPartySocketListeners();
 
     const unsubscribe = authStore.subscribe(($auth) => {
       if ($auth.user && !socketClient.connected) {

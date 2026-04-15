@@ -45,6 +45,7 @@ pub enum EntityPrefix {
     Location,
     Map,
     Report,
+    Party,
 }
 
 impl EntityPrefix {
@@ -60,6 +61,7 @@ impl EntityPrefix {
             EntityPrefix::Location => "loc_",
             EntityPrefix::Map => "map_",
             EntityPrefix::Report => "rpt_",
+            EntityPrefix::Party => "pty_",
         }
     }
 }
@@ -118,6 +120,12 @@ pub fn generate_report_id() -> String {
     format!("{}{}", EntityPrefix::Report.as_str(), generate_id(ENTITY_ID_LEN))
 }
 
+/// Generate a prefixed ID for a party entity.
+/// Format: `pty_XXXXXXXXXXXX` (16 chars total, ~71 bits entropy)
+pub fn generate_party_id() -> String {
+    format!("{}{}", EntityPrefix::Party.as_str(), generate_id(ENTITY_ID_LEN))
+}
+
 /// Parse the prefix from an ID string.
 /// Returns `None` if the ID doesn't have a recognized prefix.
 pub fn parse_prefix(id: &str) -> Option<EntityPrefix> {
@@ -139,6 +147,8 @@ pub fn parse_prefix(id: &str) -> Option<EntityPrefix> {
         Some(EntityPrefix::Map)
     } else if id.starts_with("rpt_") {
         Some(EntityPrefix::Report)
+    } else if id.starts_with("pty_") {
+        Some(EntityPrefix::Party)
     } else {
         None
     }
@@ -219,6 +229,13 @@ mod tests {
     }
 
     #[test]
+    fn test_party_id_format() {
+        let id = generate_party_id();
+        assert!(id.starts_with("pty_"));
+        assert_eq!(id.len(), 16);
+    }
+
+    #[test]
     fn test_parse_prefix() {
         assert_eq!(parse_prefix("usr_abcdefghijkl"), Some(EntityPrefix::User));
         assert_eq!(parse_prefix("gam_abcdefghijkl"), Some(EntityPrefix::Game));
@@ -229,6 +246,7 @@ mod tests {
         assert_eq!(parse_prefix("loc_abcdefghijkl"), Some(EntityPrefix::Location));
         assert_eq!(parse_prefix("map_abcdefghijkl"), Some(EntityPrefix::Map));
         assert_eq!(parse_prefix("rpt_abcdefghijkl"), Some(EntityPrefix::Report));
+        assert_eq!(parse_prefix("pty_abcdefghijkl"), Some(EntityPrefix::Party));
         assert_eq!(parse_prefix("unknown_id"), None);
     }
 }

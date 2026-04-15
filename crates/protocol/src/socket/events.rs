@@ -37,4 +37,28 @@ pub mod client {
     pub const SKIP_WAIT: &str = "round:skip";
     /// Player votes to skip the between-rounds wait
     pub const VOTE_SKIP: &str = "round:vote_skip";
+
+    // Party events
+    pub const CREATE_PARTY: &str = "party:create";
+    pub const JOIN_PARTY: &str = "party:join";
+    pub const LEAVE_PARTY: &str = "party:leave";
+    pub const PARTY_START_GAME: &str = "party:start_game";
+    pub const PARTY_UPDATE_SETTINGS: &str = "party:update_settings";
+    pub const PARTY_KICK: &str = "party:kick";
+    pub const DISBAND_PARTY: &str = "party:disband";
+}
+
+/// Socket.IO event names for party system (server -> client)
+pub mod party {
+    pub const PARTY_CREATED: &str = "party:created";
+    pub const PARTY_STATE: &str = "party:state";
+    pub const MEMBER_JOINED: &str = "party:member_joined";
+    pub const MEMBER_LEFT: &str = "party:member_left";
+    pub const GAME_STARTING: &str = "party:game_starting";
+    pub const GAME_ENDED: &str = "party:game_ended";
+    pub const DISBANDED: &str = "party:disbanded";
+    pub const HOST_CHANGED: &str = "party:host_changed";
+    pub const SETTINGS_UPDATED: &str = "party:settings_updated";
+    pub const KICKED: &str = "party:kicked";
+    pub const ERROR: &str = "party:error";
 }

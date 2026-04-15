@@ -345,3 +345,157 @@ pub struct GameAbandonedPayload {
     #[schema(example = "All players disconnected")]
     pub reason: String,
 }
+
+// =============================================================================
+// Party payloads
+// =============================================================================
+
+/// Client request to create a party
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreatePartyPayload {
+    /// Optional initial game settings
+    #[serde(default)]
+    pub settings: Option<GameSettingsPayload>,
+}
+
+/// Client request to join a party
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct JoinPartyPayload {
+    /// Party join code
+    pub code: String,
+}
+
+/// Client request to start a game from the party
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyStartGamePayload {
+    /// Party ID
+    pub party_id: String,
+}
+
+/// Client request to update party settings
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyUpdateSettingsPayload {
+    /// Party ID
+    pub party_id: String,
+    /// Updated settings
+    pub settings: GameSettingsPayload,
+}
+
+/// Client request to kick a member
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyKickPayload {
+    /// Party ID
+    pub party_id: String,
+    /// User ID of the member to kick
+    pub user_id: String,
+}
+
+/// Client request to disband a party
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyDisbandPayload {
+    /// Party ID
+    pub party_id: String,
+}
+
+/// Server response: party created
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyCreatedPayload {
+    /// Party ID (e.g., pty_FybH2oF9Xaw8)
+    pub party_id: String,
+    /// Join code for sharing
+    pub join_code: String,
+}
+
+/// Member info in party state
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyMemberInfo {
+    /// User ID
+    pub user_id: String,
+    /// Display name
+    pub display_name: String,
+    /// Avatar URL
+    pub avatar_url: Option<String>,
+    /// Whether the member is currently connected
+    pub connected: bool,
+}
+
+/// Full party state (sent when member joins or reconnects)
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyStatePayload {
+    /// Party ID
+    pub party_id: String,
+    /// Join code
+    pub join_code: String,
+    /// User ID of the party host
+    pub host_id: String,
+    /// All party members
+    pub members: Vec<PartyMemberInfo>,
+    /// Default game settings
+    pub settings: GameSettingsPayload,
+    /// Current game ID (if a game is in progress)
+    pub current_game_id: Option<String>,
+    /// Party phase: "lobby" or "in_game"
+    pub phase: String,
+}
+
+/// Server broadcast: member joined party
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyMemberJoinedPayload {
+    pub member: PartyMemberInfo,
+}
+
+/// Server broadcast: member left party
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyMemberLeftPayload {
+    pub user_id: String,
+    pub display_name: String,
+}
+
+/// Server broadcast: game starting from party
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyGameStartingPayload {
+    /// Game ID to navigate to
+    pub game_id: String,
+}
+
+/// Server broadcast: game ended, return to party lobby
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyGameEndedPayload {
+    /// Game ID that ended
+    pub game_id: String,
+}
+
+/// Server broadcast: party disbanded
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyDisbandedPayload {
+    /// Reason for disbanding
+    pub reason: String,
+}
+
+/// Server broadcast: party host changed
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyHostChangedPayload {
+    /// New host user ID
+    pub new_host_id: String,
+    /// New host display name
+    pub new_host_name: String,
+}
+
+/// Server broadcast: party settings updated
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartySettingsUpdatedPayload {
+    pub settings: GameSettingsPayload,
+}
+
+/// Server: member was kicked
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyKickedPayload {
+    pub user_id: String,
+}
+
+/// Party error payload
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PartyErrorPayload {
+    pub code: String,
+    pub message: String,
+}

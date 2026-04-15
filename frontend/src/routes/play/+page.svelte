@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { user, authStore } from '$lib/stores/auth';
   import { gamesApi } from '$lib/api/games';
+  import { partiesApi } from '$lib/api/parties';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import * as Card from '$lib/components/ui/card';
@@ -18,6 +19,7 @@
   import SparklesIcon from '@lucide/svelte/icons/sparkles';
   import MapPinIcon from '@lucide/svelte/icons/map-pin';
   import TrophyIcon from '@lucide/svelte/icons/trophy';
+  import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 
   let joinCode = $state('');
   let loading = $state(false);
@@ -59,7 +61,7 @@
     }
   }
 
-  async function joinGame() {
+  async function joinByCode() {
     if (!joinCode.trim()) return;
 
     loading = true;
@@ -70,10 +72,33 @@
         await authStore.createGuest();
       }
 
-      const game = await gamesApi.joinByCode(joinCode.trim().toUpperCase());
-      goto(`/game/${game.id}`);
+      // Unified lookup: checks parties first, then games
+      const result = await partiesApi.joinByCode(joinCode.trim().toUpperCase());
+      if (result.type === 'party') {
+        goto(`/party/${result.id}`);
+      } else {
+        goto(`/game/${result.id}`);
+      }
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to join game';
+      error = e instanceof Error ? e.message : 'Invalid code';
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function createParty() {
+    loading = true;
+    error = '';
+
+    try {
+      if (!$user) {
+        await authStore.createGuest();
+      }
+
+      const party = await partiesApi.create();
+      goto(`/party/${party.id}`);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to create party';
     } finally {
       loading = false;
     }
@@ -81,7 +106,7 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
-      joinGame();
+      joinByCode();
     }
   }
 </script>
@@ -161,10 +186,16 @@
         </div>
       </Card.Header>
       <Card.Content class="space-y-4">
-        <Button variant="outline" onclick={createMultiplayerGame} disabled={loading} class="w-full">
-          <UsersIcon class="size-4" />
-          Create Room
-        </Button>
+        <div class="grid grid-cols-2 gap-2">
+          <Button variant="outline" onclick={createMultiplayerGame} disabled={loading} class="w-full">
+            <UsersIcon class="size-4" />
+            Quick Game
+          </Button>
+          <Button variant="outline" onclick={createParty} disabled={loading} class="w-full">
+            <PartyPopperIcon class="size-4" />
+            Create Party
+          </Button>
+        </div>
 
         <div class="relative">
           <div class="absolute inset-0 flex items-center">
@@ -186,7 +217,7 @@
           />
           <Button
             variant="secondary"
-            onclick={joinGame}
+            onclick={joinByCode}
             disabled={loading || !joinCode.trim()}
           >
             Join

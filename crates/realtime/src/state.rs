@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use tokio::sync::{RwLock, mpsc, oneshot};
 
-use crate::actors::GameActor;
+use crate::actors::{GameActor, PartyActor};
 use crate::config::{Config, LocationProviderType};
 use crate::emitter::BroadcastEmitter;
 use crate::redis_state::RedisStateManager;
+use dguesser_core::game::GameSettings;
 use dguesser_core::location::LocationProvider;
 use dguesser_db::{DbPool, LocationRepository};
 use dguesser_locations::reader::{FileReader, HttpReader};
@@ -32,6 +33,8 @@ struct AppStateInner {
     pub emitter: BroadcastEmitter,
     /// Active game actors (keyed by game_id: gam_xxxxxxxxxxxx)
     pub games: RwLock<HashMap<String, GameHandle>>,
+    /// Active party actors (keyed by party_id: pty_xxxxxxxxxxxx)
+    pub parties: RwLock<HashMap<String, PartyHandle>>,
     /// Socket ID to User ID mapping (user_id: usr_xxxxxxxxxxxx)
     pub socket_users: RwLock<HashMap<String, String>>,
     /// User ID to Socket ID mapping (for reconnects)
@@ -40,6 +43,10 @@ struct AppStateInner {
     pub location_provider: Arc<dyn LocationProvider>,
     /// Channel for game actors to request cleanup when they finish
     pub game_cleanup_tx: mpsc::Sender<String>,
+    /// Channel for party actors to request cleanup when they disband
+    pub party_cleanup_tx: mpsc::Sender<String>,
+    /// Channel for game actors to notify parties when a game ends
+    pub party_game_ended_tx: mpsc::Sender<(String, String)>,
 }
 
 /// Handle to communicate with a game actor
@@ -48,6 +55,14 @@ pub struct GameHandle {
     #[allow(dead_code)]
     pub game_id: String, // gam_xxxxxxxxxxxx
     pub tx: mpsc::Sender<GameCommand>,
+}
+
+/// Handle to communicate with a party actor
+#[derive(Clone)]
+pub struct PartyHandle {
+    #[allow(dead_code)]
+    pub party_id: String, // pty_xxxxxxxxxxxx
+    pub tx: mpsc::Sender<PartyCommand>,
 }
 
 /// Grace period for reconnection in lobby (seconds).
@@ -113,6 +128,52 @@ pub struct GuessResult {
     pub score: u32,
 }
 
+/// Commands sent to party actors
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum PartyCommand {
+    Join {
+        user_id: String,
+        socket_id: String,
+        display_name: String,
+        avatar_url: Option<String>,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
+    Leave {
+        user_id: String,
+    },
+    Disconnect {
+        user_id: String,
+    },
+    Reconnect {
+        user_id: String,
+        socket_id: String,
+    },
+    StartGame {
+        user_id: String,
+        respond: oneshot::Sender<Result<String, String>>,
+    },
+    UpdateSettings {
+        user_id: String,
+        settings: GameSettings,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
+    Kick {
+        user_id: String,
+        target_user_id: String,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
+    Disband {
+        user_id: String,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
+    GameEnded {
+        game_id: String,
+    },
+    Tick,
+    Shutdown,
+}
+
 impl AppState {
     pub async fn new(
         db: DbPool,
@@ -171,8 +232,10 @@ impl AppState {
             }
         };
 
-        // Create cleanup channel for game actors to signal when they finish
+        // Create cleanup channels
         let (game_cleanup_tx, game_cleanup_rx) = mpsc::channel::<String>(100);
+        let (party_cleanup_tx, party_cleanup_rx) = mpsc::channel::<String>(100);
+        let (party_game_ended_tx, party_game_ended_rx) = mpsc::channel::<(String, String)>(100);
 
         let state = Self {
             inner: Arc::new(AppStateInner {
@@ -182,10 +245,13 @@ impl AppState {
                 config,
                 emitter: BroadcastEmitter::new(),
                 games: RwLock::new(HashMap::new()),
+                parties: RwLock::new(HashMap::new()),
                 socket_users: RwLock::new(HashMap::new()),
                 user_sockets: RwLock::new(HashMap::new()),
                 location_provider,
                 game_cleanup_tx,
+                party_cleanup_tx,
+                party_game_ended_tx,
             }),
         };
 
@@ -193,6 +259,18 @@ impl AppState {
         let cleanup_state = state.clone();
         tokio::spawn(async move {
             Self::run_game_cleanup(cleanup_state, game_cleanup_rx).await;
+        });
+
+        // Spawn background task that removes disbanded parties
+        let party_cleanup_state = state.clone();
+        tokio::spawn(async move {
+            Self::run_party_cleanup(party_cleanup_state, party_cleanup_rx).await;
+        });
+
+        // Spawn background task that routes game-end notifications to parties
+        let party_notify_state = state.clone();
+        tokio::spawn(async move {
+            Self::run_party_game_notifications(party_notify_state, party_game_ended_rx).await;
         });
 
         state
@@ -324,10 +402,12 @@ impl AppState {
         let redis_state = std::sync::Arc::new(RedisStateManager::new(self.inner.redis.clone()));
         let location_provider = self.inner.location_provider.clone();
         let cleanup_tx = self.inner.game_cleanup_tx.clone();
+        let party_notify_tx = self.inner.party_game_ended_tx.clone();
         tokio::spawn(async move {
             let mut actor = GameActor::new(&gid, db, rx, emitter, location_provider)
                 .with_redis(redis_state)
-                .with_cleanup(cleanup_tx);
+                .with_cleanup(cleanup_tx)
+                .with_party_notify(party_notify_tx);
             actor.run().await;
         });
 
@@ -361,5 +441,94 @@ impl AppState {
     #[allow(dead_code)]
     pub async fn remove_game(&self, game_id: &str) {
         self.inner.games.write().await.remove(game_id);
+    }
+
+    // =========================================================================
+    // Party management
+    // =========================================================================
+
+    /// Get the party-game-ended notification channel sender
+    #[allow(dead_code)]
+    pub fn party_game_ended_tx(&self) -> mpsc::Sender<(String, String)> {
+        self.inner.party_game_ended_tx.clone()
+    }
+
+    /// Background task that removes disbanded parties from the HashMap
+    async fn run_party_cleanup(state: AppState, mut rx: mpsc::Receiver<String>) {
+        while let Some(party_id) = rx.recv().await {
+            if let Some(handle) = state.inner.parties.write().await.remove(&party_id) {
+                let _ = handle.tx.try_send(PartyCommand::Shutdown);
+            }
+            tracing::info!(party_id = %party_id, "Cleaned up disbanded party actor");
+        }
+    }
+
+    /// Background task that routes game-end notifications to the right party actor
+    async fn run_party_game_notifications(
+        state: AppState,
+        mut rx: mpsc::Receiver<(String, String)>,
+    ) {
+        while let Some((party_id, game_id)) = rx.recv().await {
+            let parties = state.inner.parties.read().await;
+            if let Some(handle) = parties.get(&party_id) {
+                let _ = handle.tx.send(PartyCommand::GameEnded { game_id: game_id.clone() }).await;
+                tracing::debug!(
+                    party_id = %party_id,
+                    game_id = %game_id,
+                    "Notified party actor of game end"
+                );
+            }
+        }
+    }
+
+    /// Create a new party actor and return its handle
+    pub async fn create_party(
+        &self,
+        party_id: &str,
+        host_id: &str,
+        join_code: &str,
+        settings: GameSettings,
+    ) -> PartyHandle {
+        let mut parties = self.inner.parties.write().await;
+
+        let (tx, rx) = mpsc::channel(100);
+        let handle = PartyHandle { party_id: party_id.to_string(), tx };
+
+        // Spawn actor
+        let db = self.inner.db.clone();
+        let pid = party_id.to_string();
+        let emitter = self.inner.emitter.clone();
+        let cleanup_tx = self.inner.party_cleanup_tx.clone();
+        let app_state = self.clone();
+        let hid = host_id.to_string();
+        let jc = join_code.to_string();
+        let s = settings;
+        tokio::spawn(async move {
+            let mut actor = PartyActor::new(&pid, db, rx, emitter, &hid, &jc, s)
+                .with_cleanup(cleanup_tx)
+                .with_app_state(app_state);
+            actor.run().await;
+        });
+
+        // Spawn tick timer for the party actor
+        let tick_tx = handle.tx.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(TICK_INTERVAL_SECS));
+            loop {
+                interval.tick().await;
+                if tick_tx.send(PartyCommand::Tick).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        parties.insert(party_id.to_string(), handle.clone());
+        handle
+    }
+
+    /// Get an existing party handle
+    pub async fn get_party(&self, party_id: &str) -> Option<PartyHandle> {
+        self.inner.parties.read().await.get(party_id).cloned()
     }
 }

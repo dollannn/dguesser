@@ -56,6 +56,8 @@ pub struct GameActor {
     location_provider: Arc<dyn LocationProvider>,
     /// Channel to signal the AppState to remove this game from the HashMap
     cleanup_tx: Option<mpsc::Sender<String>>,
+    /// Channel to notify a party when this game ends (party_id, game_id)
+    party_notify_tx: Option<mpsc::Sender<(String, String)>>,
 }
 
 impl GameActor {
@@ -78,6 +80,7 @@ impl GameActor {
             last_redis_save: None,
             location_provider,
             cleanup_tx: None,
+            party_notify_tx: None,
         }
     }
 
@@ -88,6 +91,11 @@ impl GameActor {
 
     pub fn with_cleanup(mut self, cleanup_tx: mpsc::Sender<String>) -> Self {
         self.cleanup_tx = Some(cleanup_tx);
+        self
+    }
+
+    pub fn with_party_notify(mut self, tx: mpsc::Sender<(String, String)>) -> Self {
+        self.party_notify_tx = Some(tx);
         self
     }
 
@@ -1075,6 +1083,28 @@ impl GameActor {
         // Delete from Redis
         self.delete_state_from_redis().await;
 
+        // Notify party (if this game belongs to one) so members return to lobby
+        if let Some(notify_tx) = &self.party_notify_tx {
+            match dguesser_db::parties::get_game_party_id(&self.db, &self.game_id).await {
+                Ok(Some(party_id)) => {
+                    let _ = notify_tx.send((party_id.clone(), self.game_id.clone())).await;
+                    tracing::info!(
+                        game_id = %self.game_id,
+                        party_id = %party_id,
+                        "Notified party of game end"
+                    );
+                }
+                Ok(None) => {} // Not a party game
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        game_id = %self.game_id,
+                        "Failed to check party_id for game"
+                    );
+                }
+            }
+        }
+
         // Signal cleanup so the AppState removes this game from the HashMap
         // and sends Shutdown to stop the run loop and tick timer.
         if let Some(cleanup_tx) = &self.cleanup_tx {
@@ -1469,6 +1499,14 @@ impl GameActor {
 
         // Delete from Redis
         self.delete_state_from_redis().await;
+
+        // Notify party (if this game belongs to one)
+        if let Some(notify_tx) = &self.party_notify_tx
+            && let Ok(Some(party_id)) =
+                dguesser_db::parties::get_game_party_id(&self.db, &self.game_id).await
+        {
+            let _ = notify_tx.send((party_id, self.game_id.clone())).await;
+        }
 
         // Signal cleanup — the cleanup task will send Shutdown to stop the actor
         if let Some(cleanup_tx) = &self.cleanup_tx {

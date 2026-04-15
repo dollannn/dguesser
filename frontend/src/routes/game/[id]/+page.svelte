@@ -4,6 +4,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { gamesApi, type GameDetails } from '$lib/api/games';
   import { gameStore } from '$lib/socket/game';
+  import { partyStore } from '$lib/socket/party';
   import { authStore, user } from '$lib/stores/auth';
   import GameLoading from '$lib/components/game/GameLoading.svelte';
   import GameLobby from '$lib/components/game/GameLobby.svelte';
@@ -11,10 +12,12 @@
   import GameRoundEnd from '$lib/components/game/GameRoundEnd.svelte';
   import GameFinished from '$lib/components/game/GameFinished.svelte';
   import SEO from '$lib/components/SEO.svelte';
+  import { Spinner } from '$lib/components/ui/spinner';
 
   let game: GameDetails | null = $state(null);
   let loading = $state(true);
   let error = $state('');
+  let autoStarting = $state(false);
 
   // Game ID from route params - guaranteed to exist for [id] route
   let gameId = $derived($page.params.id as string);
@@ -47,7 +50,18 @@
             await gameStore.joinGame(game.id);
           } catch (e) {
             console.error('Failed to join socket room:', e);
-            // Non-fatal - they can still see the lobby, just won't get realtime updates
+          }
+
+          // Party game auto-start: if this game was created by a party,
+          // the host auto-starts it so players skip the lobby entirely.
+          const partyState = $partyStore;
+          const isHost = game.players.find((p) => p.user_id === $user?.id)?.is_host;
+          if (partyState.partyId && isHost && game.status === 'lobby') {
+            autoStarting = true;
+            // Small delay to let socket room join settle
+            setTimeout(() => {
+              gameStore.startGame();
+            }, 500);
           }
         }
         // New players will click "Join Game" button
@@ -181,7 +195,13 @@
     <a href="/" class="inline-block px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Back to Home</a>
   </div>
 {:else if game}
-  {#if gameState.status === 'idle' || gameState.status === 'lobby'}
+  {#if autoStarting || (gameState.status === 'idle' || gameState.status === 'lobby') && $partyStore.partyId && $partyStore.status === 'in_game'}
+    <!-- Party game: show loading screen while auto-starting -->
+    <div class="flex flex-col items-center justify-center h-64 gap-4">
+      <Spinner class="size-10 text-primary" />
+      <p class="text-lg text-muted-foreground">Starting game...</p>
+    </div>
+  {:else if gameState.status === 'idle' || gameState.status === 'lobby'}
     <GameLobby {game} onStart={startGame} />
   {:else if gameState.status === 'playing'}
     <GamePlay {game} />

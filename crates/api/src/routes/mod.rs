@@ -15,6 +15,7 @@ pub mod health;
 pub mod leaderboard;
 pub mod locations;
 pub mod maps;
+pub mod parties;
 pub mod service;
 pub mod sessions;
 pub mod users;
@@ -174,6 +175,7 @@ pub fn create_router(state: AppState, cors: CorsLayer, is_production: bool) -> R
         .nest("/leaderboard", leaderboard::router())
         .nest("/locations", locations::router())
         .nest("/maps", maps::router())
+        .nest("/parties", parties::router())
         .nest("/admin", admin::router())
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit));
 

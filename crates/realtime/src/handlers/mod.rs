@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod game;
+pub mod party;
 
 use std::time::Duration;
 
@@ -10,7 +11,7 @@ use socketioxide::extract::{SocketRef, State};
 use socketioxide::socket::DisconnectReason;
 use tracing::info;
 
-use crate::state::{AppState, GameCommand};
+use crate::state::{AppState, GameCommand, PartyCommand};
 
 /// Timeout for unauthenticated socket connections (in seconds)
 /// Sockets that don't authenticate within this time will be disconnected
@@ -34,6 +35,15 @@ pub async fn on_connect<A: Adapter>(socket: SocketRef<A>, State(state): State<Ap
     socket.on("round:skip", game::handle_skip_wait::<A>);
     socket.on("round:vote_skip", game::handle_vote_skip::<A>);
     socket.on("player:ready", game::handle_ready::<A>);
+
+    // Party event handlers
+    socket.on("party:create", party::handle_create_party::<A>);
+    socket.on("party:join", party::handle_join_party::<A>);
+    socket.on("party:leave", party::handle_leave_party::<A>);
+    socket.on("party:start_game", party::handle_start_game::<A>);
+    socket.on("party:update_settings", party::handle_update_settings::<A>);
+    socket.on("party:kick", party::handle_kick::<A>);
+    socket.on("party:disband", party::handle_disband::<A>);
 
     // Handle disconnect
     socket.on_disconnect(handle_disconnect::<A>);
@@ -69,16 +79,21 @@ async fn handle_disconnect<A: Adapter>(
 
     // Get user for this socket
     if let Some(user_id) = state.unregister_socket(&socket_id).await {
-        // Notify any active games about the disconnect
         // Get all rooms this socket was in
         let rooms = socket.rooms();
         for room in rooms.into_iter() {
-            // Room names are game IDs (gam_xxxxxxxxxxxx)
+            // Notify game actors about the disconnect
             if room.starts_with("gam_")
                 && let Some(handle) = state.get_game(&room).await
             {
-                // Send leave command - the game actor will handle grace period
                 let _ = handle.tx.send(GameCommand::Leave { user_id: user_id.clone() }).await;
+            }
+
+            // Notify party actors about the disconnect
+            if room.starts_with("pty_")
+                && let Some(handle) = state.get_party(&room).await
+            {
+                let _ = handle.tx.send(PartyCommand::Disconnect { user_id: user_id.clone() }).await;
             }
         }
     }

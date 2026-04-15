@@ -1,6 +1,7 @@
 <script lang="ts">
   import { gamesApi, type GameDetails, type GameSummary } from '$lib/api/games';
   import { gameStore, type RoundResult } from '$lib/socket/game';
+  import { partyStore } from '$lib/socket/party';
   import { user } from '$lib/stores/auth';
   import { getRankDisplay, getRankClass, formatScore, formatDistance } from '$lib/utils.js';
   import { Button } from '$lib/components/ui/button';
@@ -20,6 +21,8 @@
   import SparklesIcon from '@lucide/svelte/icons/sparkles';
   import HistoryIcon from '@lucide/svelte/icons/history';
   import ChartLineIcon from '@lucide/svelte/icons/chart-line';
+  import UsersIcon from '@lucide/svelte/icons/users';
+  import LogOutIcon from '@lucide/svelte/icons/log-out';
 
   interface Props {
     game: GameDetails;
@@ -567,14 +570,26 @@
 
     <!-- Action buttons (shared) -->
     <div class="flex justify-center gap-3 pt-2">
-      <Button variant="outline" href="/" class="gap-2">
-        <HomeIcon class="h-4 w-4" />
-        Back to Home
-      </Button>
-      <Button href="/play" class="gap-2">
-        <RotateCcwIcon class="h-4 w-4" />
-        Play Again
-      </Button>
+      {#if $partyStore.partyId}
+        <!-- Party-linked game: return to party or leave -->
+        <Button href="/party/{$partyStore.partyId}" class="gap-2">
+          <UsersIcon class="h-4 w-4" />
+          Return to Party
+        </Button>
+        <Button variant="outline" onclick={() => { partyStore.leaveParty(); }} class="gap-2">
+          <LogOutIcon class="h-4 w-4" />
+          Leave Party
+        </Button>
+      {:else}
+        <Button variant="outline" href="/" class="gap-2">
+          <HomeIcon class="h-4 w-4" />
+          Back to Home
+        </Button>
+        <Button href="/play" class="gap-2">
+          <RotateCcwIcon class="h-4 w-4" />
+          Play Again
+        </Button>
+      {/if}
     </div>
   </div>
 </div>
