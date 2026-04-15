@@ -354,9 +354,12 @@ pub async fn get_co_player_ids(pool: &DbPool, user_id: &str) -> Result<Vec<Strin
         FROM game_players gp1
         INNER JOIN game_players gp2 ON gp1.game_id = gp2.game_id AND gp2.user_id != $1
         INNER JOIN games g ON g.id = gp1.game_id
+        INNER JOIN users u2 ON gp2.user_id = u2.id AND u2.deleted_at IS NULL
         WHERE gp1.user_id = $1
           AND g.mode = 'multiplayer'
           AND g.status = 'finished'
+          AND gp1.final_rank IS NOT NULL
+          AND gp2.final_rank IS NOT NULL
         "#,
         user_id
     )

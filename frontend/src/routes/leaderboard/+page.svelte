@@ -117,6 +117,17 @@
     }
   });
 
+  // Refetch when auth state changes (login/logout) for privacy-aware results
+  let prevUserId: string | null | undefined = undefined;
+  $effect(() => {
+    const currentUserId = $user?.id;
+    if (prevUserId !== undefined && prevUserId !== currentUserId) {
+      // Auth changed — refetch
+      loadLeaderboard();
+    }
+    prevUserId = currentUserId;
+  });
+
   // Track filter state for change detection using an object
   // that gets compared by value inside the effect
   let lastFilter = $state({ type: selectedType, period: selectedPeriod });

@@ -4,6 +4,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { gamesApi, type GameDetails } from '$lib/api/games';
   import { gameStore } from '$lib/socket/game';
+  import { socketClient } from '$lib/socket/client';
   import { partyStore } from '$lib/socket/party';
   import { authStore, user } from '$lib/stores/auth';
   import GameLoading from '$lib/components/game/GameLoading.svelte';
@@ -152,6 +153,28 @@
         startTimeout = null;
       }
     }
+  });
+
+  // Clear starting state on socket errors
+  $effect(() => {
+    if (!$page.params.id) return;
+
+    const unsub = socketClient.on<{ code: string; message: string }>('error', (data) => {
+      if (
+        isStarting &&
+        (data.code === 'START_FAILED' ||
+          data.code === 'NOT_HOST' ||
+          data.code === 'GAME_NOT_FOUND')
+      ) {
+        isStarting = false;
+        if (startTimeout) {
+          clearTimeout(startTimeout);
+          startTimeout = null;
+        }
+      }
+    });
+
+    return unsub;
   });
 
   onDestroy(() => {

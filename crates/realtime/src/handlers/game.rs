@@ -70,6 +70,29 @@ pub async fn handle_join<A: Adapter>(
         return;
     }
 
+    // Check if this is a party game — only party members can join
+    match dguesser_db::parties::get_game_party_id(state.db(), &payload.game_id).await {
+        Ok(Some(party_id)) => {
+            // Verify user is a party member
+            match dguesser_db::parties::get_active_party_for_user(state.db(), &user_id).await {
+                Ok(Some(user_party)) if user_party.id == party_id => {} // OK
+                _ => {
+                    emit_error(
+                        &socket,
+                        "NOT_PARTY_MEMBER",
+                        "This game belongs to a party. Join the party first.",
+                    );
+                    return;
+                }
+            }
+        }
+        Ok(None) => {} // Not a party game
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to check game party_id");
+            // Fail open — don't block join on DB error
+        }
+    }
+
     // Get or create game actor (game_id is String: gam_xxxxxxxxxxxx)
     let handle = state.get_or_create_game(&payload.game_id).await;
 

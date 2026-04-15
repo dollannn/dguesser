@@ -93,6 +93,8 @@ export interface GameStatePayload {
   next_round_at?: number | null;
   /** Current skip vote state (if between rounds) */
   skip_votes?: SkipVoteUpdatePayload | null;
+  /** User IDs who have voted to skip (for reconnecting clients) */
+  skip_vote_user_ids?: string[] | null;
 }
 
 /** Settings updated payload */
@@ -159,6 +161,8 @@ export interface PlayerState {
 export interface GameState {
   /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   gameId: string | null;
+  /** Whether we've received a game:state ack from the server (actually joined) */
+  isJoined: boolean;
   status: 'idle' | 'lobby' | 'playing' | 'round_end' | 'finished';
   currentRound: number;
   totalRounds: number;
@@ -194,6 +198,7 @@ export interface GameState {
 function createGameStore() {
   const initialState: GameState = {
     gameId: null,
+    isJoined: false,
     status: 'idle',
     currentRound: 0,
     totalRounds: 0,
@@ -242,7 +247,7 @@ function createGameStore() {
     /** Emit game:start socket event. Returns false if not connected to a game. */
     startGame(): boolean {
       const currentState = get({ subscribe });
-      if (currentState.gameId) {
+      if (currentState.gameId && currentState.isJoined) {
         socketClient.emit('game:start', { game_id: currentState.gameId });
         return true;
       }
@@ -364,6 +369,7 @@ function createGameStore() {
       update((s) => ({
         ...s,
         gameId: payload.game_id,
+        isJoined: true,
         status,
         currentRound: payload.current_round,
         totalRounds: payload.total_rounds,
@@ -379,7 +385,7 @@ function createGameStore() {
         nextRoundAt: payload.next_round_at ?? null,
         skipVotes: payload.skip_votes?.votes ?? 0,
         skipVotesRequired: payload.skip_votes?.required ?? 0,
-        hasVotedToSkip: false,
+        hasVotedToSkip: payload.skip_vote_user_ids?.includes(getCurrentUserId() ?? '') ?? false,
       }));
     },
 

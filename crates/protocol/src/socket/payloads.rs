@@ -221,6 +221,9 @@ pub struct GameStatePayload {
     /// Current skip vote status (if between rounds)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_votes: Option<SkipVoteUpdatePayload>,
+    /// User IDs who have voted to skip (for reconnecting clients)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_vote_user_ids: Option<Vec<String>>,
 }
 
 /// Player joined payload

@@ -5,8 +5,8 @@
 
 ALTER TABLE users ADD COLUMN leaderboard_public BOOLEAN NOT NULL DEFAULT FALSE;
 
--- Index to efficiently filter public users in leaderboard queries
-CREATE INDEX idx_users_leaderboard_public ON users(id) WHERE leaderboard_public = TRUE;
+-- Removed: index on (id) WHERE leaderboard_public = TRUE was not used by any query
+-- and id already has a PK index
 
 -- Index to speed up co-player lookups (finding all multiplayer games for a user)
 CREATE INDEX idx_game_players_user_game ON game_players(user_id, game_id);

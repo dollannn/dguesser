@@ -489,7 +489,20 @@ impl AppState {
         join_code: &str,
         settings: GameSettings,
     ) -> PartyHandle {
+        // Check if party already exists (read lock)
+        {
+            let parties = self.inner.parties.read().await;
+            if let Some(handle) = parties.get(party_id) {
+                return handle.clone();
+            }
+        }
+
         let mut parties = self.inner.parties.write().await;
+
+        // Double-check after acquiring write lock
+        if let Some(handle) = parties.get(party_id) {
+            return handle.clone();
+        }
 
         let (tx, rx) = mpsc::channel(100);
         let handle = PartyHandle { party_id: party_id.to_string(), tx };

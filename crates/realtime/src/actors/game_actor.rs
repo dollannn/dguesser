@@ -298,6 +298,8 @@ impl GameActor {
         state.players = players;
         state.current_round = current_round;
         state.round_number = cached.round_number;
+        state.between_rounds_ends_at = cached.between_rounds_ends_at;
+        state.skip_votes = cached.skip_votes.iter().cloned().collect();
 
         state
     }
@@ -372,6 +374,8 @@ impl GameActor {
             players,
             current_round,
             settings_json: serde_json::to_string(&state.settings).unwrap_or_default(),
+            between_rounds_ends_at: state.between_rounds_ends_at,
+            skip_votes: state.skip_votes.iter().cloned().collect(),
         })
     }
 
@@ -885,10 +889,20 @@ impl GameActor {
     async fn advance_or_end_game(&mut self) {
         let should_end = self.state.as_ref().is_some_and(|s| s.round_number >= s.settings.rounds);
 
-        if should_end {
-            self.end_game().await.ok();
-        } else {
-            self.start_next_round().await.ok();
+        let result = if should_end { self.end_game().await } else { self.start_next_round().await };
+
+        if let Err(e) = result {
+            tracing::error!(
+                error = %e,
+                game_id = %self.game_id,
+                "Failed to advance game, re-arming between-rounds timer"
+            );
+            // Re-arm the timer so the tick will retry
+            if let Some(state) = self.state.as_mut() {
+                let retry_ms = 5_000; // Retry in 5 seconds
+                state.between_rounds_ends_at = Some(Utc::now().timestamp_millis() + retry_ms);
+            }
+            self.force_save_state_to_redis().await;
         }
     }
 
@@ -1272,15 +1286,17 @@ impl GameActor {
         };
 
         // Include between-rounds info when in BetweenRounds phase
-        let (next_round_at, skip_votes_payload) = if state.phase == GamePhase::BetweenRounds {
-            let skip_votes = Some(dguesser_protocol::socket::payloads::SkipVoteUpdatePayload {
-                votes: state.skip_votes.len() as u8,
-                required: state.skip_votes_required() as u8,
-            });
-            (state.between_rounds_ends_at, skip_votes)
-        } else {
-            (None, None)
-        };
+        let (next_round_at, skip_votes_payload, skip_vote_user_ids) =
+            if state.phase == GamePhase::BetweenRounds {
+                let skip_votes = Some(dguesser_protocol::socket::payloads::SkipVoteUpdatePayload {
+                    votes: state.skip_votes.len() as u8,
+                    required: state.skip_votes_required() as u8,
+                });
+                let vote_ids: Vec<String> = state.skip_votes.iter().cloned().collect();
+                (state.between_rounds_ends_at, skip_votes, Some(vote_ids))
+            } else {
+                (None, None, None)
+            };
 
         let payload = GameStatePayload {
             game_id: self.game_id.clone(),
@@ -1294,6 +1310,7 @@ impl GameActor {
             time_remaining_ms,
             next_round_at,
             skip_votes: skip_votes_payload,
+            skip_vote_user_ids,
         };
 
         // Emit to socket's personal room (socket joins a room named after its ID)

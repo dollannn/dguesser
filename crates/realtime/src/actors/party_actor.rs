@@ -51,6 +51,7 @@ pub struct PartyActor {
     cleanup_tx: Option<mpsc::Sender<String>>,
     app_state: Option<AppState>,
     host_disconnect_at: Option<std::time::Instant>,
+    all_disconnected_at: Option<std::time::Instant>,
 }
 
 impl PartyActor {
@@ -77,6 +78,7 @@ impl PartyActor {
             cleanup_tx: None,
             app_state: None,
             host_disconnect_at: None,
+            all_disconnected_at: None,
         }
     }
 
@@ -90,9 +92,69 @@ impl PartyActor {
         self
     }
 
+    /// Hydrate actor state from DB (for restarts/recreation).
+    /// Loads active members and current game state.
+    pub async fn hydrate_from_db(&mut self) {
+        // Load active members
+        match dguesser_db::parties::get_party_members(&self.db, &self.party_id).await {
+            Ok(members) => {
+                for m in members {
+                    // Skip if already tracked (from a Join command)
+                    if self.members.contains_key(&m.user_id) {
+                        continue;
+                    }
+                    // Look up user info
+                    let (display_name, avatar_url) =
+                        match dguesser_db::users::get_by_id(&self.db, &m.user_id).await {
+                            Ok(Some(u)) => (u.display_name, u.avatar_url),
+                            _ => (format!("Player {}", &m.user_id[..8.min(m.user_id.len())]), None),
+                        };
+                    self.members.insert(
+                        m.user_id.clone(),
+                        MemberState {
+                            user_id: m.user_id,
+                            display_name,
+                            avatar_url,
+                            connected: false, // Will reconnect via socket
+                            joined_at: m.joined_at,
+                            disconnected_at: Some(std::time::Instant::now()),
+                        },
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    party_id = %self.party_id,
+                    "Failed to hydrate party members from DB"
+                );
+            }
+        }
+
+        // Check for active game
+        match dguesser_db::parties::get_party_by_id(&self.db, &self.party_id).await {
+            Ok(Some(party)) => {
+                self.host_id = party.host_id;
+                // Check if there's an active game linked to this party
+                // (A simple heuristic: query games with this party_id that aren't finished)
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    party_id = %self.party_id,
+                    "Failed to hydrate party from DB"
+                );
+            }
+        }
+    }
+
     /// Main run loop
     pub async fn run(&mut self) {
         tracing::info!(party_id = %self.party_id, "Party actor started");
+
+        // Hydrate state from DB (for restarts/recreation)
+        self.hydrate_from_db().await;
 
         while let Some(cmd) = self.rx.recv().await {
             match cmd {
@@ -176,6 +238,9 @@ impl PartyActor {
         self.members.insert(user_id.to_string(), member);
         self.socket_ids.insert(user_id.to_string(), socket_id.to_string());
 
+        // Clear all-disconnected timer since someone just joined
+        self.all_disconnected_at = None;
+
         // If this is the host reconnecting, clear the disconnect timer
         if user_id == self.host_id {
             self.host_disconnect_at = None;
@@ -186,6 +251,10 @@ impl PartyActor {
             dguesser_db::parties::add_party_member(&self.db, &self.party_id, user_id).await
         {
             tracing::error!(error = %e, "Failed to persist party member");
+            // Rollback in-memory state
+            self.members.remove(user_id);
+            self.socket_ids.remove(user_id);
+            return Err("Failed to join party (database error)".to_string());
         }
 
         // Send full state to the joining member
@@ -262,6 +331,20 @@ impl PartyActor {
         }
 
         self.socket_ids.remove(user_id);
+
+        // Track when all members become disconnected
+        let all_disconnected =
+            !self.members.is_empty() && self.members.values().all(|m| !m.connected);
+        if all_disconnected && self.all_disconnected_at.is_none() {
+            self.all_disconnected_at = Some(std::time::Instant::now());
+        }
+
+        // Broadcast updated member status
+        let state_payload = self.build_state_payload();
+        let _ = self
+            .emitter
+            .emit_to_room(&self.party_id, events::party::PARTY_STATE, &state_payload)
+            .await;
     }
 
     async fn handle_reconnect(&mut self, user_id: &str, socket_id: &str) {
@@ -270,6 +353,9 @@ impl PartyActor {
             member.disconnected_at = None;
         }
         self.socket_ids.insert(user_id.to_string(), socket_id.to_string());
+
+        // Clear all-disconnected timer since someone reconnected
+        self.all_disconnected_at = None;
 
         // If host reconnected, clear timer
         if user_id == self.host_id {
@@ -285,6 +371,13 @@ impl PartyActor {
         let _ = self
             .emitter
             .emit_to_socket(socket_id, events::party::PARTY_STATE, &state_payload)
+            .await;
+
+        // Broadcast updated member status to all members
+        let state_payload = self.build_state_payload();
+        let _ = self
+            .emitter
+            .emit_to_room(&self.party_id, events::party::PARTY_STATE, &state_payload)
             .await;
     }
 
@@ -410,8 +503,23 @@ impl PartyActor {
             return Err("Cannot kick yourself".to_string());
         }
 
+        if !self.members.contains_key(target_user_id) {
+            return Err("Member not found in party".to_string());
+        }
+
         let display_name =
             self.members.get(target_user_id).map(|m| m.display_name.clone()).unwrap_or_default();
+
+        // Emit kicked event to the target socket BEFORE removing
+        if let Some(target_socket_id) = self.socket_ids.get(target_user_id) {
+            let kicked_payload = dguesser_protocol::socket::payloads::PartyKickedPayload {
+                user_id: target_user_id.to_string(),
+            };
+            let _ = self
+                .emitter
+                .emit_to_socket(target_socket_id, events::party::KICKED, &kicked_payload)
+                .await;
+        }
 
         // Remove from state
         self.members.remove(target_user_id);
@@ -425,7 +533,7 @@ impl PartyActor {
             tracing::error!(error = %e, "Failed to remove kicked member from DB");
         }
 
-        // Broadcast to party
+        // Broadcast member left to remaining members
         let left_payload =
             PartyMemberLeftPayload { user_id: target_user_id.to_string(), display_name };
         let _ = self
@@ -482,11 +590,12 @@ impl PartyActor {
         let all_disconnected =
             !self.members.is_empty() && self.members.values().all(|m| !m.connected);
         if all_disconnected {
-            // Give a generous grace period (2 minutes) before disbanding
+            if self.all_disconnected_at.is_none() {
+                self.all_disconnected_at = Some(std::time::Instant::now());
+            }
             let max_disconnect_secs = 120;
-            let oldest_disconnect = self.members.values().filter_map(|m| m.disconnected_at).min();
-            if let Some(oldest) = oldest_disconnect
-                && oldest.elapsed().as_secs() >= max_disconnect_secs
+            if let Some(at) = self.all_disconnected_at
+                && at.elapsed().as_secs() >= max_disconnect_secs
             {
                 tracing::info!(
                     party_id = %self.party_id,
@@ -495,6 +604,32 @@ impl PartyActor {
                 );
                 self.do_disband("All members disconnected").await;
                 self.rx.close();
+            }
+        } else {
+            self.all_disconnected_at = None;
+        }
+
+        // Check for stuck game start (game_id set but no progress after 60s)
+        // This recovers from failed client-side auto-starts
+        if let Some(game_id) = &self.current_game_id {
+            // Check if the game exists and is still in lobby (stuck)
+            if let Some(ref app) = self.app_state
+                && app.get_game(game_id).await.is_none()
+            {
+                // Game actor doesn't exist — the game was never started or already ended
+                tracing::warn!(
+                    party_id = %self.party_id,
+                    game_id = %game_id,
+                    "Party game has no active actor, clearing stuck game state"
+                );
+                let ended_game_id = game_id.clone();
+                self.current_game_id = None;
+                // Notify members to return to party lobby
+                let payload = PartyGameEndedPayload { game_id: ended_game_id };
+                let _ = self
+                    .emitter
+                    .emit_to_room(&self.party_id, events::party::GAME_ENDED, &payload)
+                    .await;
             }
         }
     }

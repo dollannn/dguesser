@@ -151,7 +151,7 @@ async fn join_party_by_code(
 /// Get party details
 async fn get_party(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<PartyDetails>, ApiError> {
     let party = dguesser_db::parties::get_party_by_id(state.db(), &id)
@@ -159,6 +159,12 @@ async fn get_party(
         .ok_or_else(|| ApiError::not_found("Party not found"))?;
 
     let members = dguesser_db::parties::get_party_members(state.db(), &party.id).await?;
+
+    // Verify the user is a member of this party (or it's their own party)
+    let is_member = members.iter().any(|m| m.user_id == auth.user_id);
+    if !is_member && party.host_id != auth.user_id {
+        return Err(ApiError::not_found("Party not found"));
+    }
 
     let mut member_details = Vec::new();
     for m in members {

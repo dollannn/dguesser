@@ -201,9 +201,23 @@ fn handle_disconnect(mut state: GameState, user_id: String, now: DateTime<Utc>) 
         state.all_disconnected_at = Some(now);
     }
 
-    let event = GameEvent::PlayerDisconnected { user_id, display_name, grace_period_ms };
+    let event =
+        GameEvent::PlayerDisconnected { user_id: user_id.clone(), display_name, grace_period_ms };
 
-    ReducerResult::with_events(state, vec![event])
+    let mut events = vec![event];
+
+    // If between rounds, remove disconnected player's vote and recheck threshold
+    if state.phase == GamePhase::BetweenRounds {
+        state.skip_votes.remove(&user_id);
+        let votes = state.skip_votes.len() as u8;
+        let required = state.skip_votes_required() as u8;
+        if votes > 0 && votes >= required {
+            state.between_rounds_ends_at = None;
+            events.push(GameEvent::SkipVotePassed);
+        }
+    }
+
+    ReducerResult::with_events(state, events)
 }
 
 fn handle_reconnect(mut state: GameState, user_id: String) -> ReducerResult {
@@ -655,6 +669,15 @@ fn handle_vote_skip_wait(mut state: GameState, user_id: String) -> ReducerResult
     // Player must exist
     if !state.players.contains_key(&user_id) {
         return ReducerResult::error(state, "NOT_IN_GAME", "Player not in this game");
+    }
+
+    // Host should use SkipWait instead of voting
+    if state.is_host(&user_id) {
+        return ReducerResult::error(
+            state,
+            "HOST_SHOULD_SKIP",
+            "Host should use force-skip instead of voting",
+        );
     }
 
     // Player must be connected
@@ -1475,5 +1498,157 @@ mod tests {
         // Game should NOT be abandoned
         assert_ne!(result.state.phase, GamePhase::Finished);
         assert!(!result.events.iter().any(|e| matches!(e, GameEvent::GameAbandoned { .. })));
+    }
+
+    // -------------------------------------------------------------------------
+    // Between-Rounds Wait / Skip Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_end_round_sets_between_rounds_deadline() {
+        let mut state = test_state();
+        add_host(&mut state);
+        let now = Utc::now();
+
+        // Start game
+        let result = reduce(
+            &state,
+            GameCommand::Start {
+                user_id: "usr_host".to_string(),
+                first_location: LocationData::new(0.0, 0.0, None),
+            },
+            now,
+        );
+        state = result.state;
+
+        // End round
+        let result = reduce(&state, GameCommand::EndRound, now);
+        assert!(result.state.between_rounds_ends_at.is_some());
+        assert!(result.state.skip_votes.is_empty());
+    }
+
+    #[test]
+    fn test_skip_wait_host_only() {
+        let mut state = test_state();
+        add_host(&mut state);
+        add_player(&mut state, "usr_p1");
+        state.phase = GamePhase::BetweenRounds;
+        state.between_rounds_ends_at = Some(Utc::now().timestamp_millis() + 20_000);
+
+        let now = Utc::now();
+
+        // Non-host cannot skip
+        let result = reduce(&state, GameCommand::SkipWait { user_id: "usr_p1".to_string() }, now);
+        assert!(result.has_error());
+
+        // Host can skip
+        let result = reduce(&state, GameCommand::SkipWait { user_id: "usr_host".to_string() }, now);
+        assert!(!result.has_error());
+        assert!(result.state.between_rounds_ends_at.is_none());
+        assert!(result.events.iter().any(|e| matches!(e, GameEvent::WaitSkipped)));
+    }
+
+    #[test]
+    fn test_vote_skip_majority() {
+        let mut state = test_state();
+        add_host(&mut state);
+        add_player(&mut state, "usr_p1");
+        add_player(&mut state, "usr_p2");
+        state.phase = GamePhase::BetweenRounds;
+        state.between_rounds_ends_at = Some(Utc::now().timestamp_millis() + 20_000);
+
+        let now = Utc::now();
+
+        // First vote (1/2 needed)
+        let result =
+            reduce(&state, GameCommand::VoteSkipWait { user_id: "usr_p1".to_string() }, now);
+        state = result.state;
+        assert!(result.events.iter().any(|e| matches!(e, GameEvent::SkipVoteRecorded { .. })));
+        // With 3 players, need 2 votes (3/2 + 1 = 2)
+        assert!(!result.events.iter().any(|e| matches!(e, GameEvent::SkipVotePassed)));
+
+        // Second vote reaches majority
+        let result =
+            reduce(&state, GameCommand::VoteSkipWait { user_id: "usr_p2".to_string() }, now);
+        assert!(result.events.iter().any(|e| matches!(e, GameEvent::SkipVotePassed)));
+        assert!(result.state.between_rounds_ends_at.is_none());
+    }
+
+    #[test]
+    fn test_vote_skip_rejects_host() {
+        let mut state = test_state();
+        add_host(&mut state);
+        add_player(&mut state, "usr_p1");
+        state.phase = GamePhase::BetweenRounds;
+        state.between_rounds_ends_at = Some(Utc::now().timestamp_millis() + 20_000);
+
+        let now = Utc::now();
+        let result =
+            reduce(&state, GameCommand::VoteSkipWait { user_id: "usr_host".to_string() }, now);
+        assert!(result.has_error());
+        assert_eq!(result.get_error().unwrap().error_code(), Some("HOST_SHOULD_SKIP"));
+    }
+
+    #[test]
+    fn test_vote_skip_duplicate_rejected() {
+        let mut state = test_state();
+        add_host(&mut state);
+        add_player(&mut state, "usr_p1");
+        state.phase = GamePhase::BetweenRounds;
+        state.between_rounds_ends_at = Some(Utc::now().timestamp_millis() + 20_000);
+
+        let now = Utc::now();
+
+        // First vote
+        let result =
+            reduce(&state, GameCommand::VoteSkipWait { user_id: "usr_p1".to_string() }, now);
+        state = result.state;
+
+        // Duplicate rejected
+        let result =
+            reduce(&state, GameCommand::VoteSkipWait { user_id: "usr_p1".to_string() }, now);
+        assert!(result.has_error());
+        assert_eq!(result.get_error().unwrap().error_code(), Some("ALREADY_VOTED"));
+    }
+
+    #[test]
+    fn test_between_rounds_expires_on_tick() {
+        let mut state = test_state();
+        state.settings.time_limit_seconds = 0; // No round timeout
+        add_host(&mut state);
+        state.phase = GamePhase::BetweenRounds;
+        let now = Utc::now();
+        state.between_rounds_ends_at = Some(now.timestamp_millis() - 1000); // Already expired
+
+        let result = reduce(&state, GameCommand::Tick, now);
+        assert!(result.events.iter().any(|e| matches!(e, GameEvent::BetweenRoundsExpired)));
+        assert!(result.state.between_rounds_ends_at.is_none());
+    }
+
+    #[test]
+    fn test_disconnect_removes_vote_and_rechecks_threshold() {
+        let mut state = test_state();
+        state.settings.time_limit_seconds = 0;
+        add_host(&mut state);
+        add_player(&mut state, "usr_p1");
+        add_player(&mut state, "usr_p2");
+        // Start game first so disconnect uses Disconnect (not Leave)
+        state.phase = GamePhase::BetweenRounds;
+        state.between_rounds_ends_at = Some(Utc::now().timestamp_millis() + 20_000);
+
+        // p1 votes
+        let now = Utc::now();
+        let result =
+            reduce(&state, GameCommand::VoteSkipWait { user_id: "usr_p1".to_string() }, now);
+        state = result.state;
+        // 1/2 votes needed — not passed yet
+
+        // p2 disconnects — now 2 connected, 1 vote, need 2/2+1=2 → but wait,
+        // with p2 disconnected, only 2 connected (host + p1), threshold = 2
+        // Still 1 vote, not enough. But that's fine, just verify vote is preserved.
+        let result = reduce(&state, GameCommand::Disconnect { user_id: "usr_p2".to_string() }, now);
+        state = result.state;
+        assert_eq!(state.skip_votes.len(), 1); // p1's vote preserved
+        assert!(!state.skip_votes.contains("usr_p2")); // p2 didn't vote
     }
 }

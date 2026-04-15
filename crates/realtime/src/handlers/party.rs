@@ -30,6 +30,8 @@ pub struct CreatePartyPayload {
 #[derive(Debug, Deserialize)]
 pub struct JoinPartyPayload {
     pub party_id: String,
+    /// Join code (required for non-members)
+    pub code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -246,6 +248,39 @@ pub async fn handle_join_party<A: Adapter>(
             return;
         }
     };
+
+    // Check if user is already in another party
+    match dguesser_db::parties::get_active_party_for_user(state.db(), &user_id).await {
+        Ok(Some(existing)) if existing.id != payload.party_id => {
+            emit_error(
+                &socket,
+                "ALREADY_IN_PARTY",
+                "You are already in another party. Leave it first.",
+            );
+            return;
+        }
+        Ok(_) => {} // Same party (rejoin) or no party — proceed
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to check existing party");
+            emit_error(&socket, "INTERNAL_ERROR", "An internal error occurred");
+            return;
+        }
+    }
+
+    // Verify join code for non-members
+    let is_existing_member = matches!(
+        dguesser_db::parties::get_active_party_for_user(state.db(), &user_id).await,
+        Ok(Some(p)) if p.id == party.id
+    );
+    if !is_existing_member {
+        match &payload.code {
+            Some(code) if code.to_uppercase() == party.join_code => {} // Valid
+            _ => {
+                emit_error(&socket, "INVALID_CODE", "Invalid or missing join code");
+                return;
+            }
+        }
+    }
 
     // Get or create party actor
     let handle = match state.get_party(&party.id).await {

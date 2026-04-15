@@ -44,6 +44,22 @@ impl CoPlayersCache {
         co_players
     }
 
+    /// Invalidate co-player cache for a specific user
+    #[allow(dead_code)]
+    pub async fn invalidate(client: &redis::Client, user_id: &str) {
+        let key = Self::cache_key(user_id);
+        let mut conn = match client.get_multiplexed_async_connection().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                tracing::warn!("Failed to connect to Redis for co-players invalidation: {}", e);
+                return;
+            }
+        };
+        if let Err(e) = conn.del::<_, ()>(&key).await {
+            tracing::warn!("Failed to invalidate co-players cache: {}", e);
+        }
+    }
+
     /// Read from Redis cache
     async fn get_cached(client: &redis::Client, user_id: &str) -> Option<HashSet<String>> {
         let key = Self::cache_key(user_id);

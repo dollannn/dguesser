@@ -32,6 +32,12 @@ pub struct CachedGameState {
     pub current_round: Option<CachedRoundState>,
     /// Game settings as JSON
     pub settings_json: String,
+    /// Unix timestamp (ms) when between-rounds wait expires
+    #[serde(default)]
+    pub between_rounds_ends_at: Option<i64>,
+    /// User IDs who have voted to skip the between-rounds wait
+    #[serde(default)]
+    pub skip_votes: Vec<String>,
 }
 
 /// Serializable player state

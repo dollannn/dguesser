@@ -301,6 +301,8 @@ pub async fn update_profile(
     // Update leaderboard public setting if provided
     if let Some(public) = req.leaderboard_public {
         dguesser_db::users::update_leaderboard_public(state.db(), &auth.user_id, public).await?;
+        // Invalidate leaderboard caches so privacy change takes effect immediately
+        crate::cache::LeaderboardCache::invalidate_all(state.redis()).await;
     }
 
     // Return updated profile

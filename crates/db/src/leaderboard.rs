@@ -32,7 +32,7 @@ pub async fn get_by_total_score(
             games_played as games_count,
             leaderboard_public
         FROM users
-        WHERE games_played > 0
+        WHERE games_played > 0 AND deleted_at IS NULL
         ORDER BY total_score DESC, games_played DESC
         LIMIT $1 OFFSET $2
         "#,
@@ -71,7 +71,7 @@ pub async fn get_by_best_score(
             games_played as games_count,
             leaderboard_public
         FROM users
-        WHERE games_played > 0
+        WHERE games_played > 0 AND deleted_at IS NULL
         ORDER BY best_score DESC, games_played DESC
         LIMIT $1 OFFSET $2
         "#,
@@ -110,7 +110,7 @@ pub async fn get_by_games_played(
             games_played as games_count,
             leaderboard_public
         FROM users
-        WHERE games_played > 0
+        WHERE games_played > 0 AND deleted_at IS NULL
         ORDER BY games_played DESC, total_score DESC
         LIMIT $1 OFFSET $2
         "#,
@@ -149,7 +149,7 @@ pub async fn get_by_average_score(
             games_played as games_count,
             leaderboard_public
         FROM users
-        WHERE games_played >= 3
+        WHERE games_played >= 3 AND deleted_at IS NULL
         ORDER BY (total_score::numeric / games_played) DESC, games_played DESC
         LIMIT $1 OFFSET $2
         "#,
@@ -191,7 +191,7 @@ pub async fn get_by_total_score_period(
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
         INNER JOIN games g ON g.id = gp.game_id
-        WHERE g.status = 'finished' AND g.ended_at >= $1
+        WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL
         GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public
         HAVING SUM(gp.score_total) > 0
         ORDER BY SUM(gp.score_total) DESC, COUNT(DISTINCT gp.game_id) DESC
@@ -236,7 +236,7 @@ pub async fn get_by_best_score_period(
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
         INNER JOIN games g ON g.id = gp.game_id
-        WHERE g.status = 'finished' AND g.ended_at >= $1
+        WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL
         GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public
         HAVING MAX(gp.score_total) > 0
         ORDER BY MAX(gp.score_total) DESC, COUNT(DISTINCT gp.game_id) DESC
@@ -281,7 +281,7 @@ pub async fn get_by_games_played_period(
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
         INNER JOIN games g ON g.id = gp.game_id
-        WHERE g.status = 'finished' AND g.ended_at >= $1
+        WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL
         GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public
         HAVING COUNT(DISTINCT gp.game_id) > 0
         ORDER BY COUNT(DISTINCT gp.game_id) DESC, SUM(gp.score_total) DESC
@@ -326,7 +326,7 @@ pub async fn get_by_average_score_period(
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
         INNER JOIN games g ON g.id = gp.game_id
-        WHERE g.status = 'finished' AND g.ended_at >= $1
+        WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL
         GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public
         HAVING COUNT(DISTINCT gp.game_id) >= 3
         ORDER BY (SUM(gp.score_total)::numeric / NULLIF(COUNT(DISTINCT gp.game_id), 0)) DESC, COUNT(DISTINCT gp.game_id) DESC
@@ -355,7 +355,7 @@ pub async fn get_by_average_score_period(
 /// Count total players on leaderboard (all-time)
 pub async fn count_ranked_players(pool: &DbPool) -> Result<i64, sqlx::Error> {
     let result = sqlx::query_scalar!(
-        r#"SELECT COUNT(*)::bigint as "count!" FROM users WHERE games_played > 0"#
+        r#"SELECT COUNT(*)::bigint as "count!" FROM users WHERE games_played > 0 AND deleted_at IS NULL"#
     )
     .fetch_one(pool)
     .await?;
@@ -372,6 +372,7 @@ pub async fn count_ranked_players_period(
         SELECT COUNT(DISTINCT gp.user_id)::bigint as "count!"
         FROM game_players gp
         INNER JOIN games g ON g.id = gp.game_id
+        INNER JOIN users u ON gp.user_id = u.id AND u.deleted_at IS NULL
         WHERE g.status = 'finished' AND g.ended_at >= $1
         "#,
         since
@@ -392,7 +393,7 @@ pub async fn get_user_rank_total_score(
         FROM (
             SELECT id, RANK() OVER (ORDER BY total_score DESC) as rank
             FROM users
-            WHERE games_played > 0
+            WHERE games_played > 0 AND deleted_at IS NULL
         ) ranked
         WHERE id = $1
         "#,
@@ -414,7 +415,7 @@ pub async fn get_user_rank_best_score(
         FROM (
             SELECT id, RANK() OVER (ORDER BY best_score DESC) as rank
             FROM users
-            WHERE games_played > 0
+            WHERE games_played > 0 AND deleted_at IS NULL
         ) ranked
         WHERE id = $1
         "#,
@@ -436,7 +437,7 @@ pub async fn get_user_rank_games_played(
         FROM (
             SELECT id, RANK() OVER (ORDER BY games_played DESC) as rank
             FROM users
-            WHERE games_played > 0
+            WHERE games_played > 0 AND deleted_at IS NULL
         ) ranked
         WHERE id = $1
         "#,
@@ -458,7 +459,7 @@ pub async fn get_user_rank_average_score(
         FROM (
             SELECT id, RANK() OVER (ORDER BY (total_score::numeric / NULLIF(games_played, 0)) DESC) as rank
             FROM users
-            WHERE games_played >= 3
+            WHERE games_played >= 3 AND deleted_at IS NULL
         ) ranked
         WHERE id = $1
         "#,
@@ -486,7 +487,7 @@ pub async fn get_user_rank_total_score_period(
             FROM users u
             INNER JOIN game_players gp ON gp.user_id = u.id
             INNER JOIN games g ON g.id = gp.game_id
-            WHERE g.status = 'finished' AND g.ended_at >= $1
+            WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL
             GROUP BY u.id
             HAVING SUM(gp.score_total) > 0
         ) ranked
@@ -517,7 +518,7 @@ pub async fn get_user_rank_best_score_period(
             FROM users u
             INNER JOIN game_players gp ON gp.user_id = u.id
             INNER JOIN games g ON g.id = gp.game_id
-            WHERE g.status = 'finished' AND g.ended_at >= $1
+            WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL
             GROUP BY u.id
             HAVING MAX(gp.score_total) > 0
         ) ranked
@@ -548,7 +549,7 @@ pub async fn get_user_rank_games_played_period(
             FROM users u
             INNER JOIN game_players gp ON gp.user_id = u.id
             INNER JOIN games g ON g.id = gp.game_id
-            WHERE g.status = 'finished' AND g.ended_at >= $1
+            WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL
             GROUP BY u.id
             HAVING COUNT(DISTINCT gp.game_id) > 0
         ) ranked
@@ -581,7 +582,7 @@ pub async fn get_user_rank_average_score_period(
             FROM users u
             INNER JOIN game_players gp ON gp.user_id = u.id
             INNER JOIN games g ON g.id = gp.game_id
-            WHERE g.status = 'finished' AND g.ended_at >= $1
+            WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL
             GROUP BY u.id
             HAVING COUNT(DISTINCT gp.game_id) >= 3
         ) ranked
