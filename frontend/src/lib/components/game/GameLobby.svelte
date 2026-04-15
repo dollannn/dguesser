@@ -9,6 +9,7 @@
   import * as Avatar from '$lib/components/ui/avatar';
   import { Separator } from '$lib/components/ui/separator';
   import GameSettingsForm from './GameSettingsForm.svelte';
+  import LoaderIcon from '@lucide/svelte/icons/loader';
   import PlayIcon from '@lucide/svelte/icons/play';
   import UsersIcon from '@lucide/svelte/icons/users';
   import TargetIcon from '@lucide/svelte/icons/target';
@@ -21,9 +22,10 @@
   interface Props {
     game: GameDetails;
     onStart: () => void;
+    isStarting?: boolean;
   }
 
-  let { game, onStart }: Props = $props();
+  let { game, onStart, isStarting = false }: Props = $props();
 
   let gameState = $derived($gameStore);
   // Check both API response (game.players) and live socket state ($gameStore.players)
@@ -241,9 +243,14 @@
             {isJoining ? 'Joining...' : 'Join Game'}
           </Button>
         {:else if canStart}
-          <Button onclick={onStart} size="lg" class="w-full sm:w-auto px-8">
-            <PlayIcon class="size-5" />
-            Start Game
+          <Button onclick={onStart} size="lg" class="w-full sm:w-auto px-8" disabled={isStarting}>
+            {#if isStarting}
+              <LoaderIcon class="size-5 animate-spin" />
+              Starting...
+            {:else}
+              <PlayIcon class="size-5" />
+              Start Game
+            {/if}
           </Button>
         {:else if !isHost}
           <p class="text-muted-foreground">Waiting for host to start the game...</p>

@@ -239,11 +239,14 @@ function createGameStore() {
       set(initialState);
     },
 
-    startGame(): void {
+    /** Emit game:start socket event. Returns false if not connected to a game. */
+    startGame(): boolean {
       const currentState = get({ subscribe });
       if (currentState.gameId) {
         socketClient.emit('game:start', { game_id: currentState.gameId });
+        return true;
       }
+      return false;
     },
 
     /** Update game settings via socket (multiplayer) */

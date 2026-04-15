@@ -13,11 +13,14 @@
   import GameFinished from '$lib/components/game/GameFinished.svelte';
   import SEO from '$lib/components/SEO.svelte';
   import { Spinner } from '$lib/components/ui/spinner';
+  import { toast } from 'svelte-sonner';
 
   let game: GameDetails | null = $state(null);
   let loading = $state(true);
   let error = $state('');
   let autoStarting = $state(false);
+  let isStarting = $state(false);
+  let startTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Game ID from route params - guaranteed to exist for [id] route
   let gameId = $derived($page.params.id as string);
@@ -140,12 +143,25 @@
     // If status is 'lobby', gameStore defaults to 'idle' which shows the lobby
   }
 
+  // Clear starting state when the game transitions out of lobby
+  $effect(() => {
+    if (gameState.status === 'playing' || gameState.status === 'round_end') {
+      isStarting = false;
+      if (startTimeout) {
+        clearTimeout(startTimeout);
+        startTimeout = null;
+      }
+    }
+  });
+
   onDestroy(() => {
     gameStore.leaveGame();
+    if (startTimeout) clearTimeout(startTimeout);
   });
 
   async function startGame() {
-    if (!game || !gameId) return;
+    if (!game || !gameId || isStarting) return;
+    isStarting = true;
 
     try {
       if (game.mode === 'solo') {
@@ -158,11 +174,24 @@
           started_at: Date.now(),
         });
       } else {
-        // Multiplayer - emit via socket
-        gameStore.startGame();
+        // Multiplayer - emit via socket, await round:start event
+        const emitted = gameStore.startGame();
+        if (!emitted) {
+          toast.error('Not connected to game. Please refresh the page.');
+          isStarting = false;
+          return;
+        }
+        // Timeout if server never responds with round:start
+        startTimeout = setTimeout(() => {
+          if (isStarting) {
+            isStarting = false;
+            toast.error('Failed to start game. Please try again.');
+          }
+        }, 10000);
       }
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to start game';
+      isStarting = false;
     }
   }
 
@@ -202,7 +231,7 @@
       <p class="text-lg text-muted-foreground">Starting game...</p>
     </div>
   {:else if gameState.status === 'idle' || gameState.status === 'lobby'}
-    <GameLobby {game} onStart={startGame} />
+    <GameLobby {game} onStart={startGame} {isStarting} />
   {:else if gameState.status === 'playing'}
     <GamePlay {game} />
   {:else if gameState.status === 'round_end'}
