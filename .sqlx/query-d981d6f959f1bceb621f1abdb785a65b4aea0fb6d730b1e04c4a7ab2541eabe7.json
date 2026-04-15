@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT gp2.user_id as \"user_id!\"\n        FROM game_players gp1\n        INNER JOIN game_players gp2 ON gp1.game_id = gp2.game_id AND gp2.user_id != $1\n        INNER JOIN games g ON g.id = gp1.game_id\n        INNER JOIN users u2 ON gp2.user_id = u2.id AND u2.deleted_at IS NULL\n        WHERE gp1.user_id = $1\n          AND g.mode = 'multiplayer'\n          AND g.status = 'finished'\n          AND gp1.final_rank IS NOT NULL\n          AND gp2.final_rank IS NOT NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d981d6f959f1bceb621f1abdb785a65b4aea0fb6d730b1e04c4a7ab2541eabe7"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COUNT(*)::bigint as \"count!\" FROM users WHERE games_played > 0",
+  "query": "SELECT COUNT(*)::bigint as \"count!\" FROM users WHERE games_played > 0 AND deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       null
     ]
   },
-  "hash": "1dcd61e07701436ba0d17919026ecab46549556ad3c85904dd0c985fb09eca8f"
+  "hash": "5898ac57a7371ed39e427281b8d441ee1268e6e9dc5b7d035cc1c4e05e143f80"
 }

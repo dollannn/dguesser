@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT \n            id as user_id,\n            display_name,\n            avatar_url,\n            total_score as score,\n            games_played as games_count,\n            leaderboard_public\n        FROM users\n        WHERE games_played > 0\n        ORDER BY total_score DESC, games_played DESC\n        LIMIT $1 OFFSET $2\n        ",
+  "query": "\n        SELECT \n            id as user_id,\n            display_name,\n            avatar_url,\n            games_played as score,\n            games_played as games_count,\n            leaderboard_public\n        FROM users\n        WHERE games_played > 0 AND deleted_at IS NULL\n        ORDER BY games_played DESC, total_score DESC\n        LIMIT $1 OFFSET $2\n        ",
   "describe": {
     "columns": [
       {
@@ -21,7 +21,7 @@
       {
         "ordinal": 3,
         "name": "score",
-        "type_info": "Int8"
+        "type_info": "Int4"
       },
       {
         "ordinal": 4,
@@ -49,5 +49,5 @@
       false
     ]
   },
-  "hash": "a0d94f6d08bbe0286c26de965c044d6d9bdd5029be0dd54d1f9fada62500b524"
+  "hash": "f58dfb2a106074c69018e4d7f16e0c37e5a77a5c5e2ab2cf1d5f538cdb48ae18"
 }

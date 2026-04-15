@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT \n            u.id as user_id,\n            u.display_name,\n            u.avatar_url,\n            u.leaderboard_public,\n            COALESCE(SUM(gp.score_total), 0)::bigint as \"score!: i64\",\n            COUNT(DISTINCT gp.game_id)::bigint as \"games_count!: i64\"\n        FROM users u\n        INNER JOIN game_players gp ON gp.user_id = u.id\n        INNER JOIN games g ON g.id = gp.game_id\n        WHERE g.status = 'finished' AND g.ended_at >= $1\n        GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public\n        HAVING SUM(gp.score_total) > 0\n        ORDER BY SUM(gp.score_total) DESC, COUNT(DISTINCT gp.game_id) DESC\n        LIMIT $2 OFFSET $3\n        ",
+  "query": "\n        SELECT \n            u.id as user_id,\n            u.display_name,\n            u.avatar_url,\n            u.leaderboard_public,\n            COUNT(DISTINCT gp.game_id)::bigint as \"score!: i64\",\n            COUNT(DISTINCT gp.game_id)::bigint as \"games_count!: i64\"\n        FROM users u\n        INNER JOIN game_players gp ON gp.user_id = u.id\n        INNER JOIN games g ON g.id = gp.game_id\n        WHERE g.status = 'finished' AND g.ended_at >= $1 AND u.deleted_at IS NULL\n        GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public\n        HAVING COUNT(DISTINCT gp.game_id) > 0\n        ORDER BY COUNT(DISTINCT gp.game_id) DESC, SUM(gp.score_total) DESC\n        LIMIT $2 OFFSET $3\n        ",
   "describe": {
     "columns": [
       {
@@ -50,5 +50,5 @@
       null
     ]
   },
-  "hash": "14e404435118c7cdb644e1653545ec304b1a85d50356bf43141f89cf9b3ab955"
+  "hash": "523d53b8730a1435fbe513cd11e1c24049fb6d5736f24be2faa056a49d515896"
 }
