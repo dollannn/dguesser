@@ -260,9 +260,9 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
-          {#each entries as entry (entry.user_id + entry.rank)}
+          {#each entries as entry, idx (entry.is_anonymous ? `anon-${entry.rank}-${idx}` : entry.user_id + entry.rank)}
             <tr
-              class="transition-colors hover:bg-muted/50 {getRankRowClass(entry.rank, entry.is_current_user)}"
+              class="transition-colors hover:bg-muted/50 {getRankRowClass(entry.rank, entry.is_current_user)} {entry.is_anonymous ? 'opacity-60' : ''}"
             >
               <td class="px-4 sm:px-6 py-4">
                 <span class="text-lg font-semibold {getRankClass(entry.rank)}">
@@ -271,7 +271,15 @@
               </td>
               <td class="px-4 sm:px-6 py-4">
                 <div class="flex items-center gap-3">
-                  {#if entry.avatar_url}
+                  {#if entry.is_anonymous}
+                    <div
+                      class="w-10 h-10 rounded-full bg-muted flex items-center justify-center ring-2 ring-background shadow"
+                    >
+                      <svg class="w-5 h-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                    </div>
+                  {:else if entry.avatar_url}
                     <img
                       src={entry.avatar_url}
                       alt=""
@@ -288,9 +296,11 @@
                   {/if}
                   <div>
                     <span
-                      class="font-medium {entry.is_current_user
-                        ? 'text-primary'
-                        : 'text-foreground'}"
+                      class="font-medium {entry.is_anonymous
+                        ? 'text-muted-foreground italic'
+                        : entry.is_current_user
+                          ? 'text-primary'
+                          : 'text-foreground'}"
                     >
                       {entry.display_name}
                     </span>

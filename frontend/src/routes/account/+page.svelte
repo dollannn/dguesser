@@ -13,11 +13,13 @@
   import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
   import * as Card from '$lib/components/ui/card';
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
+  import { Switch } from '$lib/components/ui/switch';
   import UserIcon from '@lucide/svelte/icons/user';
   import AtSignIcon from '@lucide/svelte/icons/at-sign';
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import GamepadIcon from '@lucide/svelte/icons/gamepad-2';
   import StarIcon from '@lucide/svelte/icons/star';
+  import ShieldIcon from '@lucide/svelte/icons/shield';
   import MonitorSmartphoneIcon from '@lucide/svelte/icons/monitor-smartphone';
   import TrashIcon from '@lucide/svelte/icons/trash-2';
   import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -39,6 +41,10 @@
   let loadingSessions = $state(true);
   let revokingSession = $state<string | null>(null);
 
+  // Privacy state
+  let leaderboardPublic = $state($user?.leaderboard_public ?? false);
+  let isSavingPrivacy = $state(false);
+
   // Delete account state
   let showDeleteDialog = $state(false);
   let isDeleting = $state(false);
@@ -48,6 +54,7 @@
     if ($user) {
       username = $user.username ?? '';
       displayName = $user.display_name;
+      leaderboardPublic = $user.leaderboard_public ?? false;
     }
   });
 
@@ -130,6 +137,23 @@
     displayName = $user?.display_name ?? '';
     usernameError = '';
     isEditingProfile = false;
+  }
+
+  async function toggleLeaderboardPublic(checked: boolean) {
+    isSavingPrivacy = true;
+    try {
+      const updated = await usersApi.updateProfile({ leaderboard_public: checked });
+      authStore.setUser({ ...$user!, ...updated });
+      leaderboardPublic = checked;
+      toast.success(checked ? 'Your profile is now public on the leaderboard' : 'Your profile is now private on the leaderboard');
+    } catch (e: unknown) {
+      // Revert the toggle on error
+      leaderboardPublic = !checked;
+      const msg = e instanceof ApiClientError ? e.message : 'Failed to update privacy setting';
+      toast.error(msg);
+    } finally {
+      isSavingPrivacy = false;
+    }
   }
 
   async function revokeSession(sessionId: string) {
@@ -356,6 +380,47 @@
           </div>
         </Card.Content>
       </Card.Root>
+
+      <!-- Privacy Section -->
+      {#if !$isGuest}
+        <Card.Root>
+          <Card.Header>
+            <div class="flex items-center gap-3">
+              <div class="p-2 rounded-lg bg-green-500/10">
+                <ShieldIcon class="w-5 h-5 text-green-500" />
+              </div>
+              <div>
+                <Card.Title>Privacy</Card.Title>
+                <Card.Description>Control who can see your profile and leaderboard identity</Card.Description>
+              </div>
+            </div>
+          </Card.Header>
+          <Card.Content>
+            <div class="space-y-4">
+              <div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+                <div class="flex-1 mr-4">
+                  <p class="font-medium">Public Leaderboard Profile</p>
+                  <p class="text-sm text-muted-foreground mt-1">
+                    When enabled, all players can see your name and stats on the leaderboard and view your profile.
+                    When disabled, only players you've played with in multiplayer games can see your identity.
+                  </p>
+                </div>
+                <Switch
+                  checked={leaderboardPublic}
+                  onCheckedChange={toggleLeaderboardPublic}
+                  disabled={isSavingPrivacy}
+                />
+              </div>
+              {#if !leaderboardPublic}
+                <p class="text-sm text-muted-foreground px-1">
+                  Your leaderboard entries will appear as "Anonymous Player" to players you haven't played with.
+                  Your profile page will return a 404 to anyone outside your co-players.
+                </p>
+              {/if}
+            </div>
+          </Card.Content>
+        </Card.Root>
+      {/if}
 
       <!-- Statistics Section -->
       <Card.Root>

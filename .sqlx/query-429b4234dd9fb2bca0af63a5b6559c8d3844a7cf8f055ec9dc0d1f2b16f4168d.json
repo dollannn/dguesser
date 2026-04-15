@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO users (id, kind, display_name, email, email_verified, avatar_url)\n        VALUES ($1, 'authenticated', $2, $3, TRUE, $4)\n        RETURNING id, kind as \"kind: UserKind\", role, username, email, email_verified,\n                  display_name, avatar_url, created_at, updated_at, last_seen_at,\n                  games_played, total_score, best_score, deleted_at\n        ",
+  "query": "\n        SELECT id, kind as \"kind: UserKind\", role, username, email, email_verified,\n               display_name, avatar_url, created_at, updated_at, last_seen_at,\n               games_played, total_score, best_score, deleted_at, leaderboard_public\n        FROM users WHERE id = $1 AND deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -87,13 +87,15 @@
         "ordinal": 14,
         "name": "deleted_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "leaderboard_public",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
       "Left": [
-        "Varchar",
-        "Varchar",
-        "Varchar",
         "Text"
       ]
     },
@@ -112,8 +114,9 @@
       false,
       false,
       false,
-      true
+      true,
+      false
     ]
   },
-  "hash": "dba15af90eb6afce3eb72f98c8c15b86c35efac901bd174bbf9ef6275feddee8"
+  "hash": "429b4234dd9fb2bca0af63a5b6559c8d3844a7cf8f055ec9dc0d1f2b16f4168d"
 }

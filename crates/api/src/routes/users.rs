@@ -11,8 +11,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{error::ApiError, state::AppState};
-use dguesser_auth::AuthUser;
+use crate::{cache::CoPlayersCache, error::ApiError, state::AppState};
+use dguesser_auth::{AuthUser, MaybeAuthUser};
 
 /// Reserved usernames that cannot be used
 const RESERVED_USERNAMES: &[&str] = &[
@@ -96,6 +96,8 @@ pub struct UserProfileResponse {
     pub total_score: i64,
     /// Best score in a single game
     pub best_score: i32,
+    /// Whether the user has opted into public leaderboard visibility
+    pub leaderboard_public: bool,
 }
 
 impl From<dguesser_db::User> for UserProfileResponse {
@@ -109,6 +111,7 @@ impl From<dguesser_db::User> for UserProfileResponse {
             games_played: user.games_played,
             total_score: user.total_score,
             best_score: user.best_score,
+            leaderboard_public: user.leaderboard_public,
         }
     }
 }
@@ -124,6 +127,8 @@ pub struct UpdateProfileRequest {
     pub display_name: Option<String>,
     /// New avatar URL
     pub avatar_url: Option<String>,
+    /// Whether to show identity publicly on the leaderboard
+    pub leaderboard_public: Option<bool>,
 }
 
 /// Delete account response
@@ -293,12 +298,44 @@ pub async fn update_profile(
         dguesser_db::users::update_avatar(state.db(), &auth.user_id, avatar_option).await?;
     }
 
+    // Update leaderboard public setting if provided
+    if let Some(public) = req.leaderboard_public {
+        dguesser_db::users::update_leaderboard_public(state.db(), &auth.user_id, public).await?;
+    }
+
     // Return updated profile
     let user = dguesser_db::users::get_by_id(state.db(), &auth.user_id)
         .await?
         .ok_or_else(|| ApiError::not_found("User"))?;
 
     Ok(Json(UserProfileResponse::from(user)))
+}
+
+/// Check if a viewer has permission to see a user's profile.
+/// Returns true if the profile should be visible.
+async fn can_view_profile(
+    state: &AppState,
+    viewer: &MaybeAuthUser,
+    profile_user: &dguesser_db::User,
+) -> bool {
+    // Public profiles are visible to everyone
+    if profile_user.leaderboard_public {
+        return true;
+    }
+
+    // Check if the viewer is authenticated
+    let Some(auth) = &viewer.0 else {
+        return false;
+    };
+
+    // Users can always view their own profile
+    if auth.user_id == profile_user.id {
+        return true;
+    }
+
+    // Check if viewer is a co-player (shared a multiplayer game)
+    let co_players = CoPlayersCache::get_or_fetch(state, &auth.user_id).await;
+    co_players.contains(&profile_user.id)
 }
 
 /// Get another user's public profile by ID
@@ -316,11 +353,17 @@ pub async fn update_profile(
 )]
 pub async fn get_user_profile(
     State(state): State<AppState>,
+    maybe_auth: MaybeAuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<UserProfileResponse>, ApiError> {
     let user = dguesser_db::users::get_by_id(state.db(), &id)
         .await?
         .ok_or_else(|| ApiError::not_found("User"))?;
+
+    // Privacy check: return 404 if viewer doesn't have permission
+    if !can_view_profile(&state, &maybe_auth, &user).await {
+        return Err(ApiError::not_found("User"));
+    }
 
     Ok(Json(UserProfileResponse::from(user)))
 }
@@ -340,11 +383,17 @@ pub async fn get_user_profile(
 )]
 pub async fn get_user_by_username(
     State(state): State<AppState>,
+    maybe_auth: MaybeAuthUser,
     Path(username): Path<String>,
 ) -> Result<Json<UserProfileResponse>, ApiError> {
     let user = dguesser_db::users::get_by_username(state.db(), &username)
         .await?
         .ok_or_else(|| ApiError::not_found("User"))?;
+
+    // Privacy check: return 404 if viewer doesn't have permission
+    if !can_view_profile(&state, &maybe_auth, &user).await {
+        return Err(ApiError::not_found("User"));
+    }
 
     Ok(Json(UserProfileResponse::from(user)))
 }

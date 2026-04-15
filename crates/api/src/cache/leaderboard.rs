@@ -3,17 +3,30 @@
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 
-use dguesser_protocol::api::leaderboard::{LeaderboardEntry, LeaderboardType, TimePeriod};
+use dguesser_protocol::api::leaderboard::{LeaderboardType, TimePeriod};
 
 /// TTL for all-time leaderboards (5 minutes)
 const ALL_TIME_TTL_SECS: u64 = 300;
 /// TTL for time-filtered leaderboards (30 seconds - more dynamic)
 const TIME_FILTERED_TTL_SECS: u64 = 30;
 
+/// Internal cached leaderboard entry (includes privacy flag, not sent to clients)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedLeaderboardEntry {
+    pub rank: u32,
+    pub user_id: String,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+    pub score: i64,
+    pub games_played: i64,
+    /// Whether this user has opted into public leaderboard visibility
+    pub leaderboard_public: bool,
+}
+
 /// Cached leaderboard data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedLeaderboard {
-    pub entries: Vec<LeaderboardEntry>,
+    pub entries: Vec<CachedLeaderboardEntry>,
     pub total_players: i64,
 }
 

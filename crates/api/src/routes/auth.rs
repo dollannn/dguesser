@@ -53,6 +53,8 @@ pub struct CurrentUserResponse {
     pub total_score: i64,
     /// Best score in a single game
     pub best_score: i32,
+    /// Whether the user has opted into public leaderboard visibility
+    pub leaderboard_public: bool,
 }
 
 impl CurrentUserResponse {
@@ -68,6 +70,7 @@ impl CurrentUserResponse {
             games_played: user.games_played,
             total_score: user.total_score,
             best_score: user.best_score,
+            leaderboard_public: user.leaderboard_public,
         }
     }
 }

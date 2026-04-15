@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT \n            id as user_id,\n            display_name,\n            avatar_url,\n            ROUND(total_score::numeric / games_played, 0)::bigint as \"score!: i64\",\n            games_played as games_count\n        FROM users\n        WHERE games_played >= 3\n        ORDER BY (total_score::numeric / games_played) DESC, games_played DESC\n        LIMIT $1 OFFSET $2\n        ",
+  "query": "\n        SELECT \n            id as user_id,\n            display_name,\n            avatar_url,\n            games_played as score,\n            games_played as games_count,\n            leaderboard_public\n        FROM users\n        WHERE games_played > 0\n        ORDER BY games_played DESC, total_score DESC\n        LIMIT $1 OFFSET $2\n        ",
   "describe": {
     "columns": [
       {
@@ -20,13 +20,18 @@
       },
       {
         "ordinal": 3,
-        "name": "score!: i64",
-        "type_info": "Int8"
+        "name": "score",
+        "type_info": "Int4"
       },
       {
         "ordinal": 4,
         "name": "games_count",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "leaderboard_public",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -39,9 +44,10 @@
       false,
       false,
       true,
-      null,
+      false,
+      false,
       false
     ]
   },
-  "hash": "e487db1537b8fd1b210f705769380cc5176ac13197056a3e989a898261a40332"
+  "hash": "e307980d8c013ee6f5fe8ae3bc0968d429def853b6bab10cc57f6367e628cb4b"
 }

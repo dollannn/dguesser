@@ -12,6 +12,8 @@ pub struct LeaderboardRow {
     pub avatar_url: Option<String>,
     pub score: i64,
     pub games_count: i64,
+    /// Whether this user has opted into public leaderboard visibility
+    pub leaderboard_public: bool,
 }
 
 /// Get top players by total score (all-time)
@@ -27,7 +29,8 @@ pub async fn get_by_total_score(
             display_name,
             avatar_url,
             total_score as score,
-            games_played as games_count
+            games_played as games_count,
+            leaderboard_public
         FROM users
         WHERE games_played > 0
         ORDER BY total_score DESC, games_played DESC
@@ -47,6 +50,7 @@ pub async fn get_by_total_score(
             avatar_url: r.avatar_url,
             score: r.score,
             games_count: r.games_count as i64,
+            leaderboard_public: r.leaderboard_public,
         })
         .collect())
 }
@@ -64,7 +68,8 @@ pub async fn get_by_best_score(
             display_name,
             avatar_url,
             best_score as score,
-            games_played as games_count
+            games_played as games_count,
+            leaderboard_public
         FROM users
         WHERE games_played > 0
         ORDER BY best_score DESC, games_played DESC
@@ -84,6 +89,7 @@ pub async fn get_by_best_score(
             avatar_url: r.avatar_url,
             score: r.score as i64,
             games_count: r.games_count as i64,
+            leaderboard_public: r.leaderboard_public,
         })
         .collect())
 }
@@ -101,7 +107,8 @@ pub async fn get_by_games_played(
             display_name,
             avatar_url,
             games_played as score,
-            games_played as games_count
+            games_played as games_count,
+            leaderboard_public
         FROM users
         WHERE games_played > 0
         ORDER BY games_played DESC, total_score DESC
@@ -121,6 +128,7 @@ pub async fn get_by_games_played(
             avatar_url: r.avatar_url,
             score: r.score as i64,
             games_count: r.games_count as i64,
+            leaderboard_public: r.leaderboard_public,
         })
         .collect())
 }
@@ -138,7 +146,8 @@ pub async fn get_by_average_score(
             display_name,
             avatar_url,
             ROUND(total_score::numeric / games_played, 0)::bigint as "score!: i64",
-            games_played as games_count
+            games_played as games_count,
+            leaderboard_public
         FROM users
         WHERE games_played >= 3
         ORDER BY (total_score::numeric / games_played) DESC, games_played DESC
@@ -158,6 +167,7 @@ pub async fn get_by_average_score(
             avatar_url: r.avatar_url,
             score: r.score,
             games_count: r.games_count as i64,
+            leaderboard_public: r.leaderboard_public,
         })
         .collect())
 }
@@ -175,13 +185,14 @@ pub async fn get_by_total_score_period(
             u.id as user_id,
             u.display_name,
             u.avatar_url,
+            u.leaderboard_public,
             COALESCE(SUM(gp.score_total), 0)::bigint as "score!: i64",
             COUNT(DISTINCT gp.game_id)::bigint as "games_count!: i64"
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
         INNER JOIN games g ON g.id = gp.game_id
         WHERE g.status = 'finished' AND g.ended_at >= $1
-        GROUP BY u.id, u.display_name, u.avatar_url
+        GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public
         HAVING SUM(gp.score_total) > 0
         ORDER BY SUM(gp.score_total) DESC, COUNT(DISTINCT gp.game_id) DESC
         LIMIT $2 OFFSET $3
@@ -201,6 +212,7 @@ pub async fn get_by_total_score_period(
             avatar_url: r.avatar_url,
             score: r.score,
             games_count: r.games_count,
+            leaderboard_public: r.leaderboard_public,
         })
         .collect())
 }
@@ -218,13 +230,14 @@ pub async fn get_by_best_score_period(
             u.id as user_id,
             u.display_name,
             u.avatar_url,
+            u.leaderboard_public,
             COALESCE(MAX(gp.score_total), 0)::bigint as "score!: i64",
             COUNT(DISTINCT gp.game_id)::bigint as "games_count!: i64"
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
         INNER JOIN games g ON g.id = gp.game_id
         WHERE g.status = 'finished' AND g.ended_at >= $1
-        GROUP BY u.id, u.display_name, u.avatar_url
+        GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public
         HAVING MAX(gp.score_total) > 0
         ORDER BY MAX(gp.score_total) DESC, COUNT(DISTINCT gp.game_id) DESC
         LIMIT $2 OFFSET $3
@@ -244,6 +257,7 @@ pub async fn get_by_best_score_period(
             avatar_url: r.avatar_url,
             score: r.score,
             games_count: r.games_count,
+            leaderboard_public: r.leaderboard_public,
         })
         .collect())
 }
@@ -261,13 +275,14 @@ pub async fn get_by_games_played_period(
             u.id as user_id,
             u.display_name,
             u.avatar_url,
+            u.leaderboard_public,
             COUNT(DISTINCT gp.game_id)::bigint as "score!: i64",
             COUNT(DISTINCT gp.game_id)::bigint as "games_count!: i64"
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
         INNER JOIN games g ON g.id = gp.game_id
         WHERE g.status = 'finished' AND g.ended_at >= $1
-        GROUP BY u.id, u.display_name, u.avatar_url
+        GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public
         HAVING COUNT(DISTINCT gp.game_id) > 0
         ORDER BY COUNT(DISTINCT gp.game_id) DESC, SUM(gp.score_total) DESC
         LIMIT $2 OFFSET $3
@@ -287,6 +302,7 @@ pub async fn get_by_games_played_period(
             avatar_url: r.avatar_url,
             score: r.score,
             games_count: r.games_count,
+            leaderboard_public: r.leaderboard_public,
         })
         .collect())
 }
@@ -304,13 +320,14 @@ pub async fn get_by_average_score_period(
             u.id as user_id,
             u.display_name,
             u.avatar_url,
+            u.leaderboard_public,
             ROUND(COALESCE(SUM(gp.score_total), 0)::numeric / NULLIF(COUNT(DISTINCT gp.game_id), 0), 0)::bigint as "score!: i64",
             COUNT(DISTINCT gp.game_id)::bigint as "games_count!: i64"
         FROM users u
         INNER JOIN game_players gp ON gp.user_id = u.id
         INNER JOIN games g ON g.id = gp.game_id
         WHERE g.status = 'finished' AND g.ended_at >= $1
-        GROUP BY u.id, u.display_name, u.avatar_url
+        GROUP BY u.id, u.display_name, u.avatar_url, u.leaderboard_public
         HAVING COUNT(DISTINCT gp.game_id) >= 3
         ORDER BY (SUM(gp.score_total)::numeric / NULLIF(COUNT(DISTINCT gp.game_id), 0)) DESC, COUNT(DISTINCT gp.game_id) DESC
         LIMIT $2 OFFSET $3
@@ -330,6 +347,7 @@ pub async fn get_by_average_score_period(
             avatar_url: r.avatar_url,
             score: r.score,
             games_count: r.games_count,
+            leaderboard_public: r.leaderboard_public,
         })
         .collect())
 }

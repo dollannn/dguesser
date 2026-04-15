@@ -97,13 +97,13 @@ pub struct LeaderboardEntry {
     /// Rank on the leaderboard (1-indexed)
     #[schema(example = 1)]
     pub rank: u32,
-    /// User ID (e.g., usr_V1StGXR8_Z5j)
+    /// User ID (e.g., usr_V1StGXR8_Z5j). Empty string when anonymized.
     #[schema(example = "usr_V1StGXR8_Z5j")]
     pub user_id: String,
-    /// Display name
+    /// Display name (shows "Anonymous Player" when anonymized)
     #[schema(example = "CoolPlayer42")]
     pub display_name: String,
-    /// Avatar URL
+    /// Avatar URL (null when anonymized)
     pub avatar_url: Option<String>,
     /// Score value (context-dependent based on leaderboard type)
     #[schema(example = 125000)]
@@ -114,6 +114,10 @@ pub struct LeaderboardEntry {
     /// Whether this entry is the current authenticated user
     #[schema(example = false)]
     pub is_current_user: bool,
+    /// Whether this entry has been anonymized due to privacy settings
+    #[serde(default)]
+    #[schema(example = false)]
+    pub is_anonymous: bool,
 }
 
 /// Leaderboard response

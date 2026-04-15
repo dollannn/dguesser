@@ -13,6 +13,8 @@ export interface UserProfile {
   games_played: number;
   total_score: number;
   best_score: number;
+  /** Whether the user has opted into public leaderboard visibility */
+  leaderboard_public: boolean;
 }
 
 /**
@@ -22,6 +24,7 @@ export interface UpdateProfileRequest {
   username?: string;
   display_name?: string;
   avatar_url?: string;
+  leaderboard_public?: boolean;
 }
 
 /**

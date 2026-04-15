@@ -62,4 +62,6 @@ pub struct UpdateProfileRequest {
     pub display_name: Option<String>,
     /// New avatar URL
     pub avatar_url: Option<String>,
+    /// Whether to show identity publicly on the leaderboard
+    pub leaderboard_public: Option<bool>,
 }

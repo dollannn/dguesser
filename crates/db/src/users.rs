@@ -77,6 +77,7 @@ pub struct User {
     pub total_score: i64,
     pub best_score: i32,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub leaderboard_public: bool,
 }
 
 impl User {
@@ -102,7 +103,7 @@ pub async fn create_guest(pool: &DbPool, display_name: &str) -> Result<User, sql
         VALUES ($1, 'guest', $2)
         RETURNING id, kind as "kind: UserKind", role, username, email, email_verified,
                   display_name, avatar_url, created_at, updated_at, last_seen_at,
-                  games_played, total_score, best_score, deleted_at
+                  games_played, total_score, best_score, deleted_at, leaderboard_public
         "#,
         id,
         display_name
@@ -127,7 +128,7 @@ pub async fn create_authenticated(
         VALUES ($1, 'authenticated', $2, $3, TRUE, $4)
         RETURNING id, kind as "kind: UserKind", role, username, email, email_verified,
                   display_name, avatar_url, created_at, updated_at, last_seen_at,
-                  games_played, total_score, best_score, deleted_at
+                  games_played, total_score, best_score, deleted_at, leaderboard_public
         "#,
         id,
         display_name,
@@ -145,7 +146,7 @@ pub async fn get_by_id(pool: &DbPool, id: &str) -> Result<Option<User>, sqlx::Er
         r#"
         SELECT id, kind as "kind: UserKind", role, username, email, email_verified,
                display_name, avatar_url, created_at, updated_at, last_seen_at,
-               games_played, total_score, best_score, deleted_at
+               games_played, total_score, best_score, deleted_at, leaderboard_public
         FROM users WHERE id = $1 AND deleted_at IS NULL
         "#,
         id
@@ -161,7 +162,7 @@ pub async fn get_by_email(pool: &DbPool, email: &str) -> Result<Option<User>, sq
         r#"
         SELECT id, kind as "kind: UserKind", role, username, email, email_verified,
                display_name, avatar_url, created_at, updated_at, last_seen_at,
-               games_played, total_score, best_score, deleted_at
+               games_played, total_score, best_score, deleted_at, leaderboard_public
         FROM users WHERE email = $1 AND deleted_at IS NULL
         "#,
         email
@@ -190,7 +191,7 @@ pub async fn upgrade_to_authenticated(
         WHERE id = $1 AND deleted_at IS NULL
         RETURNING id, kind as "kind: UserKind", role, username, email, email_verified,
                   display_name, avatar_url, created_at, updated_at, last_seen_at,
-                  games_played, total_score, best_score, deleted_at
+                  games_played, total_score, best_score, deleted_at, leaderboard_public
         "#,
         user_id,
         email,
@@ -270,7 +271,7 @@ pub async fn get_by_username(pool: &DbPool, username: &str) -> Result<Option<Use
         r#"
         SELECT id, kind as "kind: UserKind", role, username, email, email_verified,
                display_name, avatar_url, created_at, updated_at, last_seen_at,
-               games_played, total_score, best_score, deleted_at
+               games_played, total_score, best_score, deleted_at, leaderboard_public
         FROM users WHERE username = $1 AND deleted_at IS NULL
         "#,
         username
@@ -326,4 +327,40 @@ pub async fn cleanup_deleted(pool: &DbPool, retention_days: i32) -> Result<u64, 
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
+}
+
+/// Update user's leaderboard public visibility setting
+pub async fn update_leaderboard_public(
+    pool: &DbPool,
+    user_id: &str,
+    public: bool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE users SET leaderboard_public = $2 WHERE id = $1 AND deleted_at IS NULL",
+        user_id,
+        public
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Get all user IDs who have shared a finished multiplayer game with the given user.
+/// This forms the "co-player" relationship for leaderboard privacy.
+pub async fn get_co_player_ids(pool: &DbPool, user_id: &str) -> Result<Vec<String>, sqlx::Error> {
+    let rows = sqlx::query_scalar!(
+        r#"
+        SELECT DISTINCT gp2.user_id as "user_id!"
+        FROM game_players gp1
+        INNER JOIN game_players gp2 ON gp1.game_id = gp2.game_id AND gp2.user_id != $1
+        INNER JOIN games g ON g.id = gp1.game_id
+        WHERE gp1.user_id = $1
+          AND g.mode = 'multiplayer'
+          AND g.status = 'finished'
+        "#,
+        user_id
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }

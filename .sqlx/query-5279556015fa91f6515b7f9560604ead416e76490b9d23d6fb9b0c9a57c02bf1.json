@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, kind as \"kind: UserKind\", role, username, email, email_verified,\n               display_name, avatar_url, created_at, updated_at, last_seen_at,\n               games_played, total_score, best_score, deleted_at\n        FROM users WHERE username = $1 AND deleted_at IS NULL\n        ",
+  "query": "\n        UPDATE users\n        SET kind = 'authenticated',\n            email = $2,\n            email_verified = TRUE,\n            display_name = COALESCE($3, display_name),\n            avatar_url = COALESCE($4, avatar_url)\n        WHERE id = $1 AND deleted_at IS NULL\n        RETURNING id, kind as \"kind: UserKind\", role, username, email, email_verified,\n                  display_name, avatar_url, created_at, updated_at, last_seen_at,\n                  games_played, total_score, best_score, deleted_at, leaderboard_public\n        ",
   "describe": {
     "columns": [
       {
@@ -87,10 +87,18 @@
         "ordinal": 14,
         "name": "deleted_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "leaderboard_public",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
       "Left": [
+        "Text",
+        "Varchar",
+        "Varchar",
         "Text"
       ]
     },
@@ -109,8 +117,9 @@
       false,
       false,
       false,
-      true
+      true,
+      false
     ]
   },
-  "hash": "d46ab4db741c36be60fb923ebad43a56f4bfb22a6c25786d6b1cb83ab59545cd"
+  "hash": "5279556015fa91f6515b7f9560604ead416e76490b9d23d6fb9b0c9a57c02bf1"
 }

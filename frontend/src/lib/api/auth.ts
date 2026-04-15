@@ -23,6 +23,8 @@ export interface User {
   games_played: number;
   total_score: number;
   best_score: number;
+  /** Whether the user has opted into public leaderboard visibility */
+  leaderboard_public: boolean;
 }
 
 export const authApi = {

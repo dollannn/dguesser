@@ -11,6 +11,8 @@ export interface LeaderboardEntry {
   score: number;
   games_played: number;
   is_current_user: boolean;
+  /** Whether this entry has been anonymized due to privacy settings */
+  is_anonymous: boolean;
 }
 
 export interface LeaderboardResponse {

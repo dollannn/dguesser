@@ -5,7 +5,10 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::{
-    cache::leaderboard::{CachedLeaderboard, LeaderboardCache},
+    cache::{
+        CoPlayersCache,
+        leaderboard::{CachedLeaderboard, CachedLeaderboardEntry, LeaderboardCache},
+    },
     error::ApiError,
     state::AppState,
 };
@@ -39,6 +42,8 @@ pub struct LeaderboardResponse {
 ///
 /// Returns a list of top players ranked by the specified criteria.
 /// Supports different time periods and ranking types.
+/// Players are anonymized unless they have opted into public visibility
+/// or the requesting user has played a multiplayer game with them.
 #[utoipa::path(
     get,
     path = "/api/v1/leaderboard",
@@ -72,7 +77,7 @@ pub async fn get_leaderboard(
     // Try to get cached leaderboard data first
     let cached = LeaderboardCache::get(redis, &query.r#type, &query.period, limit, offset).await;
 
-    let (mut entries, total_players) = if let Some(cached) = cached {
+    let (cached_entries, total_players) = if let Some(cached) = cached {
         tracing::debug!("Leaderboard cache hit");
         (cached.entries, cached.total_players)
     } else {
@@ -112,18 +117,18 @@ pub async fn get_leaderboard(
             }
         };
 
-        // Convert to response entries with rank (without is_current_user for caching)
-        let entries: Vec<LeaderboardEntry> = rows
+        // Convert to cached entries (includes leaderboard_public for per-viewer anonymization)
+        let cached_entries: Vec<CachedLeaderboardEntry> = rows
             .into_iter()
             .enumerate()
-            .map(|(i, row)| LeaderboardEntry {
+            .map(|(i, row)| CachedLeaderboardEntry {
                 rank: (offset as u32) + (i as u32) + 1,
                 user_id: row.user_id,
                 display_name: row.display_name,
                 avatar_url: row.avatar_url,
                 score: row.score,
                 games_played: row.games_count,
-                is_current_user: false, // Set later per-user
+                leaderboard_public: row.leaderboard_public,
             })
             .collect();
 
@@ -135,28 +140,65 @@ pub async fn get_leaderboard(
             }
         };
 
-        // Cache the result (without user-specific data)
+        // Cache the result (with leaderboard_public flag for per-viewer anonymization)
         LeaderboardCache::set(
             redis,
             &query.r#type,
             &query.period,
             limit,
             offset,
-            &CachedLeaderboard { entries: entries.clone(), total_players },
+            &CachedLeaderboard { entries: cached_entries.clone(), total_players },
         )
         .await;
 
-        (entries, total_players)
+        (cached_entries, total_players)
     };
 
-    // Mark current user in entries (user-specific, not cached)
-    if let Some(auth) = &maybe_auth.0 {
-        for entry in &mut entries {
-            if entry.user_id == auth.user_id {
-                entry.is_current_user = true;
+    // Fetch co-players set for authenticated users (cached in Redis, ~5min TTL)
+    let co_players = if let Some(auth) = &maybe_auth.0 {
+        Some(CoPlayersCache::get_or_fetch(&state, &auth.user_id).await)
+    } else {
+        None
+    };
+
+    // Convert cached entries to response entries with privacy anonymization
+    let entries: Vec<LeaderboardEntry> = cached_entries
+        .into_iter()
+        .map(|cached| {
+            let is_current_user =
+                maybe_auth.0.as_ref().is_some_and(|auth| auth.user_id == cached.user_id);
+
+            // Determine if this entry should be visible (not anonymized)
+            let is_visible = is_current_user
+                || cached.leaderboard_public
+                || co_players.as_ref().is_some_and(|cp| cp.contains(&cached.user_id));
+
+            if is_visible {
+                LeaderboardEntry {
+                    rank: cached.rank,
+                    user_id: cached.user_id,
+                    display_name: cached.display_name,
+                    avatar_url: cached.avatar_url,
+                    score: cached.score,
+                    games_played: cached.games_played,
+                    is_current_user,
+                    is_anonymous: false,
+                }
+            } else {
+                // Anonymize: hide identity but keep stats
+                LeaderboardEntry {
+                    rank: cached.rank,
+                    user_id: String::new(),
+                    display_name: "Anonymous Player".to_string(),
+                    avatar_url: None,
+                    score: cached.score,
+                    games_played: cached.games_played,
+                    is_current_user: false,
+                    is_anonymous: true,
+                }
             }
-        }
-    }
+        })
+        .collect();
 
     // Get current user's rank if authenticated
     let (current_user_rank, current_user_score) = if let Some(auth) = &maybe_auth.0 {
@@ -204,7 +246,7 @@ pub async fn get_leaderboard(
                     (None, None)
                 }
             }
-            // Time-filtered queries - now supported!
+            // Time-filtered queries
             Some(since) => {
                 let result = match query.r#type {
                     LeaderboardType::TotalScore => {
