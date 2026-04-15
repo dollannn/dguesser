@@ -92,6 +92,16 @@ pub enum GameCommand {
         settings: dguesser_core::game::GameSettings,
         respond: oneshot::Sender<Result<(), String>>,
     },
+    /// Host force-skips the between-rounds wait
+    SkipWait {
+        user_id: String,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
+    /// Player votes to skip the between-rounds wait
+    VoteSkip {
+        user_id: String,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
     Tick,
     Shutdown,
 }

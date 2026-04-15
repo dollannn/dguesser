@@ -51,6 +51,13 @@ impl SocketRateLimitConfig {
     /// Settings update: 30 requests per minute per user (debounced on frontend)
     pub const UPDATE_SETTINGS: Self =
         Self { event: "game:update_settings", max_requests: 30, window_secs: 60 };
+
+    /// Host skip wait: 10 requests per minute per user
+    pub const SKIP_WAIT: Self = Self { event: "round:skip", max_requests: 10, window_secs: 60 };
+
+    /// Vote to skip: 10 requests per minute per user
+    pub const VOTE_SKIP: Self =
+        Self { event: "round:vote_skip", max_requests: 10, window_secs: 60 };
 }
 
 /// Result of a rate limit check

@@ -82,6 +82,25 @@ pub enum GameEvent {
         settings: GameSettings,
     },
 
+    /// The host force-skipped the between-rounds wait.
+    WaitSkipped,
+
+    /// A player voted to skip the between-rounds wait.
+    SkipVoteRecorded {
+        /// User ID of the voter
+        user_id: String,
+        /// Current number of skip votes
+        votes: u8,
+        /// Number of votes required to skip
+        required: u8,
+    },
+
+    /// The skip vote threshold was reached — wait will be skipped.
+    SkipVotePassed,
+
+    /// The between-rounds wait expired (timer elapsed).
+    BetweenRoundsExpired,
+
     /// The game was abandoned (all players disconnected for too long).
     GameAbandoned {
         /// Reason for abandonment
@@ -131,6 +150,10 @@ impl GameEvent {
             GameEvent::ScoresUpdated { .. } => "ScoresUpdated",
             GameEvent::GameEnded { .. } => "GameEnded",
             GameEvent::SettingsUpdated { .. } => "SettingsUpdated",
+            GameEvent::WaitSkipped => "WaitSkipped",
+            GameEvent::SkipVoteRecorded { .. } => "SkipVoteRecorded",
+            GameEvent::SkipVotePassed => "SkipVotePassed",
+            GameEvent::BetweenRoundsExpired => "BetweenRoundsExpired",
             GameEvent::GameAbandoned { .. } => "GameAbandoned",
             GameEvent::Error { .. } => "Error",
         }

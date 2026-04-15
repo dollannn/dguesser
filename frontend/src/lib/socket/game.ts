@@ -41,6 +41,8 @@ export interface RoundEndPayload {
   round_number: number;
   correct_location: RoundLocation;
   results: RoundResult[];
+  /** Unix timestamp (ms) when the next round will auto-start (multiplayer only) */
+  next_round_at?: number | null;
 }
 
 export interface FinalStanding {
@@ -68,6 +70,14 @@ export interface PlayerInfo {
   disconnected_at?: number | null;
 }
 
+/** Skip vote update payload */
+export interface SkipVoteUpdatePayload {
+  /** Number of players who have voted to skip */
+  votes: number;
+  /** Number of votes required to skip (majority threshold) */
+  required: number;
+}
+
 /** Full game state payload (sent on join/reconnect) */
 export interface GameStatePayload {
   game_id: string;
@@ -79,6 +89,10 @@ export interface GameStatePayload {
   players: PlayerInfo[];
   location: RoundLocation | null;
   time_remaining_ms: number | null;
+  /** Unix timestamp (ms) when next round auto-starts (if between rounds) */
+  next_round_at?: number | null;
+  /** Current skip vote state (if between rounds) */
+  skip_votes?: SkipVoteUpdatePayload | null;
 }
 
 /** Settings updated payload */
@@ -167,6 +181,14 @@ export interface GameState {
   players: Map<string, PlayerState>;
   /** Live scoreboard data */
   liveScores: PlayerScoreInfo[];
+  /** Unix timestamp (ms) when next round auto-starts (multiplayer between-rounds) */
+  nextRoundAt: number | null;
+  /** Current number of skip votes */
+  skipVotes: number;
+  /** Number of votes required to skip */
+  skipVotesRequired: number;
+  /** Whether the current user has voted to skip */
+  hasVotedToSkip: boolean;
 }
 
 function createGameStore() {
@@ -188,6 +210,10 @@ function createGameStore() {
     finalStandings: [],
     players: new Map(),
     liveScores: [],
+    nextRoundAt: null,
+    skipVotes: 0,
+    skipVotesRequired: 0,
+    hasVotedToSkip: false,
   };
 
   const { subscribe, set, update } = writable<GameState>(initialState);
@@ -244,6 +270,23 @@ function createGameStore() {
         }
         return s;
       });
+    },
+
+    /** Host force-skips the between-rounds wait */
+    skipWait(): void {
+      const currentState = get({ subscribe });
+      if (currentState.gameId) {
+        socketClient.emit('round:skip', { game_id: currentState.gameId });
+      }
+    },
+
+    /** Vote to skip the between-rounds wait */
+    voteSkip(): void {
+      const currentState = get({ subscribe });
+      if (currentState.gameId && !currentState.hasVotedToSkip) {
+        socketClient.emit('round:vote_skip', { game_id: currentState.gameId });
+        update((s) => ({ ...s, hasVotedToSkip: true }));
+      }
     },
 
     // Event handlers
@@ -309,6 +352,12 @@ function createGameStore() {
         .sort((a, b) => b.total_score - a.total_score)
         .map((p, i) => ({ ...p, rank: i + 1 }));
 
+      // If between rounds (next_round_at is set), show round_end status
+      if (payload.next_round_at && status === 'playing') {
+        // Reconnecting during between-rounds: show round_end view
+        status = 'round_end' as GameState['status'];
+      }
+
       update((s) => ({
         ...s,
         gameId: payload.game_id,
@@ -324,6 +373,10 @@ function createGameStore() {
         hasGuessed: payload.players.some((p) => p.has_guessed && p.id === getCurrentUserId()),
         players,
         liveScores,
+        nextRoundAt: payload.next_round_at ?? null,
+        skipVotes: payload.skip_votes?.votes ?? 0,
+        skipVotesRequired: payload.skip_votes?.required ?? 0,
+        hasVotedToSkip: false,
       }));
     },
 
@@ -345,6 +398,11 @@ function createGameStore() {
         players: new Map(
           [...s.players].map(([id, p]) => [id, { ...p, hasGuessed: false }])
         ),
+        // Reset between-rounds state
+        nextRoundAt: null,
+        skipVotes: 0,
+        skipVotesRequired: 0,
+        hasVotedToSkip: false,
       }));
     },
 
@@ -391,8 +449,22 @@ function createGameStore() {
           roundLocations: [...s.roundLocations, payload.correct_location],
           location: payload.correct_location,
           players,
+          // Store between-rounds countdown deadline
+          nextRoundAt: payload.next_round_at ?? null,
+          skipVotes: 0,
+          skipVotesRequired: 0,
+          hasVotedToSkip: false,
         };
       });
+    },
+
+    /** Handle skip vote update */
+    handleSkipVoteUpdate(payload: SkipVoteUpdatePayload): void {
+      update((s) => ({
+        ...s,
+        skipVotes: payload.votes,
+        skipVotesRequired: payload.required,
+      }));
     },
 
     handleGameEnd(payload: GameEndPayload): void {
@@ -550,6 +622,9 @@ export function initGameSocketListeners(): () => void {
     }),
     socketClient.on<RoundEndPayload>('round:end', (data) => {
       gameStore.handleRoundEnd(data);
+    }),
+    socketClient.on<SkipVoteUpdatePayload>('round:skip_votes', (data) => {
+      gameStore.handleSkipVoteUpdate(data);
     }),
     socketClient.on<GameEndPayload>('game:end', (data) => {
       gameStore.handleGameEnd(data);

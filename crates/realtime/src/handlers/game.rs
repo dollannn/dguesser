@@ -356,6 +356,112 @@ pub async fn handle_update_settings<A: Adapter>(
     }
 }
 
+/// Handle host force-skipping the between-rounds wait
+pub async fn handle_skip_wait<A: Adapter>(
+    socket: SocketRef<A>,
+    State(state): State<AppState>,
+    Data(payload): Data<JoinPayload>,
+) {
+    let socket_id = socket.id.to_string();
+
+    let user_id = match state.get_user_for_socket(&socket_id).await {
+        Some(id) => id,
+        None => {
+            emit_error(&socket, "NOT_AUTHENTICATED", "Please authenticate first");
+            return;
+        }
+    };
+
+    // Rate limit by user (reuse READY config - same interaction pattern)
+    if !check_user_rate_limit(&state, &SocketRateLimitConfig::SKIP_WAIT, &user_id, &socket).await {
+        return;
+    }
+
+    let handle = match state.get_game(&payload.game_id).await {
+        Some(h) => h,
+        None => {
+            emit_error(&socket, "GAME_NOT_FOUND", "Game not active");
+            return;
+        }
+    };
+
+    let (tx, rx) = oneshot::channel();
+    if handle
+        .tx
+        .send(GameCommand::SkipWait { user_id: user_id.clone(), respond: tx })
+        .await
+        .is_err()
+    {
+        emit_error(&socket, "GAME_ERROR", "Failed to skip wait");
+        return;
+    }
+
+    match rx.await {
+        Ok(Ok(())) => {
+            tracing::info!("Host {} skipped wait for game {}", user_id, payload.game_id);
+        }
+        Ok(Err(err)) => {
+            emit_error(&socket, "SKIP_FAILED", &err);
+        }
+        Err(_) => {
+            emit_error(&socket, "GAME_ERROR", "Game actor unavailable");
+        }
+    }
+}
+
+/// Handle player voting to skip the between-rounds wait
+pub async fn handle_vote_skip<A: Adapter>(
+    socket: SocketRef<A>,
+    State(state): State<AppState>,
+    Data(payload): Data<JoinPayload>,
+) {
+    let socket_id = socket.id.to_string();
+
+    let user_id = match state.get_user_for_socket(&socket_id).await {
+        Some(id) => id,
+        None => {
+            emit_error(&socket, "NOT_AUTHENTICATED", "Please authenticate first");
+            return;
+        }
+    };
+
+    // Rate limit by user
+    if !check_user_rate_limit(&state, &SocketRateLimitConfig::VOTE_SKIP, &user_id, &socket).await {
+        return;
+    }
+
+    let handle = match state.get_game(&payload.game_id).await {
+        Some(h) => h,
+        None => {
+            emit_error(&socket, "GAME_NOT_FOUND", "Game not active");
+            return;
+        }
+    };
+
+    let (tx, rx) = oneshot::channel();
+    if handle
+        .tx
+        .send(GameCommand::VoteSkip { user_id: user_id.clone(), respond: tx })
+        .await
+        .is_err()
+    {
+        emit_error(&socket, "GAME_ERROR", "Failed to vote to skip");
+        return;
+    }
+
+    match rx.await {
+        Ok(Ok(())) => {
+            tracing::debug!("Player {} voted to skip for game {}", user_id, payload.game_id);
+        }
+        Ok(Err(err)) => {
+            emit_error(&socket, "VOTE_FAILED", &err);
+        }
+        Err(_) => {
+            emit_error(&socket, "GAME_ERROR", "Game actor unavailable");
+        }
+    }
+}
+
 /// Handle player ready state
 pub async fn handle_ready<A: Adapter>(
     socket: SocketRef<A>,

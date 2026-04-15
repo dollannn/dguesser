@@ -24,6 +24,9 @@ pub const ALL_DISCONNECTED_TIMEOUT_MS: u32 = 120_000;
 /// Maximum players allowed per game (prevents resource exhaustion).
 pub const MAX_PLAYERS_PER_GAME: usize = 50;
 
+/// Duration of the between-rounds wait in milliseconds (20 seconds).
+pub const BETWEEN_ROUNDS_WAIT_MS: i64 = 20_000;
+
 /// Result of applying a command to the game state.
 #[derive(Debug)]
 pub struct ReducerResult {
@@ -100,7 +103,7 @@ pub fn reduce(state: &GameState, command: GameCommand, now: DateTime<Utc>) -> Re
             handle_submit_guess(state.clone(), user_id, lat, lng, time_taken_ms, now)
         }
 
-        GameCommand::EndRound => handle_end_round(state.clone()),
+        GameCommand::EndRound => handle_end_round(state.clone(), now),
 
         GameCommand::AdvanceRound { next_location } => {
             handle_advance_round(state.clone(), next_location, now)
@@ -113,6 +116,10 @@ pub fn reduce(state: &GameState, command: GameCommand, now: DateTime<Utc>) -> Re
         GameCommand::UpdateSettings { user_id, settings } => {
             handle_update_settings(state.clone(), user_id, settings)
         }
+
+        GameCommand::SkipWait { user_id } => handle_skip_wait(state.clone(), user_id),
+
+        GameCommand::VoteSkipWait { user_id } => handle_vote_skip_wait(state.clone(), user_id),
     }
 }
 
@@ -345,7 +352,7 @@ fn handle_submit_guess(
     ReducerResult::with_events(state, events)
 }
 
-fn handle_end_round(mut state: GameState) -> ReducerResult {
+fn handle_end_round(mut state: GameState, now: DateTime<Utc>) -> ReducerResult {
     // Must be in a round
     if state.phase != GamePhase::RoundInProgress {
         return ReducerResult::unchanged(state);
@@ -390,6 +397,10 @@ fn handle_end_round(mut state: GameState) -> ReducerResult {
     state.completed_rounds.push(round);
     state.phase = GamePhase::BetweenRounds;
 
+    // Set the between-rounds deadline and clear any previous skip votes
+    state.between_rounds_ends_at = Some(now.timestamp_millis() + BETWEEN_ROUNDS_WAIT_MS);
+    state.skip_votes.clear();
+
     ReducerResult::with_events(state, vec![event])
 }
 
@@ -421,6 +432,8 @@ fn handle_advance_round(
     // Update state
     state.round_number = next_round_number;
     state.phase = GamePhase::RoundInProgress;
+    state.between_rounds_ends_at = None;
+    state.skip_votes.clear();
 
     let time_limit_ms = if state.settings.time_limit_seconds > 0 {
         Some(state.settings.time_limit_seconds * 1000)
@@ -473,6 +486,8 @@ fn handle_end_game(mut state: GameState) -> ReducerResult {
         .collect();
 
     state.phase = GamePhase::Finished;
+    state.between_rounds_ends_at = None;
+    state.skip_votes.clear();
 
     let event = GameEvent::GameEnded { final_standings };
 
@@ -497,6 +512,16 @@ fn handle_tick(mut state: GameState, now: DateTime<Utc>) -> ReducerResult {
             // End the round - recursively process EndRound
             return reduce(&state, GameCommand::EndRound, now);
         }
+    }
+
+    // Check for between-rounds wait expiry
+    if state.phase == GamePhase::BetweenRounds
+        && let Some(ends_at) = state.between_rounds_ends_at
+        && now.timestamp_millis() >= ends_at
+    {
+        state.between_rounds_ends_at = None;
+        events.push(GameEvent::BetweenRoundsExpired);
+        return ReducerResult::with_events(state, events);
     }
 
     // Check for disconnection grace period timeouts - ONLY in Lobby phase
@@ -593,6 +618,74 @@ fn handle_update_settings(
     let event = GameEvent::SettingsUpdated { settings };
 
     ReducerResult::with_events(state, vec![event])
+}
+
+fn handle_skip_wait(mut state: GameState, user_id: String) -> ReducerResult {
+    // Must be between rounds
+    if state.phase != GamePhase::BetweenRounds {
+        return ReducerResult::error(
+            state,
+            "INVALID_STATE",
+            "Can only skip wait when between rounds",
+        );
+    }
+
+    // Must be host
+    if !state.is_host(&user_id) {
+        return ReducerResult::error(state, "NOT_HOST", "Only the host can force skip the wait");
+    }
+
+    // Clear wait state
+    state.between_rounds_ends_at = None;
+    state.skip_votes.clear();
+
+    ReducerResult::with_events(state, vec![GameEvent::WaitSkipped])
+}
+
+fn handle_vote_skip_wait(mut state: GameState, user_id: String) -> ReducerResult {
+    // Must be between rounds
+    if state.phase != GamePhase::BetweenRounds {
+        return ReducerResult::error(
+            state,
+            "INVALID_STATE",
+            "Can only vote to skip when between rounds",
+        );
+    }
+
+    // Player must exist
+    if !state.players.contains_key(&user_id) {
+        return ReducerResult::error(state, "NOT_IN_GAME", "Player not in this game");
+    }
+
+    // Player must be connected
+    if !state.players.get(&user_id).is_some_and(|p| p.connected) {
+        return ReducerResult::error(
+            state,
+            "NOT_CONNECTED",
+            "Only connected players can vote to skip",
+        );
+    }
+
+    // Check if already voted
+    if state.skip_votes.contains(&user_id) {
+        return ReducerResult::error(state, "ALREADY_VOTED", "Already voted to skip");
+    }
+
+    // Record the vote
+    state.skip_votes.insert(user_id.clone());
+
+    let votes = state.skip_votes.len() as u8;
+    let required = state.skip_votes_required() as u8;
+
+    let mut events = vec![GameEvent::SkipVoteRecorded { user_id, votes, required }];
+
+    // Check if majority reached
+    if votes >= required {
+        state.between_rounds_ends_at = None;
+        events.push(GameEvent::SkipVotePassed);
+    }
+
+    ReducerResult::with_events(state, events)
 }
 
 // =============================================================================

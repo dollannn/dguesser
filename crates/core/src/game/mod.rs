@@ -39,7 +39,7 @@ pub mod state;
 // Re-export commonly used types for convenience
 pub use commands::{GameCommand, LocationData};
 pub use events::{FinalStandingData, GameEvent, RoundResultData, ScoreData};
-pub use reducer::{ReducerResult, reduce};
+pub use reducer::{BETWEEN_ROUNDS_WAIT_MS, ReducerResult, reduce};
 pub use rules::*;
 pub use scoring::*;
 pub use state::{GamePhase, GameState, Guess, PlayerState, RoundState};

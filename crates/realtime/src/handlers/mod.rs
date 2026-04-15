@@ -31,6 +31,8 @@ pub async fn on_connect<A: Adapter>(socket: SocketRef<A>, State(state): State<Ap
     socket.on("game:start", game::handle_start::<A>);
     socket.on("game:update_settings", game::handle_update_settings::<A>);
     socket.on("guess:submit", game::handle_guess::<A>);
+    socket.on("round:skip", game::handle_skip_wait::<A>);
+    socket.on("round:vote_skip", game::handle_vote_skip::<A>);
     socket.on("player:ready", game::handle_ready::<A>);
 
     // Handle disconnect

@@ -3,7 +3,7 @@
 //! These types represent the canonical game state that both singleplayer (REST API)
 //! and multiplayer (GameActor) modes operate on.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -204,6 +204,12 @@ pub struct GameState {
     /// When all players became disconnected (for abandonment timeout)
     #[serde(default)]
     pub all_disconnected_at: Option<DateTime<Utc>>,
+    /// Unix timestamp (ms) when the between-rounds wait expires and the next round auto-starts
+    #[serde(default)]
+    pub between_rounds_ends_at: Option<i64>,
+    /// User IDs of players who have voted to skip the between-rounds wait
+    #[serde(default)]
+    pub skip_votes: HashSet<String>,
 }
 
 impl GameState {
@@ -220,6 +226,8 @@ impl GameState {
             created_at: Utc::now(),
             started_at: None,
             all_disconnected_at: None,
+            between_rounds_ends_at: None,
+            skip_votes: HashSet::new(),
         }
     }
 
@@ -266,6 +274,12 @@ impl GameState {
     /// Get the number of connected players.
     pub fn connected_player_count(&self) -> usize {
         self.players.values().filter(|p| p.connected).count()
+    }
+
+    /// Get the number of votes required to skip the between-rounds wait (majority >50%).
+    pub fn skip_votes_required(&self) -> usize {
+        let connected = self.connected_player_count();
+        (connected / 2) + 1
     }
 }
 

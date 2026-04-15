@@ -161,6 +161,24 @@ pub enum GameCommand {
         /// New game settings
         settings: GameSettings,
     },
+
+    /// Host force-skips the between-rounds wait.
+    ///
+    /// Only valid in the `BetweenRounds` phase and only by the host.
+    /// Immediately triggers advancement to the next round (or game end).
+    SkipWait {
+        /// User ID of the host requesting the skip
+        user_id: String,
+    },
+
+    /// A player votes to skip the between-rounds wait.
+    ///
+    /// Only valid in the `BetweenRounds` phase for connected players.
+    /// When a majority (>50%) of connected players vote, the wait is skipped.
+    VoteSkipWait {
+        /// User ID of the player voting to skip
+        user_id: String,
+    },
 }
 
 impl GameCommand {
@@ -173,7 +191,9 @@ impl GameCommand {
             | GameCommand::Reconnect { user_id }
             | GameCommand::Start { user_id, .. }
             | GameCommand::SubmitGuess { user_id, .. }
-            | GameCommand::UpdateSettings { user_id, .. } => Some(user_id),
+            | GameCommand::UpdateSettings { user_id, .. }
+            | GameCommand::SkipWait { user_id }
+            | GameCommand::VoteSkipWait { user_id } => Some(user_id),
             GameCommand::EndRound
             | GameCommand::AdvanceRound { .. }
             | GameCommand::EndGame
@@ -183,7 +203,12 @@ impl GameCommand {
 
     /// Check if this command requires the user to be the host.
     pub fn requires_host(&self) -> bool {
-        matches!(self, GameCommand::Start { .. } | GameCommand::UpdateSettings { .. })
+        matches!(
+            self,
+            GameCommand::Start { .. }
+                | GameCommand::UpdateSettings { .. }
+                | GameCommand::SkipWait { .. }
+        )
     }
 
     /// Get a human-readable name for this command (for logging/debugging).
@@ -200,6 +225,8 @@ impl GameCommand {
             GameCommand::EndGame => "EndGame",
             GameCommand::Tick => "Tick",
             GameCommand::UpdateSettings { .. } => "UpdateSettings",
+            GameCommand::SkipWait { .. } => "SkipWait",
+            GameCommand::VoteSkipWait { .. } => "VoteSkipWait",
         }
     }
 }

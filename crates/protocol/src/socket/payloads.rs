@@ -101,6 +101,9 @@ pub struct RoundEndPayload {
     pub correct_location: RoundLocation,
     /// Results for all players
     pub results: Vec<RoundResult>,
+    /// Unix timestamp (ms) when the next round will auto-start (multiplayer only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_round_at: Option<i64>,
 }
 
 /// Individual player result for a round
@@ -212,6 +215,12 @@ pub struct GameStatePayload {
     pub location: Option<RoundLocation>,
     /// Time remaining in milliseconds (if timed)
     pub time_remaining_ms: Option<u32>,
+    /// Unix timestamp (ms) when the next round will auto-start (if between rounds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_round_at: Option<i64>,
+    /// Current skip vote status (if between rounds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_votes: Option<SkipVoteUpdatePayload>,
 }
 
 /// Player joined payload
@@ -313,6 +322,17 @@ pub struct SettingsUpdatedPayload {
     pub game_id: String,
     /// Updated settings
     pub settings: GameSettingsPayload,
+}
+
+/// Skip vote update payload (broadcast when a player votes to skip the between-rounds wait)
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SkipVoteUpdatePayload {
+    /// Number of players who have voted to skip
+    #[schema(example = 3)]
+    pub votes: u8,
+    /// Number of votes required to skip (majority threshold)
+    #[schema(example = 3)]
+    pub required: u8,
 }
 
 /// Game abandoned payload (all players disconnected for too long)

@@ -126,6 +126,14 @@ impl GameActor {
                     let result = self.handle_update_settings(&user_id, settings).await;
                     let _ = respond.send(result);
                 }
+                GameCommand::SkipWait { user_id, respond } => {
+                    let result = self.handle_skip_wait(&user_id).await;
+                    let _ = respond.send(result);
+                }
+                GameCommand::VoteSkip { user_id, respond } => {
+                    let result = self.handle_vote_skip(&user_id).await;
+                    let _ = respond.send(result);
+                }
                 GameCommand::Tick => {
                     self.handle_tick().await;
                 }
@@ -720,7 +728,7 @@ impl GameActor {
         }
     }
 
-    /// Handle tick - check for timeouts
+    /// Handle tick - check for timeouts and between-rounds expiry
     async fn handle_tick(&mut self) {
         let Some(state) = self.state.as_ref() else { return };
         let now = Utc::now();
@@ -736,6 +744,10 @@ impl GameActor {
         let round_ended = result.state.phase == GamePhase::BetweenRounds
             && state.phase == GamePhase::RoundInProgress;
 
+        // Check if between-rounds wait expired
+        let between_rounds_expired =
+            result.events.iter().any(|e| matches!(e, GameEvent::BetweenRoundsExpired));
+
         // Update state
         self.state = Some(result.state);
 
@@ -746,9 +758,18 @@ impl GameActor {
         if round_ended {
             self.handle_round_ended_by_tick().await;
         }
+
+        // If between-rounds wait expired, advance to next round or end game
+        if between_rounds_expired {
+            self.advance_or_end_game().await;
+        }
     }
 
-    /// Handle round ended by tick (timeout)
+    /// Handle round ended by tick (timeout or all guessed)
+    ///
+    /// Persists the round end to DB and broadcasts results.
+    /// The tick-based timer in `between_rounds_ends_at` handles
+    /// the automatic advancement after the wait period.
     async fn handle_round_ended_by_tick(&mut self) {
         // End round in database
         if let Some(round_id) = &self.current_round_db_id
@@ -757,23 +778,14 @@ impl GameActor {
             tracing::error!(error = %e, game_id = %self.game_id, "Failed to end round in DB (tick)");
         }
 
-        // Broadcast round end
+        // Broadcast round end (includes next_round_at for countdown)
         self.broadcast_round_end().await;
 
         // Clear round DB ID
         self.current_round_db_id = None;
 
-        // Short delay before next round
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-        // Start next round or end game
-        let should_end = self.state.as_ref().is_some_and(|s| s.round_number >= s.settings.rounds);
-
-        if should_end {
-            self.end_game().await.ok();
-        } else {
-            self.start_next_round().await.ok();
-        }
+        // Save to Redis (the between_rounds_ends_at is now in state)
+        self.force_save_state_to_redis().await;
     }
 
     /// Handle settings update (host only, lobby only)
@@ -813,6 +825,63 @@ impl GameActor {
         self.save_state_to_redis().await;
 
         Ok(())
+    }
+
+    /// Handle host force-skipping the between-rounds wait
+    async fn handle_skip_wait(&mut self, user_id: &str) -> Result<(), String> {
+        let state = self.state.as_ref().ok_or("Game not initialized")?;
+        let now = Utc::now();
+
+        let result = reduce(state, CoreCommand::SkipWait { user_id: user_id.to_string() }, now);
+
+        if result.has_error() {
+            return Err(self.extract_error_message(&result));
+        }
+
+        self.state = Some(result.state);
+        self.broadcast_events(&result.events).await;
+
+        // Advance immediately
+        self.advance_or_end_game().await;
+
+        Ok(())
+    }
+
+    /// Handle a player voting to skip the between-rounds wait
+    async fn handle_vote_skip(&mut self, user_id: &str) -> Result<(), String> {
+        let state = self.state.as_ref().ok_or("Game not initialized")?;
+        let now = Utc::now();
+
+        let result = reduce(state, CoreCommand::VoteSkipWait { user_id: user_id.to_string() }, now);
+
+        if result.has_error() {
+            return Err(self.extract_error_message(&result));
+        }
+
+        // Check if the vote passed (majority reached)
+        let vote_passed = result.events.iter().any(|e| matches!(e, GameEvent::SkipVotePassed));
+
+        self.state = Some(result.state);
+        self.broadcast_events(&result.events).await;
+
+        if vote_passed {
+            self.advance_or_end_game().await;
+        }
+
+        Ok(())
+    }
+
+    /// Advance to the next round or end the game.
+    ///
+    /// Called when the between-rounds wait is skipped or expires.
+    async fn advance_or_end_game(&mut self) {
+        let should_end = self.state.as_ref().is_some_and(|s| s.round_number >= s.settings.rounds);
+
+        if should_end {
+            self.end_game().await.ok();
+        } else {
+            self.start_next_round().await.ok();
+        }
     }
 
     // =========================================================================
@@ -925,6 +994,10 @@ impl GameActor {
     }
 
     /// End the current round
+    ///
+    /// Persists the round end to DB and broadcasts results.
+    /// The tick-based timer in `between_rounds_ends_at` handles
+    /// the automatic advancement after the wait period.
     async fn end_current_round(&mut self) -> Result<(), String> {
         let state = self.state.as_ref().ok_or("Game not initialized")?;
         let now = Utc::now();
@@ -942,19 +1015,16 @@ impl GameActor {
         // Update state
         self.state = Some(result.state);
 
-        // Broadcast round end (with results from completed_rounds)
+        // Broadcast round end (includes next_round_at for countdown)
         self.broadcast_round_end().await;
 
         // Clear round DB ID
         self.current_round_db_id = None;
 
-        // Short delay before next round
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        // Save to Redis (the between_rounds_ends_at is now in state)
+        self.force_save_state_to_redis().await;
 
-        // Start next round or end game
-        let should_end = self.state.as_ref().is_some_and(|s| s.round_number >= s.settings.rounds);
-
-        if should_end { self.end_game().await } else { self.start_next_round().await }
+        Ok(())
     }
 
     /// End the game
@@ -1065,6 +1135,18 @@ impl GameActor {
                 GameEvent::SettingsUpdated { settings } => {
                     self.broadcast_settings_updated(settings).await;
                 }
+                GameEvent::WaitSkipped => {
+                    // Handled by the caller (advance_or_end_game)
+                }
+                GameEvent::SkipVoteRecorded { votes, required, .. } => {
+                    self.broadcast_skip_vote_update(*votes, *required).await;
+                }
+                GameEvent::SkipVotePassed => {
+                    // Handled by the caller (advance_or_end_game)
+                }
+                GameEvent::BetweenRoundsExpired => {
+                    // Handled by handle_tick (advance_or_end_game)
+                }
                 GameEvent::GameAbandoned { reason } => {
                     self.broadcast_game_abandoned(reason).await;
                 }
@@ -1113,12 +1195,28 @@ impl GameActor {
             GamePhase::Finished => "finished",
         };
 
-        let location = state.current_round.as_ref().map(|r| RoundLocation {
-            lat: r.location_lat,
-            lng: r.location_lng,
-            panorama_id: r.panorama_id.clone(),
-            heading: r.heading,
-        });
+        // During BetweenRounds, provide the last completed round's correct location
+        let location = state
+            .current_round
+            .as_ref()
+            .map(|r| RoundLocation {
+                lat: r.location_lat,
+                lng: r.location_lng,
+                panorama_id: r.panorama_id.clone(),
+                heading: r.heading,
+            })
+            .or_else(|| {
+                if state.phase == GamePhase::BetweenRounds {
+                    state.completed_rounds.last().map(|r| RoundLocation {
+                        lat: r.location_lat,
+                        lng: r.location_lng,
+                        panorama_id: r.panorama_id.clone(),
+                        heading: r.heading,
+                    })
+                } else {
+                    None
+                }
+            });
 
         let time_remaining_ms = state
             .current_round
@@ -1143,6 +1241,17 @@ impl GameActor {
             rotation_allowed: state.settings.rotation_allowed,
         };
 
+        // Include between-rounds info when in BetweenRounds phase
+        let (next_round_at, skip_votes_payload) = if state.phase == GamePhase::BetweenRounds {
+            let skip_votes = Some(dguesser_protocol::socket::payloads::SkipVoteUpdatePayload {
+                votes: state.skip_votes.len() as u8,
+                required: state.skip_votes_required() as u8,
+            });
+            (state.between_rounds_ends_at, skip_votes)
+        } else {
+            (None, None)
+        };
+
         let payload = GameStatePayload {
             game_id: self.game_id.clone(),
             status: status.to_string(),
@@ -1153,6 +1262,8 @@ impl GameActor {
             players,
             location,
             time_remaining_ms,
+            next_round_at,
+            skip_votes: skip_votes_payload,
         };
 
         // Emit to socket's personal room (socket joins a room named after its ID)
@@ -1305,6 +1416,7 @@ impl GameActor {
                 heading: round.heading,
             },
             results,
+            next_round_at: state.between_rounds_ends_at,
         };
 
         self.emitter.emit_to_room(&self.game_id, events::server::ROUND_END, &payload).await.ok();
@@ -1410,6 +1522,17 @@ impl GameActor {
 
         self.emitter
             .emit_to_room(&self.game_id, events::server::SCORES_UPDATE, &payload)
+            .await
+            .ok();
+    }
+
+    /// Broadcast skip vote update
+    async fn broadcast_skip_vote_update(&self, votes: u8, required: u8) {
+        let payload =
+            dguesser_protocol::socket::payloads::SkipVoteUpdatePayload { votes, required };
+
+        self.emitter
+            .emit_to_room(&self.game_id, events::server::SKIP_VOTE_UPDATE, &payload)
             .await
             .ok();
     }

@@ -22,6 +22,8 @@ pub mod server {
     pub const SETTINGS_UPDATED: &str = "game:settings_updated";
     /// Game abandoned (all players disconnected for too long)
     pub const GAME_ABANDONED: &str = "game:abandoned";
+    /// Skip vote update (broadcast current vote count)
+    pub const SKIP_VOTE_UPDATE: &str = "round:skip_votes";
 }
 
 /// Socket.IO event names (client -> server)
@@ -31,4 +33,8 @@ pub mod client {
     pub const START_GAME: &str = "game:start";
     pub const SUBMIT_GUESS: &str = "guess:submit";
     pub const READY: &str = "player:ready";
+    /// Host force-skips the between-rounds wait
+    pub const SKIP_WAIT: &str = "round:skip";
+    /// Player votes to skip the between-rounds wait
+    pub const VOTE_SKIP: &str = "round:vote_skip";
 }

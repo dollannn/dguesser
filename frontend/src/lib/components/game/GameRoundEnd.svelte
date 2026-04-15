@@ -14,6 +14,10 @@
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import MapPinIcon from '@lucide/svelte/icons/map-pin';
   import Loader2Icon from '@lucide/svelte/icons/loader-2';
+  import SkipForwardIcon from '@lucide/svelte/icons/skip-forward';
+  import VoteIcon from '@lucide/svelte/icons/hand';
+  import CheckIcon from '@lucide/svelte/icons/check';
+  import TimerIcon from '@lucide/svelte/icons/timer';
 
   interface Props {
     game: GameDetails;
@@ -29,7 +33,14 @@
   // For solo mode: auto-transition to finished after last round
   let isLastRound = $derived(gameState.currentRound >= gameState.totalRounds);
   
-  // Countdown for auto-transition (only for last round)
+  // Host detection for skip controls
+  let isHost = $derived(gameState.hostId === $user?.id);
+  let isMultiplayer = $derived(game.mode === 'multiplayer');
+  
+  // Between-rounds countdown (multiplayer)
+  let countdownSeconds = $state<number | null>(null);
+  
+  // Countdown for auto-transition (only for last round in solo)
   let countdown = $state(3);
   let isTransitioning = $state(false);
   
@@ -62,6 +73,7 @@
     }
   }
   
+  // Solo mode: auto-transition to results after last round
   $effect(() => {
     if (game.mode === 'solo' && isLastRound) {
       countdown = 3;
@@ -77,6 +89,25 @@
       
       return () => clearInterval(countdownInterval);
     }
+  });
+  
+  // Multiplayer: between-rounds countdown timer
+  $effect(() => {
+    const nextRoundAt = gameState.nextRoundAt;
+    if (!nextRoundAt || !isMultiplayer) {
+      countdownSeconds = null;
+      return;
+    }
+    
+    function updateCountdown() {
+      const remaining = Math.max(0, Math.ceil((nextRoundAt! - Date.now()) / 1000));
+      countdownSeconds = remaining;
+    }
+    
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 250);
+    
+    return () => clearInterval(timer);
   });
   
   // Sort results by score (highest first) and assign ranks
@@ -222,7 +253,7 @@
     </Card.Root>
 
     <!-- Continue/Next action -->
-    <div class="flex flex-col items-center gap-2 pt-2">
+    <div class="flex flex-col items-center gap-3 pt-2">
       {#if gameState.currentRound < gameState.totalRounds}
         {#if game.mode === 'solo' && onNextRound}
           <Button size="lg" onclick={onNextRound} class="gap-2">
@@ -230,10 +261,54 @@
             <ArrowRightIcon class="h-5 w-5" />
           </Button>
         {:else}
-          <Card.Root class="inline-flex">
-            <Card.Content class="flex items-center gap-3 py-3 px-5">
-              <Loader2Icon class="h-5 w-5 animate-spin text-primary" />
-              <span class="font-medium">Next round starting soon...</span>
+          <!-- Multiplayer between-rounds: countdown + skip/vote controls -->
+          <Card.Root class="w-full max-w-sm">
+            <Card.Content class="flex flex-col items-center gap-4 py-5 px-6">
+              <!-- Countdown timer -->
+              {#if countdownSeconds !== null && countdownSeconds > 0}
+                <div class="flex items-center gap-2 text-muted-foreground">
+                  <TimerIcon class="h-5 w-5" />
+                  <span class="font-medium">
+                    Next round in <span class="text-foreground font-bold tabular-nums">{countdownSeconds}s</span>
+                  </span>
+                </div>
+              {:else}
+                <div class="flex items-center gap-2">
+                  <Loader2Icon class="h-5 w-5 animate-spin text-primary" />
+                  <span class="font-medium">Starting next round...</span>
+                </div>
+              {/if}
+
+              <!-- Skip/Vote controls -->
+              {#if isHost}
+                <Button size="sm" variant="secondary" onclick={() => gameStore.skipWait()} class="gap-2">
+                  <SkipForwardIcon class="h-4 w-4" />
+                  Skip Wait
+                </Button>
+              {:else}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onclick={() => gameStore.voteSkip()}
+                  disabled={gameState.hasVotedToSkip}
+                  class="gap-2"
+                >
+                  {#if gameState.hasVotedToSkip}
+                    <CheckIcon class="h-4 w-4" />
+                    Voted to Skip
+                  {:else}
+                    <VoteIcon class="h-4 w-4" />
+                    Vote to Skip
+                  {/if}
+                </Button>
+              {/if}
+
+              <!-- Vote count -->
+              {#if gameState.skipVotesRequired > 0}
+                <p class="text-xs text-muted-foreground">
+                  {gameState.skipVotes}/{gameState.skipVotesRequired} voted to skip
+                </p>
+              {/if}
             </Card.Content>
           </Card.Root>
         {/if}
