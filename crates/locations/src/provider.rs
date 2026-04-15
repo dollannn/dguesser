@@ -262,7 +262,7 @@ impl<R: RangeReader> PackProvider<R> {
 
         while results.len() < count && retries < MAX_RETRIES {
             // Step 1: Select a country based on distribution strategy
-            let country_target = rand::random::<u64>() % total_country_weight;
+            let country_target = rand::random_range(0..total_country_weight);
             let mut cumulative = 0u64;
             let mut selected_country = None;
 
@@ -279,8 +279,8 @@ impl<R: RangeReader> PackProvider<R> {
 
             // Step 2: Select a bucket within that country (weighted by bucket size)
             let bucket_total: u64 = buckets.iter().map(|(_, c)| c).sum();
-            let bucket_target = rand::random::<u64>() % bucket_total;
-            let rand_seed = rand::random::<u64>();
+            let bucket_target = rand::random_range(0..bucket_total);
+            let rand_seed: u64 = rand::random();
 
             let mut cumulative = 0u64;
             let mut selected_bucket = None;

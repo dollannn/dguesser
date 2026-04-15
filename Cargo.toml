@@ -30,11 +30,11 @@ tower-http = { version = "0.6", features = ["cors", "trace", "timeout", "limit"]
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "ipnetwork"] }
 
 # Redis
-redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.2", features = ["tokio-comp", "connection-manager"] }
 
 # Socket.IO
-socketioxide = { version = "0.17", features = ["state"] }
-socketioxide-redis = { version = "0.3", features = ["redis"] }
+socketioxide = { version = "0.18", features = ["state"] }
+socketioxide-redis = { version = "0.4", features = ["redis"] }
 socketioxide-emitter = { version = "0.1", features = ["common-parser"] }
 
 # Serialization
@@ -42,15 +42,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Auth/Crypto
-oauth2 = "4"
-jsonwebtoken = "9"
+oauth2 = "5"
+jsonwebtoken = "10"
 argon2 = "0.5"
-rand = "0.8"
-rand_chacha = "0.3"          # ChaCha20 RNG for secure session tokens
-rand_core = "0.6"
+rand = "0.10"
+rand_chacha = "0.10"         # ChaCha20 RNG for secure session tokens
+rand_core = "0.10"
 
 # ID Generation
-nanoid = "0.4"               # Prefixed public IDs (usr_xxx, gam_xxx)
+nanoid = "0.5"               # Prefixed public IDs (usr_xxx, gam_xxx)
 
 # API Documentation
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
@@ -71,13 +71,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Config
 dotenvy = "0.15"
-config = "0.14"
+config = "0.15"
 
 # Validation
-validator = { version = "0.18", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 
 # Rate limiting
-governor = "0.8"
+governor = "0.10"
 
 # Dev dependencies
 tokio-test = "0.4"

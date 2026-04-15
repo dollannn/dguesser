@@ -110,7 +110,7 @@ impl RedisStateManager {
         let key = Self::game_key(&state.game_id);
         let json = serde_json::to_string(state).map_err(|e| {
             redis::RedisError::from((
-                redis::ErrorKind::TypeError,
+                redis::ErrorKind::Parse,
                 "Failed to serialize game state",
                 e.to_string(),
             ))
@@ -135,7 +135,7 @@ impl RedisStateManager {
             Some(data) => {
                 let state: CachedGameState = serde_json::from_str(&data).map_err(|e| {
                     redis::RedisError::from((
-                        redis::ErrorKind::TypeError,
+                        redis::ErrorKind::Parse,
                         "Failed to deserialize game state",
                         e.to_string(),
                     ))

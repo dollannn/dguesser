@@ -29,10 +29,10 @@ rand.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 
 # HTTP client for Google API validation
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 
 # Progress bar
-indicatif = "0.17"
+indicatif = "0.18"
 
 # CSV parsing for location data
 csv = "1"

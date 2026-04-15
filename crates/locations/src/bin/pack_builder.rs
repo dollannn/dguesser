@@ -597,8 +597,8 @@ fn build_packs(
             }
 
             // Shuffle records for randomness
-            use rand::seq::SliceRandom;
-            let mut rng = rand::thread_rng();
+            use rand::prelude::IndexedMutRandom;
+            let mut rng = rand::rng();
             records.shuffle(&mut rng);
 
             // Write pack file
@@ -829,7 +829,7 @@ fn generate_sample_packs(
     count: usize,
     countries_str: &str,
 ) -> Result<()> {
-    use rand::Rng;
+    use rand::RngExt;
 
     let countries: Vec<&str> = countries_str.split(',').map(|s| s.trim()).collect();
 
@@ -845,7 +845,7 @@ fn generate_sample_packs(
     std::fs::create_dir_all(&countries_dir)?;
 
     let mut manifest = Manifest::new(version);
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     for country in &countries {
         let country_upper = country.to_uppercase();
@@ -864,8 +864,8 @@ fn generate_sample_packs(
         // Generate records with slight variations around the center point
         let mut records: Vec<PackRecord> = (0..count)
             .map(|i| {
-                let lat = lat_center + rng.gen_range(-0.5..0.5);
-                let lng = lng_center + rng.gen_range(-0.5..0.5);
+                let lat = lat_center + rng.random_range(-0.5..0.5);
+                let lng = lng_center + rng.random_range(-0.5..0.5);
                 let pano_id = format!("sample_{}_{}", country_upper, i);
 
                 PackRecord::new(
@@ -873,20 +873,20 @@ fn generate_sample_packs(
                     lat,
                     lng,
                     Some(format!("{}-XX", country_upper)),
-                    Some(rng.gen_range(18000..19500)), // ~2019-2023
-                    rng.gen_bool(0.1),                 // 10% scout
-                    Some(rng.gen_range(0.0..360.0)),
+                    Some(rng.random_range(18000..19500)), // ~2019-2023
+                    rng.random_bool(0.1),                 // 10% scout
+                    Some(rng.random_range(0.0..360.0)),
                     Some("asphalt".to_string()),
-                    Some(rng.gen_range(2..6)),
-                    Some(rng.gen_range(0..200)),
-                    Some(rng.gen_range(0..20)),
-                    Some(rng.gen_range(0..500)),
+                    Some(rng.random_range(2..6)),
+                    Some(rng.random_range(0..200)),
+                    Some(rng.random_range(0..20)),
+                    Some(rng.random_range(0..500)),
                 )
             })
             .collect();
 
         // Shuffle records
-        use rand::seq::SliceRandom;
+        use rand::prelude::IndexedMutRandom;
         records.shuffle(&mut rng);
 
         // Distribute across a couple of buckets

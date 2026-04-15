@@ -18,13 +18,13 @@ rand = { workspace = true }
 tokio = { workspace = true }
 
 # HTTP client for R2 Range requests
-reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
+reqwest = { version = "0.13", features = ["rustls", "json"] }
 
 # Hashing for pano_id
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # LRU cache for disabled locations
-lru = "0.12"
+lru = "0.17"
 
 # Bytes for efficient buffer handling
 bytes = "1"
@@ -40,7 +40,7 @@ dguesser-core = { path = "../core" }
 
 # CLI dependencies (only for pack-builder binary)
 clap = { version = "4", features = ["derive"], optional = true }
-indicatif = { version = "0.17", optional = true }
+indicatif = { version = "0.18", optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 dotenvy = { workspace = true, optional = true }
 

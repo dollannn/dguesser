@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         .build_layer();
 
     // Initialize the broadcast emitter with a Redis connection
-    let emitter_conn = redis.get_multiplexed_tokio_connection().await?;
+    let emitter_conn = redis.get_multiplexed_async_connection().await?;
     state.init_emitter(emitter_conn).await;
     tracing::info!("Broadcast emitter initialized");
 

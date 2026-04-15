@@ -227,7 +227,7 @@ pub async fn logout_other_sessions(
 /// Names follow the pattern: "{Adjective} {Noun} {Number}"
 /// e.g., "Swift Explorer 4521"
 fn generate_guest_name() -> String {
-    use rand::seq::SliceRandom;
+    use rand::prelude::IndexedRandom;
 
     const ADJECTIVES: &[&str] = &[
         "Swift", "Clever", "Bold", "Wise", "Brave", "Quick", "Sharp", "Keen", "Nimble", "Crafty",
@@ -249,10 +249,10 @@ fn generate_guest_name() -> String {
         "Pathfinder",
     ];
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let adj = ADJECTIVES.choose(&mut rng).unwrap_or(&"Guest");
     let noun = NOUNS.choose(&mut rng).unwrap_or(&"Player");
-    let num = rand::random::<u16>() % 10000;
+    let num: u16 = rand::random_range(0..10000);
 
     format!("{} {} {}", adj, noun, num)
 }

@@ -744,7 +744,7 @@ async fn generate_sample_locations(
     count: usize,
     map_slug: &str,
 ) -> Result<()> {
-    use rand::Rng;
+    use rand::RngExt;
 
     // Verify map exists
     let map = dguesser_db::locations::list_maps(pool)
@@ -764,15 +764,15 @@ async fn generate_sample_locations(
             .progress_chars("#>-"),
     );
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut generated = 0;
 
     for i in 0..count {
         pb.inc(1);
 
         // Generate random coordinates (biased towards land)
-        let lat = rng.gen_range(-60.0..70.0);
-        let lng = rng.gen_range(-180.0..180.0);
+        let lat = rng.random_range(-60.0..70.0);
+        let lng = rng.random_range(-180.0..180.0);
         let panorama_id = format!("sample_{}_{}", i, dguesser_core::generate_location_id());
 
         match dguesser_db::locations::create_location(

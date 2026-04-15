@@ -21,7 +21,7 @@ redis.workspace = true
 serde_json.workspace = true
 
 # HTTP client for OAuth flows
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json", "form"] }
 
 # URL encoding for OAuth parameters
 urlencoding = "2"

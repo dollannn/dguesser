@@ -1249,12 +1249,12 @@ pub async fn get_presets() -> Json<Vec<PresetInfo>> {
 
 /// Generate a random 6-character join code
 fn generate_join_code() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (0..6)
         .map(|_| {
-            let idx = rng.gen_range(0..CHARSET.len());
+            let idx = rng.random_range(0..CHARSET.len());
             CHARSET[idx] as char
         })
         .collect()
@@ -1296,9 +1296,9 @@ async fn select_location(
         ),
         Err(e) => {
             tracing::warn!(error = %e, map_id = %map_id, "Failed to select location, using random");
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
-            LocationData::new(rng.gen_range(-60.0..70.0), rng.gen_range(-180.0..180.0), None)
+            use rand::RngExt;
+            let mut rng = rand::rng();
+            LocationData::new(rng.random_range(-60.0..70.0), rng.random_range(-180.0..180.0), None)
         }
     }
 }

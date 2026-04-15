@@ -21,13 +21,13 @@ const SESSION_ID_LEN: usize = 43;
 
 /// Generate a random string of the specified length using the nanoid alphabet.
 ///
-/// Uses `rand::thread_rng()` which is already thread-safe (no Mutex needed).
+/// Uses `rand::rng()` which is already thread-safe (no Mutex needed).
 fn generate_id(len: usize) -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
+    use rand::RngExt;
+    let mut rng = rand::rng();
     (0..len)
         .map(|_| {
-            let idx = rng.gen_range(0..ALPHABET.len());
+            let idx = rng.random_range(0..ALPHABET.len());
             ALPHABET[idx]
         })
         .collect()

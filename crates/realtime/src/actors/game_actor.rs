@@ -1437,7 +1437,7 @@ impl GameActor {
 
 /// Generate a random location for a round (fallback)
 fn generate_random_location() -> (f64, f64) {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    (rng.gen_range(-60.0..70.0), rng.gen_range(-180.0..180.0))
+    use rand::RngExt;
+    let mut rng = rand::rng();
+    (rng.random_range(-60.0..70.0), rng.random_range(-180.0..180.0))
 }

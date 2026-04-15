@@ -124,8 +124,8 @@ impl OAuthState {
     /// * `provider` - The OAuth provider for this flow
     /// * `redirect_to` - Optional URL to redirect to after auth
     pub fn new(provider: OAuthProvider, redirect_to: Option<String>) -> Self {
-        use rand::RngCore;
-        let mut rng = rand::thread_rng();
+        use rand::Rng;
+        let mut rng = rand::rng();
 
         let mut state_bytes = [0u8; 32];
         let mut nonce_bytes = [0u8; 32];

@@ -12,6 +12,8 @@ use dguesser_core::location::{
 };
 use sqlx::FromRow;
 
+use rand::RngExt;
+
 use crate::DbPool;
 
 // =============================================================================
@@ -297,7 +299,7 @@ async fn select_random_location(
             if countries.is_empty() {
                 return Err(LocationError::NoLocationsAvailable(map_id_or_slug.to_string()));
             }
-            let idx = rand::random::<usize>() % countries.len();
+            let idx = rand::random_range(0..countries.len());
             Some(countries[idx].clone())
         }
         CountryDistribution::Weighted { weights } => {
@@ -313,11 +315,11 @@ async fn select_random_location(
 
             if weighted.is_empty() {
                 // No weights match available countries, fall back to equal
-                let idx = rand::random::<usize>() % countries.len();
+                let idx = rand::random_range(0..countries.len());
                 Some(countries[idx].clone())
             } else {
                 let total: u64 = weighted.iter().map(|(_, w)| *w as u64).sum();
-                let target = rand::random::<u64>() % total;
+                let target = rand::random_range(0..total);
                 let mut cumulative = 0u64;
                 let mut selected = weighted[0].0;
                 for (country, weight) in &weighted {
@@ -333,7 +335,7 @@ async fn select_random_location(
     };
 
     // Generate a random key
-    let random_key: f64 = rand::random();
+    let random_key: f64 = rand::rng().random();
 
     // Build the query with dynamic filters - country filter uses parameterized query ($4)
     let query = format!(
@@ -457,7 +459,7 @@ async fn select_random_location_with_constraints(
             if countries.is_empty() {
                 return Err(LocationError::NoLocationsAvailable(map_id_or_slug.to_string()));
             }
-            let idx = rand::random::<usize>() % countries.len();
+            let idx = rand::random_range(0..countries.len());
             Some(countries[idx].clone())
         }
         CountryDistribution::Weighted { weights } => {
@@ -469,11 +471,11 @@ async fn select_random_location_with_constraints(
                 countries.iter().filter_map(|c| weights.get(c).map(|&w| (c.as_str(), w))).collect();
 
             if weighted.is_empty() {
-                let idx = rand::random::<usize>() % countries.len();
+                let idx = rand::random_range(0..countries.len());
                 Some(countries[idx].clone())
             } else {
                 let total: u64 = weighted.iter().map(|(_, w)| *w as u64).sum();
-                let target = rand::random::<u64>() % total;
+                let target = rand::random_range(0..total);
                 let mut cumulative = 0u64;
                 let mut selected = weighted[0].0;
                 for (country, weight) in &weighted {

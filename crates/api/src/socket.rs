@@ -29,7 +29,7 @@ pub async fn emit_to_room<T: Serialize>(
     event: &str,
     payload: &T,
 ) -> Result<(), SocketEmitError> {
-    let conn = redis.get_multiplexed_tokio_connection().await?;
+    let conn = redis.get_multiplexed_async_connection().await?;
     let driver = RedisDriver(conn);
 
     IoEmitter::new()
