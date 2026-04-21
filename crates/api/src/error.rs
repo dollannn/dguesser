@@ -175,6 +175,9 @@ impl From<dguesser_auth::AuthError> for ApiError {
             dguesser_auth::AuthError::SessionNotFound => {
                 Self::unauthorized_with_message("Session not found or expired")
             }
+            dguesser_auth::AuthError::MergeBlocked(message) => {
+                Self::conflict("AUTH_MERGE_BLOCKED", message)
+            }
             dguesser_auth::AuthError::OAuth(e) => {
                 // Log the actual error for debugging, but don't expose details to client
                 tracing::warn!(error = %e, "OAuth error");
@@ -254,5 +257,16 @@ mod tests {
         assert_eq!(err.internal_message, Some("Secret error details".to_string()));
         // The internal message should not appear in the public message
         assert_eq!(err.message, "An internal error occurred");
+    }
+
+    #[test]
+    fn test_auth_merge_blocked_maps_to_conflict() {
+        let err = ApiError::from(dguesser_auth::AuthError::MergeBlocked(
+            "Finish your game first".to_string(),
+        ));
+
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.code, "AUTH_MERGE_BLOCKED");
+        assert_eq!(err.message, "Finish your game first");
     }
 }

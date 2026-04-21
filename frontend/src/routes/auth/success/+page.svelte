@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { clearStoredAuthRedirect, getStoredAuthRedirect } from '$lib/auth/oauth';
   import { authStore } from '$lib/stores/auth';
   import SEO from '$lib/components/SEO.svelte';
 
@@ -8,8 +9,8 @@
     // Refresh user data after OAuth callback
     authStore.initialize().then(() => {
       // Redirect to home or stored redirect
-      const redirectTo = sessionStorage.getItem('auth_redirect') || '/';
-      sessionStorage.removeItem('auth_redirect');
+      const redirectTo = getStoredAuthRedirect();
+      clearStoredAuthRedirect();
       goto(redirectTo);
     });
   });

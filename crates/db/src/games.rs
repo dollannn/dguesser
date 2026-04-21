@@ -368,6 +368,34 @@ pub async fn is_player_in_game(
     Ok(count.unwrap_or(0) > 0)
 }
 
+/// Check whether a user is currently attached to a live multiplayer game.
+///
+/// This is used to avoid identity merges while realtime game actors may still be
+/// holding the user's previous guest ID in memory.
+pub async fn has_live_multiplayer_membership(
+    pool: &DbPool,
+    user_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM game_players gp
+            INNER JOIN games g ON g.id = gp.game_id
+            WHERE gp.user_id = $1
+              AND gp.left_at IS NULL
+              AND g.mode = 'multiplayer'
+              AND g.status IN ('lobby', 'active')
+        )
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(exists)
+}
+
 // =============================================================================
 // Round operations
 // =============================================================================

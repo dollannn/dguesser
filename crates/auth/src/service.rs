@@ -5,7 +5,7 @@
 
 use crate::oauth::{OAuthError, OAuthIdentity};
 use crate::session::SessionConfig;
-use dguesser_db::{UserKind, oauth as db_oauth, sessions, users};
+use dguesser_db::{User, UserKind, games, oauth as db_oauth, parties, sessions, users};
 
 /// Result of an authentication flow.
 #[derive(Debug)]
@@ -18,6 +18,8 @@ pub struct AuthResult {
     pub is_new_user: bool,
     /// If a guest was upgraded, the original guest user ID
     pub merged_from_guest: Option<String>,
+    /// User IDs whose co-player caches should be invalidated after this auth flow.
+    pub invalidate_co_player_cache_for: Vec<String>,
 }
 
 /// Errors that can occur during authentication operations.
@@ -32,15 +34,19 @@ pub enum AuthError {
     /// Session not found or invalid
     #[error("Session not found")]
     SessionNotFound,
+    /// Guest account cannot be merged right now without breaking realtime state
+    #[error("Guest merge blocked: {0}")]
+    MergeBlocked(String),
 }
 
 /// Handle OAuth callback and create or link user account.
 ///
 /// This function implements the core OAuth callback logic:
 /// 1. Check if OAuth identity already linked to a user -> log them in
-/// 2. If current session is a guest -> upgrade guest to authenticated
-/// 3. If current session is authenticated -> link additional OAuth provider
-/// 4. If no session -> create new authenticated user
+/// 2. Check for an existing verified-email account when safe to do so
+/// 3. If current session is a guest -> either merge into that account or upgrade in place
+/// 4. If current session is authenticated -> link additional OAuth provider
+/// 5. If no session -> create or reuse an authenticated user
 ///
 /// Session is always rotated on successful auth for security.
 ///
@@ -60,89 +66,176 @@ pub async fn handle_oauth_callback(
     ip: Option<&str>,
     user_agent: Option<&str>,
 ) -> Result<AuthResult, AuthError> {
-    // Check if this OAuth identity is already linked to a user
-    let existing_oauth =
-        db_oauth::get_by_provider(pool, &identity.provider.to_string(), &identity.subject).await?;
-
-    let (user_id, is_new_user, merged_from): (String, bool, Option<String>) =
-        if let Some(oauth_account) = existing_oauth {
-            // Existing user with this OAuth - just log them in
-            (oauth_account.user_id, false, None)
+    // Load the current session user first so we can safely decide whether to
+    // upgrade a guest in place or merge it into an existing account.
+    let current_user = if let Some(sid) = current_session {
+        if let Some(session) = sessions::get_valid(pool, sid).await? {
+            users::get_by_id(pool, &session.user_id).await?
         } else {
-            // No existing OAuth link - check if there's a current session
-            let current_user = if let Some(sid) = current_session {
-                if let Some(session) = sessions::get_valid(pool, sid).await? {
-                    users::get_by_id(pool, &session.user_id).await?
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            None
+        }
+    } else {
+        None
+    };
 
-            if let Some(user) = current_user {
-                if user.kind == UserKind::Guest {
-                    // Upgrade guest to authenticated
-                    let email = identity.email.as_deref().unwrap_or("");
-                    users::upgrade_to_authenticated(
+    let provider = identity.provider.to_string();
+    let verified_email = verified_email(&identity);
+
+    let existing_oauth = db_oauth::get_by_provider(pool, &provider, &identity.subject).await?;
+    let email_match = if existing_oauth.is_none()
+        && current_user.as_ref().map(|user| user.kind == UserKind::Guest).unwrap_or(true)
+    {
+        if let Some(email) = verified_email {
+            users::get_by_email(pool, email).await?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let linked_oauth_user = if let Some(oauth_account) = existing_oauth {
+        Some(
+            users::get_by_id(pool, &oauth_account.user_id)
+                .await?
+                .ok_or(sqlx::Error::RowNotFound)?,
+        )
+    } else {
+        None
+    };
+
+    enum ExistingAccount {
+        LinkedOAuth(User),
+        VerifiedEmail(User),
+    }
+
+    let existing_account = linked_oauth_user
+        .map(ExistingAccount::LinkedOAuth)
+        .or_else(|| email_match.map(ExistingAccount::VerifiedEmail));
+
+    let (user_id, is_new_user, merged_from, invalidate_ids): (
+        String,
+        bool,
+        Option<String>,
+        Vec<String>,
+    ) = if let Some(existing_account) = existing_account {
+        let (target_user, needs_provider_link) = match existing_account {
+            ExistingAccount::LinkedOAuth(user) => (user, false),
+            ExistingAccount::VerifiedEmail(user) => (user, true),
+        };
+
+        if let Some(user) = current_user {
+            if user.kind == UserKind::Guest && user.id != target_user.id {
+                ensure_guest_merge_safe(pool, &user.id).await?;
+
+                let merge = users::merge_guest_into_user(pool, &user.id, &target_user.id).await?;
+
+                if needs_provider_link {
+                    db_oauth::link_account(
                         pool,
-                        &user.id,
-                        email,
-                        identity.name.as_deref(),
-                        identity.picture.as_deref(),
+                        &target_user.id,
+                        &provider,
+                        &identity.subject,
+                        identity.email.as_deref(),
                     )
                     .await?;
+                }
 
-                    // Link OAuth account
+                (target_user.id, false, Some(user.id), merge.co_player_cache_user_ids)
+            } else if user.kind == UserKind::Authenticated {
+                if needs_provider_link {
+                    // Authenticated users explicitly linking another provider keep their
+                    // current account even if the provider's verified email matches.
                     db_oauth::link_account(
                         pool,
                         &user.id,
-                        &identity.provider.to_string(),
+                        &provider,
                         &identity.subject,
                         identity.email.as_deref(),
                     )
                     .await?;
 
-                    (user.id, false, None)
+                    (user.id, false, None, Vec::new())
                 } else {
-                    // Already authenticated - link additional OAuth provider
-                    db_oauth::link_account(
-                        pool,
-                        &user.id,
-                        &identity.provider.to_string(),
-                        &identity.subject,
-                        identity.email.as_deref(),
-                    )
-                    .await?;
-
-                    (user.id, false, None)
+                    // Provider link already belongs to another user - log into that account.
+                    (target_user.id, false, None, Vec::new())
                 }
             } else {
-                // No current session - create new authenticated user
-                let display_name =
-                    identity.name.clone().unwrap_or_else(|| "New Player".to_string());
-
-                let user = users::create_authenticated(
-                    pool,
-                    &display_name,
-                    identity.email.as_deref(),
-                    identity.picture.as_deref(),
-                )
-                .await?;
-
-                // Link OAuth account
+                (target_user.id, false, None, Vec::new())
+            }
+        } else {
+            if needs_provider_link {
                 db_oauth::link_account(
                     pool,
-                    &user.id,
-                    &identity.provider.to_string(),
+                    &target_user.id,
+                    &provider,
                     &identity.subject,
                     identity.email.as_deref(),
                 )
                 .await?;
-
-                (user.id, true, None)
             }
-        };
+
+            (target_user.id, false, None, Vec::new())
+        }
+    } else if let Some(user) = current_user {
+        if user.kind == UserKind::Guest {
+            // Upgrade guest to authenticated in-place (same user_id, so any live state
+            // remains consistent).
+            users::upgrade_to_authenticated(
+                pool,
+                &user.id,
+                verified_email,
+                identity.name.as_deref(),
+                identity.picture.as_deref(),
+            )
+            .await?;
+
+            db_oauth::link_account(
+                pool,
+                &user.id,
+                &provider,
+                &identity.subject,
+                identity.email.as_deref(),
+            )
+            .await?;
+
+            (user.id, false, None, Vec::new())
+        } else {
+            // Already authenticated - link additional OAuth provider
+            db_oauth::link_account(
+                pool,
+                &user.id,
+                &provider,
+                &identity.subject,
+                identity.email.as_deref(),
+            )
+            .await?;
+
+            (user.id, false, None, Vec::new())
+        }
+    } else {
+        // No current session - create new authenticated user
+        let display_name = identity.name.clone().unwrap_or_else(|| "New Player".to_string());
+
+        let user = users::create_authenticated(
+            pool,
+            &display_name,
+            verified_email,
+            identity.picture.as_deref(),
+        )
+        .await?;
+
+        db_oauth::link_account(
+            pool,
+            &user.id,
+            &provider,
+            &identity.subject,
+            identity.email.as_deref(),
+        )
+        .await?;
+
+        (user.id, true, None, Vec::new())
+    };
 
     // Revoke old session if exists (security: rotate on auth)
     if let Some(old_sid) = current_session {
@@ -153,7 +246,13 @@ pub async fn handle_oauth_callback(
     let session =
         sessions::create(pool, &user_id, session_config.ttl_hours, ip, user_agent).await?;
 
-    Ok(AuthResult { user_id, session_id: session.id, is_new_user, merged_from_guest: merged_from })
+    Ok(AuthResult {
+        user_id,
+        session_id: session.id,
+        is_new_user,
+        merged_from_guest: merged_from,
+        invalidate_co_player_cache_for: invalidate_ids,
+    })
 }
 
 /// Create a guest session for anonymous users.
@@ -188,6 +287,7 @@ pub async fn create_guest_session(
         session_id: session.id,
         is_new_user: true,
         merged_from_guest: None,
+        invalidate_co_player_cache_for: Vec::new(),
     })
 }
 
@@ -220,6 +320,30 @@ pub async fn logout_other_sessions(
 ) -> Result<u64, AuthError> {
     let count = sessions::revoke_all_except(pool, user_id, keep_session_id).await?;
     Ok(count)
+}
+
+fn verified_email(identity: &OAuthIdentity) -> Option<&str> {
+    identity.email.as_deref().filter(|_| identity.email_verified)
+}
+
+async fn ensure_guest_merge_safe(
+    pool: &sqlx::PgPool,
+    guest_user_id: &str,
+) -> Result<(), AuthError> {
+    if parties::get_active_party_for_user(pool, guest_user_id).await?.is_some() {
+        return Err(AuthError::MergeBlocked(
+            "Leave your current party before signing in with an existing account".to_string(),
+        ));
+    }
+
+    if games::has_live_multiplayer_membership(pool, guest_user_id).await? {
+        return Err(AuthError::MergeBlocked(
+            "Finish or leave your current multiplayer game before signing in with an existing account"
+                .to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 /// Generate a friendly guest display name.
@@ -279,5 +403,33 @@ mod tests {
         // With 150+ adjective/noun combos * 10000 numbers, collisions are very rare
         // but possible, so we just check we got mostly unique names
         assert!(names.len() > 90);
+    }
+
+    #[test]
+    fn test_verified_email_returns_verified_address() {
+        let identity = OAuthIdentity {
+            provider: crate::OAuthProvider::Google,
+            subject: "sub_123".to_string(),
+            email: Some("player@example.com".to_string()),
+            email_verified: true,
+            name: None,
+            picture: None,
+        };
+
+        assert_eq!(verified_email(&identity), Some("player@example.com"));
+    }
+
+    #[test]
+    fn test_verified_email_ignores_unverified_address() {
+        let identity = OAuthIdentity {
+            provider: crate::OAuthProvider::Google,
+            subject: "sub_123".to_string(),
+            email: Some("player@example.com".to_string()),
+            email_verified: false,
+            name: None,
+            picture: None,
+        };
+
+        assert_eq!(verified_email(&identity), None);
     }
 }

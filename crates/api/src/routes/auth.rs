@@ -10,7 +10,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{error::ApiError, middleware::extract_ip_from_headers, state::AppState};
+use crate::{
+    cache::CoPlayersCache, error::ApiError, middleware::extract_ip_from_headers, state::AppState,
+};
 use dguesser_auth::{
     AuthUser, MaybeAuthUser, OAuthProvider, OAuthState, build_cookie_header,
     build_delete_cookie_header, create_guest_session, handle_oauth_callback,
@@ -220,15 +222,32 @@ async fn google_callback(
         .ok_or_else(|| ApiError::service_unavailable("Google OAuth not configured"))?;
 
     // Validate state parameter against stored state (CSRF protection)
-    let stored_state = state.oauth_state_store().validate_and_consume(&query.state).await?;
+    let stored_state = match state.oauth_state_store().validate_and_consume(&query.state).await {
+        Ok(stored_state) => stored_state,
+        Err(err) => {
+            tracing::warn!(error = %err, "Failed to validate Google OAuth state");
+            return Ok(auth_error_redirect(&state, "OAUTH_ERROR").into_response());
+        }
+    };
 
     // Verify provider matches
     if stored_state.provider != OAuthProvider::Google {
-        return Err(dguesser_auth::OAuthError::ProviderMismatch.into());
+        tracing::warn!(
+            expected = %OAuthProvider::Google,
+            actual = %stored_state.provider,
+            "Google OAuth callback provider mismatch"
+        );
+        return Ok(auth_error_redirect(&state, "OAUTH_ERROR").into_response());
     }
 
     // Exchange code for identity
-    let identity = google_oauth.exchange_code(&query.code).await?;
+    let identity = match google_oauth.exchange_code(&query.code).await {
+        Ok(identity) => identity,
+        Err(err) => {
+            tracing::warn!(error = %err, "Google OAuth code exchange failed");
+            return Ok(auth_error_redirect(&state, "OAUTH_ERROR").into_response());
+        }
+    };
 
     // Extract request metadata (using secure IP extraction)
     let ip = extract_ip_from_headers(&headers, state.client_ip_config());
@@ -236,7 +255,7 @@ async fn google_callback(
 
     // Handle OAuth callback
     let current_session = existing.as_ref().map(|a| a.session_id.as_str());
-    let result = handle_oauth_callback(
+    let result = match handle_oauth_callback(
         state.db(),
         identity,
         current_session,
@@ -244,7 +263,21 @@ async fn google_callback(
         ip.as_deref(),
         user_agent,
     )
-    .await?;
+    .await
+    {
+        Ok(result) => result,
+        Err(err) => {
+            tracing::warn!(error = %err, "Google OAuth callback handling failed");
+            return Ok(auth_error_redirect(&state, auth_error_code(&err)).into_response());
+        }
+    };
+
+    if result.merged_from_guest.is_some() {
+        crate::cache::LeaderboardCache::invalidate_all(state.redis()).await;
+        for user_id in &result.invalidate_co_player_cache_for {
+            CoPlayersCache::invalidate(state.redis(), user_id).await;
+        }
+    }
 
     // Build session cookie
     let cookie = build_cookie_header(
@@ -259,7 +292,7 @@ async fn google_callback(
         .filter(|url| is_safe_redirect(url, state.frontend_url()))
         .unwrap_or_else(|| format!("{}/auth/success", state.frontend_url()));
 
-    Ok(([(SET_COOKIE, cookie)], Redirect::temporary(&redirect_url)))
+    Ok(([(SET_COOKIE, cookie)], Redirect::temporary(&redirect_url)).into_response())
 }
 
 /// Check if a redirect URL is safe (same-origin or relative path).
@@ -328,6 +361,12 @@ mod tests {
         assert!(!is_safe_redirect("https://dguesser.com.evil.com/path", frontend));
         assert!(!is_safe_redirect("https://notdguesser.com/path", frontend));
     }
+
+    #[test]
+    fn test_auth_error_code_for_merge_block() {
+        let err = dguesser_auth::AuthError::MergeBlocked("blocked".to_string());
+        assert_eq!(auth_error_code(&err), "AUTH_MERGE_BLOCKED");
+    }
 }
 
 /// Initiate Microsoft OAuth
@@ -374,21 +413,38 @@ async fn microsoft_callback(
         .ok_or_else(|| ApiError::service_unavailable("Microsoft OAuth not configured"))?;
 
     // Validate state parameter against stored state (CSRF protection)
-    let stored_state = state.oauth_state_store().validate_and_consume(&query.state).await?;
+    let stored_state = match state.oauth_state_store().validate_and_consume(&query.state).await {
+        Ok(stored_state) => stored_state,
+        Err(err) => {
+            tracing::warn!(error = %err, "Failed to validate Microsoft OAuth state");
+            return Ok(auth_error_redirect(&state, "OAUTH_ERROR").into_response());
+        }
+    };
 
     // Verify provider matches
     if stored_state.provider != OAuthProvider::Microsoft {
-        return Err(dguesser_auth::OAuthError::ProviderMismatch.into());
+        tracing::warn!(
+            expected = %OAuthProvider::Microsoft,
+            actual = %stored_state.provider,
+            "Microsoft OAuth callback provider mismatch"
+        );
+        return Ok(auth_error_redirect(&state, "OAUTH_ERROR").into_response());
     }
 
-    let identity = microsoft_oauth.exchange_code(&query.code).await?;
+    let identity = match microsoft_oauth.exchange_code(&query.code).await {
+        Ok(identity) => identity,
+        Err(err) => {
+            tracing::warn!(error = %err, "Microsoft OAuth code exchange failed");
+            return Ok(auth_error_redirect(&state, "OAUTH_ERROR").into_response());
+        }
+    };
 
     // Extract request metadata (using secure IP extraction)
     let ip = extract_ip_from_headers(&headers, state.client_ip_config());
     let user_agent = headers.get("user-agent").and_then(|v| v.to_str().ok());
 
     let current_session = existing.as_ref().map(|a| a.session_id.as_str());
-    let result = handle_oauth_callback(
+    let result = match handle_oauth_callback(
         state.db(),
         identity,
         current_session,
@@ -396,7 +452,21 @@ async fn microsoft_callback(
         ip.as_deref(),
         user_agent,
     )
-    .await?;
+    .await
+    {
+        Ok(result) => result,
+        Err(err) => {
+            tracing::warn!(error = %err, "Microsoft OAuth callback handling failed");
+            return Ok(auth_error_redirect(&state, auth_error_code(&err)).into_response());
+        }
+    };
+
+    if result.merged_from_guest.is_some() {
+        crate::cache::LeaderboardCache::invalidate_all(state.redis()).await;
+        for user_id in &result.invalidate_co_player_cache_for {
+            CoPlayersCache::invalidate(state.redis(), user_id).await;
+        }
+    }
 
     let cookie = build_cookie_header(
         &result.session_id,
@@ -410,5 +480,18 @@ async fn microsoft_callback(
         .filter(|url| is_safe_redirect(url, state.frontend_url()))
         .unwrap_or_else(|| format!("{}/auth/success", state.frontend_url()));
 
-    Ok(([(SET_COOKIE, cookie)], Redirect::temporary(&redirect_url)))
+    Ok(([(SET_COOKIE, cookie)], Redirect::temporary(&redirect_url)).into_response())
+}
+
+fn auth_error_code(err: &dguesser_auth::AuthError) -> &'static str {
+    match err {
+        dguesser_auth::AuthError::MergeBlocked(_) => "AUTH_MERGE_BLOCKED",
+        dguesser_auth::AuthError::OAuth(_) => "OAUTH_ERROR",
+        dguesser_auth::AuthError::SessionNotFound => "AUTH_SESSION_ERROR",
+        dguesser_auth::AuthError::Database(_) => "AUTH_ERROR",
+    }
+}
+
+fn auth_error_redirect(state: &AppState, code: &str) -> Redirect {
+    Redirect::temporary(&format!("{}/auth/error?code={code}", state.frontend_url()))
 }
