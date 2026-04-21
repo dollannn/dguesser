@@ -130,14 +130,15 @@
         error = 'Failed to resume game. The game may have ended.';
       }
     } else if (gameDetails.status === 'finished') {
-      // Game is finished - show finished state
-      gameStore.handleGameEnd({
-        game_id: gameDetails.id,
-        final_standings: gameDetails.players.map((p, i) => ({
-          rank: i + 1,
-          user_id: p.user_id,
-          display_name: p.display_name,
-          total_score: p.score,
+      // Game is finished - restore persisted results and statistics
+      const results = await gamesApi.getResults(gameDetails.id);
+      gameStore.hydrateSoloFinished({
+        game_id: results.game_id,
+        final_standings: results.final_standings,
+        rounds: results.rounds.map((round) => ({
+          round_number: round.round_number,
+          correct_location: round.correct_location,
+          results: round.results,
         })),
       });
     }

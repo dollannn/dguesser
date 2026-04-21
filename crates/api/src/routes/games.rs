@@ -37,10 +37,12 @@ pub fn router() -> Router<AppState> {
         .route("/", post(create_game))
         .route("/join", post(join_game_by_code))
         .route("/{id}", get(get_game))
+        .route("/{id}/results", get(get_game_results))
         .route("/{id}/start", post(start_game))
         .route("/{id}/settings", axum::routing::patch(update_settings))
         .route("/{id}/rounds/current", get(get_current_round))
         .route("/{id}/rounds/next", post(next_round))
+        .route("/{id}/rounds/{round}/timeout", post(timeout_round))
         .route("/{id}/rounds/{round}/guess", post(submit_guess))
         .route("/history", get(get_game_history))
         .route("/presets", get(get_presets))
@@ -229,6 +231,60 @@ pub struct GuessResultResponse {
     pub correct_location: LocationInfo,
 }
 
+/// Player's result within a completed round.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RoundResultInfo {
+    /// User ID (prefixed nanoid)
+    pub user_id: String,
+    /// Display name
+    pub display_name: String,
+    /// Guessed latitude
+    pub guess_lat: f64,
+    /// Guessed longitude
+    pub guess_lng: f64,
+    /// Distance from correct location in meters (-1 means no guess)
+    pub distance_meters: f64,
+    /// Score awarded for this round
+    pub score: u32,
+    /// Cumulative total score after this round
+    pub total_score: u32,
+}
+
+/// Final standings entry for a completed game.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct FinalStandingInfo {
+    /// Rank (1 = first place)
+    pub rank: u8,
+    /// User ID (prefixed nanoid)
+    pub user_id: String,
+    /// Display name
+    pub display_name: String,
+    /// Final total score
+    pub total_score: u32,
+}
+
+/// Completed round data for the game summary view.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CompletedRoundInfo {
+    /// Round number (1-based)
+    pub round_number: u8,
+    /// Correct location for this round
+    pub correct_location: LocationInfo,
+    /// Player results for this round
+    pub results: Vec<RoundResultInfo>,
+}
+
+/// Persisted game results for a finished solo game.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GameResultsResponse {
+    /// Game ID (prefixed nanoid)
+    pub game_id: String,
+    /// Final standings for the game
+    pub final_standings: Vec<FinalStandingInfo>,
+    /// Completed rounds with locations and player results
+    pub rounds: Vec<CompletedRoundInfo>,
+}
+
 /// Game summary for history
 #[derive(Debug, Serialize, ToSchema)]
 pub struct GameSummary {
@@ -292,6 +348,11 @@ pub struct SettingsDto {
     pub rotation_allowed: bool,
 }
 
+const SOLO_NO_GUESS_LAT: f64 = 0.0;
+const SOLO_NO_GUESS_LNG: f64 = 0.0;
+const SOLO_NO_GUESS_DISTANCE_METERS: f64 = -1.0;
+const SOLO_NO_GUESS_SCORE: i32 = 0;
+
 /// Game preset info
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PresetInfo {
@@ -308,6 +369,148 @@ pub struct PresetInfo {
 // =============================================================================
 // State Loading Helpers
 // =============================================================================
+
+async fn finalize_solo_game(
+    db: &dguesser_db::DbPool,
+    game_id: &str,
+    user_id: &str,
+    total_score: i32,
+) -> Result<(), ApiError> {
+    dguesser_db::games::update_game_status(db, game_id, GameStatus::Finished).await?;
+    dguesser_db::games::set_final_rankings(db, game_id).await?;
+    dguesser_db::games::set_game_total_score(db, game_id, total_score).await?;
+    dguesser_db::users::update_stats(db, user_id, total_score).await?;
+
+    Ok(())
+}
+
+async fn build_game_results(
+    db: &dguesser_db::DbPool,
+    game_id: &str,
+) -> Result<GameResultsResponse, ApiError> {
+    let players = dguesser_db::games::get_players(db, game_id).await?;
+    let rounds = dguesser_db::games::get_rounds_for_game(db, game_id).await?;
+
+    let mut player_names = HashMap::new();
+    let mut final_standings = Vec::new();
+    for player in &players {
+        let user = dguesser_db::users::get_by_id(db, &player.user_id).await?;
+        let display_name = user.map(|u| u.display_name).unwrap_or_else(|| "Unknown".to_string());
+
+        player_names.insert(player.user_id.clone(), display_name.clone());
+        final_standings.push(FinalStandingInfo {
+            rank: 0,
+            user_id: player.user_id.clone(),
+            display_name,
+            total_score: player.score_total.max(0) as u32,
+        });
+    }
+
+    final_standings.sort_by(|a, b| b.total_score.cmp(&a.total_score));
+    for (index, standing) in final_standings.iter_mut().enumerate() {
+        standing.rank = (index + 1) as u8;
+    }
+
+    let mut cumulative_scores = HashMap::<String, u32>::new();
+    let mut completed_rounds = Vec::new();
+    for round in rounds {
+        let guesses = dguesser_db::games::get_guesses_for_round(db, &round.id).await?;
+        let mut results = Vec::new();
+
+        for guess in guesses {
+            let display_name =
+                player_names.get(&guess.user_id).cloned().unwrap_or_else(|| "Unknown".to_string());
+
+            let total_score = {
+                let entry = cumulative_scores.entry(guess.user_id.clone()).or_insert(0);
+                *entry += guess.score.max(0) as u32;
+                *entry
+            };
+
+            results.push(RoundResultInfo {
+                user_id: guess.user_id,
+                display_name,
+                guess_lat: guess.guess_lat,
+                guess_lng: guess.guess_lng,
+                distance_meters: guess.distance_meters,
+                score: guess.score.max(0) as u32,
+                total_score,
+            });
+        }
+
+        completed_rounds.push(CompletedRoundInfo {
+            round_number: round.round_number as u8,
+            correct_location: LocationInfo {
+                lat: round.location_lat,
+                lng: round.location_lng,
+                panorama_id: round.panorama_id,
+                location_id: round.location_id,
+            },
+            results,
+        });
+    }
+
+    Ok(GameResultsResponse {
+        game_id: game_id.to_string(),
+        final_standings,
+        rounds: completed_rounds,
+    })
+}
+
+async fn reconcile_solo_game(db: &dguesser_db::DbPool, game_id: &str) -> Result<(), ApiError> {
+    let game = dguesser_db::games::get_game_by_id(db, game_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Game"))?;
+
+    if game.mode != GameMode::Solo || game.status != GameStatus::Active {
+        return Ok(());
+    }
+
+    let settings: GameSettings = serde_json::from_value(game.settings.clone()).unwrap_or_default();
+    let players = dguesser_db::games::get_players(db, game_id).await?;
+    let Some(player) = players.first() else {
+        return Ok(());
+    };
+
+    let Some(round) = dguesser_db::games::get_current_round(db, game_id).await? else {
+        return Ok(());
+    };
+
+    let has_guess = dguesser_db::games::has_guessed(db, &round.id, &player.user_id).await?;
+    let round_timed_out =
+        round.started_at.zip(round.time_limit_ms).is_some_and(|(started_at, time_limit_ms)| {
+            (Utc::now() - started_at).num_milliseconds() >= time_limit_ms as i64
+        });
+
+    let round_resolved = has_guess || round.ended_at.is_some() || round_timed_out;
+    if !round_resolved {
+        return Ok(());
+    }
+
+    if !has_guess && round_timed_out {
+        dguesser_db::games::create_guess(
+            db,
+            &round.id,
+            &player.user_id,
+            SOLO_NO_GUESS_LAT,
+            SOLO_NO_GUESS_LNG,
+            SOLO_NO_GUESS_DISTANCE_METERS,
+            SOLO_NO_GUESS_SCORE,
+            None,
+        )
+        .await?;
+    }
+
+    if round.ended_at.is_none() {
+        dguesser_db::games::end_round(db, &round.id).await?;
+    }
+
+    if round.round_number as u8 >= settings.rounds {
+        finalize_solo_game(db, game_id, &player.user_id, player.score_total).await?;
+    }
+
+    Ok(())
+}
 
 /// Load a GameState from the database for validation purposes.
 ///
@@ -328,12 +531,16 @@ async fn load_game_state(
     let settings: GameSettings =
         serde_json::from_value(db_game.settings.clone()).unwrap_or_default();
 
+    let last_round_ended = db_rounds.last().is_some_and(|round| round.ended_at.is_some());
+
     // Map DB status to core phase
     let phase = match db_game.status {
         GameStatus::Lobby => GamePhase::Lobby,
         GameStatus::Active => {
             if db_rounds.is_empty() {
                 GamePhase::Active
+            } else if last_round_ended {
+                GamePhase::BetweenRounds
             } else {
                 GamePhase::RoundInProgress
             }
@@ -633,6 +840,8 @@ pub async fn get_game(
     auth: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<GameDetails>, ApiError> {
+    reconcile_solo_game(state.db(), &id).await?;
+
     let game = dguesser_db::games::get_game_by_id(state.db(), &id)
         .await?
         .ok_or_else(|| ApiError::not_found("Game"))?;
@@ -679,6 +888,54 @@ pub async fn get_game(
         current_round: rounds.len() as u8,
         total_rounds,
     }))
+}
+
+/// Get persisted results for a finished solo game.
+#[utoipa::path(
+    get,
+    path = "/api/v1/games/{id}/results",
+    params(
+        ("id" = String, Path, description = "Game ID")
+    ),
+    responses(
+        (status = 200, description = "Finished game results", body = GameResultsResponse),
+        (status = 400, description = "Game is not finished or not solo"),
+        (status = 403, description = "Not a player in this game"),
+        (status = 404, description = "Game not found"),
+    ),
+    tag = "games"
+)]
+pub async fn get_game_results(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<GameResultsResponse>, ApiError> {
+    reconcile_solo_game(state.db(), &id).await?;
+
+    let game = dguesser_db::games::get_game_by_id(state.db(), &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Game"))?;
+
+    if game.mode != GameMode::Solo {
+        return Err(ApiError::bad_request(
+            "INVALID_MODE",
+            "Persisted results via API are only available for solo games",
+        ));
+    }
+
+    if game.status != GameStatus::Finished {
+        return Err(ApiError::bad_request(
+            "GAME_NOT_FINISHED",
+            "Game results are only available after the game has finished",
+        ));
+    }
+
+    let is_player = dguesser_db::games::is_player_in_game(state.db(), &id, &auth.user_id).await?;
+    if !is_player {
+        return Err(ApiError::forbidden("Not a player in this game"));
+    }
+
+    Ok(Json(build_game_results(state.db(), &id).await?))
 }
 
 /// Start a game (transition from lobby to active)
@@ -787,6 +1044,8 @@ pub async fn get_current_round(
 ) -> Result<Json<CurrentRoundInfo>, ApiError> {
     let now = Utc::now();
 
+    reconcile_solo_game(state.db(), &id).await?;
+
     // Load game state
     let (game_state, _) = load_game_state(state.db(), &id).await?;
 
@@ -796,7 +1055,10 @@ pub async fn get_current_round(
     }
 
     // Check game is active
-    if !matches!(game_state.phase, GamePhase::Active | GamePhase::RoundInProgress) {
+    if !matches!(
+        game_state.phase,
+        GamePhase::Active | GamePhase::RoundInProgress | GamePhase::BetweenRounds
+    ) {
         return Err(ApiError::bad_request("INVALID_STATE", "Game is not active"));
     }
 
@@ -854,7 +1116,7 @@ pub async fn next_round(
     let now = Utc::now();
 
     // Load game state
-    let (game_state, _) = load_game_state(state.db(), &id).await?;
+    let (game_state, current_round_db_id) = load_game_state(state.db(), &id).await?;
 
     // Verify user is a player
     if !game_state.players.contains_key(&auth.user_id) {
@@ -885,6 +1147,8 @@ pub async fn next_round(
     }
 
     // First, end the current round if there is one
+    let should_persist_round_end = game_state.current_round.is_some()
+        && matches!(game_state.phase, GamePhase::RoundInProgress);
     let game_state = if game_state.current_round.is_some() {
         let result = reduce(&game_state, GameCommand::EndRound, now);
         result.state
@@ -892,14 +1156,15 @@ pub async fn next_round(
         game_state
     };
 
+    if should_persist_round_end && let Some(round_id) = current_round_db_id.as_deref() {
+        dguesser_db::games::end_round(state.db(), round_id).await?;
+    }
+
     // Check if game should end
     if game_state.round_number >= game_state.settings.rounds {
-        dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Finished).await?;
-
-        // Update user stats for leaderboard
         let player_score =
             game_state.players.get(&auth.user_id).map(|p| p.total_score).unwrap_or(0);
-        dguesser_db::users::update_stats(state.db(), &auth.user_id, player_score as i32).await?;
+        finalize_solo_game(state.db(), &id, &auth.user_id, player_score as i32).await?;
 
         return Err(ApiError::bad_request("GAME_COMPLETE", "All rounds completed"));
     }
@@ -919,12 +1184,9 @@ pub async fn next_round(
 
     if result.has_error() {
         // Game is complete
-        dguesser_db::games::update_game_status(state.db(), &id, GameStatus::Finished).await?;
-
-        // Update user stats for leaderboard
         let player_score =
             game_state.players.get(&auth.user_id).map(|p| p.total_score).unwrap_or(0);
-        dguesser_db::users::update_stats(state.db(), &auth.user_id, player_score as i32).await?;
+        finalize_solo_game(state.db(), &id, &auth.user_id, player_score as i32).await?;
 
         return Err(ApiError::bad_request("GAME_COMPLETE", "All rounds completed"));
     }
@@ -995,6 +1257,9 @@ pub async fn submit_guess(
 
     // Load game state
     let (game_state, current_round_db_id) = load_game_state(state.db(), &game_id).await?;
+    let db_game = dguesser_db::games::get_game_by_id(state.db(), &game_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Game"))?;
 
     // Verify we're on the correct round
     let current_round =
@@ -1033,6 +1298,7 @@ pub async fn submit_guess(
 
     let distance = guess.distance_meters;
     let score = guess.score;
+    let is_last_round = current_round.round_number >= game_state.settings.rounds;
 
     // Get round DB ID
     let round_db_id = current_round_db_id
@@ -1056,9 +1322,115 @@ pub async fn submit_guess(
         dguesser_db::games::update_player_score(state.db(), &game_id, &auth.user_id, score as i32)
             .await?;
 
+    if db_game.mode == GameMode::Solo {
+        dguesser_db::games::end_round(state.db(), &round_db_id).await?;
+
+        if is_last_round {
+            finalize_solo_game(state.db(), &game_id, &auth.user_id, total_score).await?;
+        }
+    }
+
     Ok(Json(GuessResultResponse {
         distance_meters: distance,
         score,
+        total_score: total_score as u32,
+        correct_location: LocationInfo {
+            lat: current_round.location_lat,
+            lng: current_round.location_lng,
+            panorama_id: current_round.panorama_id.clone(),
+            location_id: current_round.location_id.clone(),
+        },
+    }))
+}
+
+/// Submit a timed-out round with no guess for a solo game.
+#[utoipa::path(
+    post,
+    path = "/api/v1/games/{game_id}/rounds/{round_number}/timeout",
+    params(
+        ("game_id" = String, Path, description = "Game ID"),
+        ("round_number" = u8, Path, description = "Round number (1-based)")
+    ),
+    responses(
+        (status = 200, description = "No-guess result recorded", body = GuessResultResponse),
+        (status = 400, description = "Round has not timed out or is not active"),
+        (status = 403, description = "Not a player in this game"),
+        (status = 404, description = "Game or round not found"),
+        (status = 409, description = "Already submitted guess"),
+    ),
+    tag = "games"
+)]
+pub async fn timeout_round(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((game_id, round_number)): Path<(String, u8)>,
+) -> Result<Json<GuessResultResponse>, ApiError> {
+    let now = Utc::now();
+
+    let (game_state, current_round_db_id) = load_game_state(state.db(), &game_id).await?;
+    let db_game = dguesser_db::games::get_game_by_id(state.db(), &game_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Game"))?;
+
+    if db_game.mode != GameMode::Solo {
+        return Err(ApiError::bad_request(
+            "INVALID_MODE",
+            "Round timeout via API is only available for solo games",
+        ));
+    }
+
+    if !game_state.players.contains_key(&auth.user_id) {
+        return Err(ApiError::forbidden("Not a player in this game"));
+    }
+
+    let current_round =
+        game_state.current_round.as_ref().ok_or_else(|| ApiError::not_found("Round"))?;
+
+    if current_round.round_number != round_number {
+        return Err(ApiError::bad_request(
+            "WRONG_ROUND",
+            "Round number does not match current round",
+        ));
+    }
+
+    if game_state.phase != GamePhase::RoundInProgress {
+        return Err(ApiError::bad_request("INVALID_STATE", "No round is currently in progress"));
+    }
+
+    if !current_round.is_timed_out(now) {
+        return Err(ApiError::bad_request("ROUND_ACTIVE", "Round has not timed out yet"));
+    }
+
+    if current_round.guesses.contains_key(&auth.user_id) {
+        return Err(ApiError::conflict("ALREADY_GUESSED", "Already submitted a guess"));
+    }
+
+    let round_db_id = current_round_db_id
+        .ok_or_else(|| ApiError::internal().with_internal("Round DB ID not found"))?;
+
+    dguesser_db::games::create_guess(
+        state.db(),
+        &round_db_id,
+        &auth.user_id,
+        SOLO_NO_GUESS_LAT,
+        SOLO_NO_GUESS_LNG,
+        SOLO_NO_GUESS_DISTANCE_METERS,
+        SOLO_NO_GUESS_SCORE,
+        None,
+    )
+    .await?;
+
+    dguesser_db::games::end_round(state.db(), &round_db_id).await?;
+
+    let total_score =
+        game_state.players.get(&auth.user_id).map(|p| p.total_score).unwrap_or(0) as i32;
+    if current_round.round_number >= game_state.settings.rounds {
+        finalize_solo_game(state.db(), &game_id, &auth.user_id, total_score).await?;
+    }
+
+    Ok(Json(GuessResultResponse {
+        distance_meters: SOLO_NO_GUESS_DISTANCE_METERS,
+        score: SOLO_NO_GUESS_SCORE as u32,
         total_score: total_score as u32,
         correct_location: LocationInfo {
             lat: current_round.location_lat,
@@ -1087,6 +1459,11 @@ pub async fn get_game_history(
 
     let mut summaries = Vec::new();
     for game in games {
+        reconcile_solo_game(state.db(), &game.id).await?;
+
+        let game = dguesser_db::games::get_game_by_id(state.db(), &game.id)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Game"))?;
         let players = dguesser_db::games::get_players(state.db(), &game.id).await?;
         let player_score =
             players.iter().find(|p| p.user_id == auth.user_id).map(|p| p.score_total).unwrap_or(0);

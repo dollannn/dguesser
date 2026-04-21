@@ -47,6 +47,24 @@
     guessLng = coords.lng;
   }
 
+  function showSoloRoundEnd(result: Awaited<ReturnType<typeof gamesApi.submitGuess>>, lat: number, lng: number) {
+    gameStore.handleRoundEnd({
+      round_number: gameState.currentRound,
+      correct_location: result.correct_location,
+      results: [
+        {
+          user_id: $user?.id ?? '',
+          display_name: $user?.display_name ?? 'You',
+          guess_lat: lat,
+          guess_lng: lng,
+          distance_meters: result.distance_meters,
+          score: result.score,
+          total_score: result.total_score,
+        },
+      ],
+    });
+  }
+
   async function submitGuess() {
     if (!canSubmit || guessLat === null || guessLng === null) return;
 
@@ -64,22 +82,7 @@
           timeTaken
         );
 
-        // Handle result locally
-        gameStore.handleRoundEnd({
-          round_number: gameState.currentRound,
-          correct_location: result.correct_location,
-          results: [
-            {
-              user_id: '',
-              display_name: '',
-              guess_lat: guessLat,
-              guess_lng: guessLng,
-              distance_meters: result.distance_meters,
-              score: result.score,
-              total_score: result.total_score,
-            },
-          ],
-        });
+        showSoloRoundEnd(result, guessLat, guessLng);
       } else {
         // Multiplayer - use socket
         gameStore.submitGuess(guessLat, guessLng, timeTaken);
@@ -98,22 +101,18 @@
       // User placed a pin - auto-submit their guess
       submitGuess();
     } else if (game.mode === 'solo' && gameState.location) {
-      // No pin placed in solo mode - score 0 and transition to results
-      gameStore.handleRoundEnd({
-        round_number: gameState.currentRound,
-        correct_location: gameState.location,
-        results: [
-          {
-            user_id: '',
-            display_name: '',
-            guess_lat: 0,
-            guess_lng: 0,
-            distance_meters: -1, // Sentinel value: "no guess"
-            score: 0,
-            total_score: 0,
-          },
-        ],
-      });
+      submitting = true;
+      gamesApi
+        .timeoutRound(game.id, gameState.currentRound)
+        .then((result) => {
+          showSoloRoundEnd(result, 0, 0);
+        })
+        .catch((e) => {
+          console.error('Failed to record timed-out round:', e);
+        })
+        .finally(() => {
+          submitting = false;
+        });
     }
     // Multiplayer: server handles round end via socket event
   }

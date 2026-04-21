@@ -95,6 +95,35 @@ export interface GuessResult {
   correct_location: Location;
 }
 
+export interface RoundResultInfo {
+  user_id: string;
+  display_name: string;
+  guess_lat: number;
+  guess_lng: number;
+  distance_meters: number;
+  score: number;
+  total_score: number;
+}
+
+export interface FinalStandingInfo {
+  rank: number;
+  user_id: string;
+  display_name: string;
+  total_score: number;
+}
+
+export interface CompletedRoundInfo {
+  round_number: number;
+  correct_location: Location;
+  results: RoundResultInfo[];
+}
+
+export interface GameResultsResponse {
+  game_id: string;
+  final_standings: FinalStandingInfo[];
+  rounds: CompletedRoundInfo[];
+}
+
 export interface GameSummary {
   /** Game ID (prefixed nanoid: gam_xxxxxxxxxxxx) */
   id: string;
@@ -143,6 +172,11 @@ export const gamesApi = {
     return api.post<RoundInfo>(`/games/${gameId}/rounds/next`);
   },
 
+  /** Record a timed-out solo round with no guess */
+  async timeoutRound(gameId: string, roundNumber: number): Promise<GuessResult> {
+    return api.post<GuessResult>(`/games/${gameId}/rounds/${roundNumber}/timeout`);
+  },
+
   /** Submit a guess */
   async submitGuess(
     gameId: string,
@@ -161,6 +195,11 @@ export const gamesApi = {
   /** Get user's game history */
   async getHistory(): Promise<GameSummary[]> {
     return api.get<GameSummary[]>('/games/history');
+  },
+
+  /** Get persisted round-by-round results for a finished game */
+  async getResults(gameId: string): Promise<GameResultsResponse> {
+    return api.get<GameResultsResponse>(`/games/${gameId}/results`);
   },
 
   /** Join a game by code */

@@ -486,6 +486,30 @@ function createGameStore() {
       }));
     },
 
+    hydrateSoloFinished(payload: {
+      game_id: string;
+      final_standings: FinalStanding[];
+      rounds: RoundEndPayload[];
+    }): void {
+      socketClient.setActiveGame(null, null);
+      update((s) => ({
+        ...s,
+        gameId: payload.game_id,
+        status: 'finished',
+        currentRound: payload.rounds.length,
+        totalRounds: payload.rounds.length,
+        results: payload.rounds.at(-1)?.results ?? [],
+        location: payload.rounds.at(-1)?.correct_location ?? null,
+        roundHistory: payload.rounds.map((round) => round.results),
+        roundLocations: payload.rounds.map((round) => round.correct_location),
+        finalStandings: payload.final_standings,
+        nextRoundAt: null,
+        skipVotes: 0,
+        skipVotesRequired: 0,
+        hasVotedToSkip: false,
+      }));
+    },
+
     /** Handle game abandoned (all players disconnected for too long) */
     handleGameAbandoned(payload: GameAbandonedPayload): void {
       socketClient.setActiveGame(null, null);

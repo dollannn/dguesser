@@ -49,23 +49,16 @@
     isTransitioning = true;
     
     try {
-      // Fetch updated game data with final scores
-      const updatedGame = await gamesApi.get(game.id);
-      
-      // Build final standings from players (sorted by score descending)
-      const standings = updatedGame.players
-        .toSorted((a, b) => b.score - a.score)
-        .map((p, i) => ({
-          rank: i + 1,
-          user_id: p.user_id,
-          display_name: p.display_name || 'You',
-          total_score: p.score,
-        }));
-      
-      // Trigger game end transition
-      gameStore.handleGameEnd({
-        game_id: game.id,
-        final_standings: standings,
+      const results = await gamesApi.getResults(game.id);
+
+      gameStore.hydrateSoloFinished({
+        game_id: results.game_id,
+        final_standings: results.final_standings,
+        rounds: results.rounds.map((round) => ({
+          round_number: round.round_number,
+          correct_location: round.correct_location,
+          results: round.results,
+        })),
       });
     } catch (e) {
       console.error('Failed to fetch final results:', e);
