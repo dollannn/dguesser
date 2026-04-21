@@ -269,6 +269,11 @@
   border-top-color: rgba(59, 130, 246, 0.12) !important;
 }
 
+.results-tooltip-self-tag {
+  opacity: 0.75;
+  font-weight: 600;
+}
+
 /* Dark mode overrides */
 .dark .results-tooltip {
   background: rgba(30, 30, 40, 0.95) !important;

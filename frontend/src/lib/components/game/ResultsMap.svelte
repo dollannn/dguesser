@@ -12,6 +12,7 @@
     displayName: string;
     userId: string;
     distanceMeters: number;
+    color?: string;
   }
 
   interface Props {
@@ -47,13 +48,30 @@
     return { currentUserGuess, otherGuesses };
   }
 
+  function escapeHtml(value: string): string {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function getDisplayName(name: string, isYou: boolean): string {
+    const trimmed = name.trim();
+    return trimmed || (isYou ? 'You' : 'Player');
+  }
+
   /** Format a label for a guess marker tooltip */
   function formatLabel(name: string, distanceMeters: number, isYou: boolean): string {
     const dist = formatDistance(distanceMeters);
-    if (isYou) {
-      return `<strong>You</strong> &middot; ${dist}`;
+    const displayName = escapeHtml(getDisplayName(name, isYou));
+
+    if (isYou && displayName !== 'You') {
+      return `<strong>${displayName}</strong> <span class="results-tooltip-self-tag">(You)</span> &middot; ${dist}`;
     }
-    return `${name} &middot; ${dist}`;
+
+    return `<strong>${displayName}</strong> &middot; ${dist}`;
   }
 
   /** Add a marker to the map with optional delay for animation */
@@ -164,9 +182,10 @@
     if (currentUserGuess) {
       const userLatLng: [number, number] = [currentUserGuess.lat, currentUserGuess.lng];
       bounds.extend(userLatLng);
+      const userColor = currentUserGuess.color ?? MARKER_CONFIG.colors.currentUser;
 
       const userIcon = createMapPinIcon(leaflet, {
-        color: MARKER_CONFIG.colors.currentUser,
+        color: userColor,
         size: MARKER_CONFIG.resultSizes.currentUser,
         glow: true,
       });
@@ -175,7 +194,7 @@
 
       addLineWithDelay(
         leaflet, map, userLatLng, correctLatLng,
-        MARKER_CONFIG.colors.currentUser,
+        userColor,
         userDelay,
       );
 
@@ -194,7 +213,7 @@
     // ─── 3. Other Players' Guesses (smaller pins, staggered) ───
     const playerColors = MARKER_CONFIG.colors.players;
     otherGuesses.forEach((guess, i) => {
-      const color = playerColors[i % playerColors.length];
+      const color = guess.color ?? playerColors[i % playerColors.length];
       const guessLatLng: [number, number] = [guess.lat, guess.lng];
       bounds.extend(guessLatLng);
 

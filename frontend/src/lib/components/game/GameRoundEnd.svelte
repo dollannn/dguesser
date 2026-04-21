@@ -121,8 +121,39 @@
       }));
   });
 
-  // Build color map for each player (matches ResultsMap logic)
-  // Current user always gets blue, others get cycling colors from players palette
+  function getResultDisplayName(displayName: string | null | undefined, isCurrentUser: boolean): string {
+    const name = displayName?.trim();
+    return name || (isCurrentUser ? 'You' : 'Player');
+  }
+
+  function hexToRgba(hex: string, alpha: number): string {
+    const normalized = hex.replace('#', '');
+    const expanded = normalized.length === 3
+      ? normalized.split('').map((char) => `${char}${char}`).join('')
+      : normalized;
+
+    if (expanded.length !== 6) {
+      return `rgba(0, 0, 0, ${alpha})`;
+    }
+
+    const r = Number.parseInt(expanded.slice(0, 2), 16);
+    const g = Number.parseInt(expanded.slice(2, 4), 16);
+    const b = Number.parseInt(expanded.slice(4, 6), 16);
+
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  function getNameChipStyle(color?: string, hasMarker: boolean = true): string | undefined {
+    if (!color || !hasMarker) return undefined;
+
+    return [
+      `background-color: ${hexToRgba(color, 0.14)}`,
+      `border-color: ${hexToRgba(color, 0.28)}`,
+    ].join('; ');
+  }
+
+  // Build the shared player-color map used by both the table and ResultsMap.
+  // Current user always gets blue, others get cycling colors from players palette.
   let playerColorMap = $derived.by(() => {
     const colorMap = new Map<string, string>();
     let otherIndex = 0;
@@ -165,14 +196,15 @@
           <ResultsMap
             correctLat={correctLocation.lat}
             correctLng={correctLocation.lng}
-            guesses={results
+            guesses={rankedResults
               .filter((r) => r.distance_meters >= 0)
               .map((r) => ({
                 lat: r.guess_lat,
                 lng: r.guess_lng,
-                displayName: r.display_name,
+                displayName: getResultDisplayName(r.display_name, r.isCurrentUser),
                 userId: r.user_id,
                 distanceMeters: r.distance_meters,
+                color: playerColorMap.get(r.user_id),
               }))}
             {currentUserId}
           />
@@ -205,6 +237,8 @@
           <Table.Body>
             {#each rankedResults as result (result.user_id)}
               {@const markerColor = playerColorMap.get(result.user_id)}
+              {@const displayName = getResultDisplayName(result.display_name, result.isCurrentUser)}
+              {@const hasMarker = result.distance_meters >= 0}
               <Table.Row 
                 class={result.isCurrentUser ? 'bg-primary/5' : ''}
               >
@@ -215,22 +249,24 @@
                 </Table.Cell>
                 <Table.Cell>
                   <div class="flex items-center gap-2">
-                    <!-- Color dot matching the map marker -->
-                    {#if markerColor && result.distance_meters >= 0}
+                    {#if markerColor && hasMarker}
                       <span
-                        class="inline-block w-3 h-3 rounded-full shrink-0 ring-2 ring-background"
-                        style="background-color: {markerColor};"
-                      ></span>
+                        class="inline-flex items-center rounded-full border px-2.5 py-0.5 font-medium"
+                        style={getNameChipStyle(markerColor, hasMarker)}
+                      >
+                        {displayName}
+                      </span>
+                    {:else}
+                      <span class={result.isCurrentUser ? 'font-medium text-primary' : 'font-medium'}>
+                        {displayName}
+                      </span>
                     {/if}
-                    <span class={result.isCurrentUser ? 'font-medium text-primary' : 'font-medium'}>
-                      {result.display_name || 'You'}
-                    </span>
                     {#if result.isCurrentUser}
                       <Badge variant="secondary" class="text-xs">You</Badge>
                     {/if}
                   </div>
                   <!-- Mobile total -->
-                  <div class="sm:hidden text-xs text-muted-foreground mt-0.5 ml-5">
+                  <div class="sm:hidden text-xs text-muted-foreground mt-0.5">
                     Total: {formatScore(result.total_score)}
                   </div>
                 </Table.Cell>
