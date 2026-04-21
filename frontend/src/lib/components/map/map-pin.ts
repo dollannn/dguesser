@@ -209,7 +209,7 @@ export function createTargetIcon(
   const svg = createTargetSvg({ color, size });
 
   const pulseRing = pulse
-    ? `<div class="map-pin-pulse" style="
+    ? `<div class="map-target-pulse" style="
         position: absolute;
         top: 50%;
         left: 50%;

@@ -82,11 +82,13 @@
     if (animated) {
       setTimeout(() => {
         marker.setOpacity(1);
-        // Add animation class to the icon element
+        // Animate the inner marker content only so Leaflet keeps full control
+        // of the root element's transform-based positioning during pan/zoom.
         const el = marker.getElement();
-        if (el) {
-          el.classList.add('marker-animated');
-          el.style.animationDelay = '0ms';
+        const animatedEl = el?.querySelector<HTMLElement>('.map-pin-container');
+        if (animatedEl) {
+          animatedEl.classList.add('marker-animated');
+          animatedEl.style.animationDelay = '0ms';
         }
       }, delay);
     }
