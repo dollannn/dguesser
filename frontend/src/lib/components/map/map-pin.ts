@@ -207,6 +207,7 @@ export function createTargetIcon(
 ): L.DivIcon {
   const { color = '#22c55e', size = 44, pulse = true } = options;
   const svg = createTargetSvg({ color, size });
+  const pulseSize = Math.round(size * 0.85);
 
   const pulseRing = pulse
     ? `<div class="map-target-pulse" style="
@@ -214,12 +215,13 @@ export function createTargetIcon(
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
-        width: ${size}px;
-        height: ${size}px;
+        width: ${pulseSize}px;
+        height: ${pulseSize}px;
         border-radius: 50%;
-        background-color: ${color};
-        opacity: 0.3;
-        animation: map-pin-pulse 2s ease-out infinite;
+        border: 2px solid ${color};
+        background-color: transparent;
+        opacity: 0;
+        animation: map-target-pulse 2.6s ease-out infinite;
         pointer-events: none;
       "></div>`
     : '';
