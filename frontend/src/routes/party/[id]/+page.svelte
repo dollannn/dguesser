@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { partiesApi } from '$lib/api/parties';
-  import type { PartyDetails } from '$lib/api/parties';
   import { partyStore } from '$lib/socket/party';
   import { user } from '$lib/stores/auth';
   import { authStore } from '$lib/stores/auth';
@@ -19,18 +17,19 @@
   import UsersIcon from '@lucide/svelte/icons/users';
   import CopyIcon from '@lucide/svelte/icons/copy';
   import CheckIcon from '@lucide/svelte/icons/check';
+  import LinkIcon from '@lucide/svelte/icons/link';
   import CrownIcon from '@lucide/svelte/icons/crown';
   import LogOutIcon from '@lucide/svelte/icons/log-out';
   import TrashIcon from '@lucide/svelte/icons/trash-2';
   import XIcon from '@lucide/svelte/icons/x';
 
   let { data } = $props();
-  const partyId = data.partyId;
+  let partyId = $derived(data.partyId);
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let party = $state<PartyDetails | null>(null);
-  let copied = $state(false);
+  let copiedCode = $state(false);
+  let copiedLink = $state(false);
   let starting = $state(false);
 
   let partyState = $derived($partyStore);
@@ -46,34 +45,46 @@
         await authStore.createGuest();
       }
 
-      // Fetch party details via REST
-      party = await partiesApi.get(partyId);
-
-      // Connect via socket
+      // Join via socket so new invitees can enter directly from /party/{id}
       await partyStore.joinParty(partyId);
     } catch (e) {
       console.error('Failed to load party:', e);
-      error = 'Party not found or has been disbanded.';
+      error = e instanceof Error ? e.message : 'Failed to join party';
     } finally {
       loading = false;
     }
   });
 
-  onDestroy(() => {
-    // Don't leave the party on unmount if we're navigating to a game
-    // The party socket room persists alongside the game room
-  });
-
   async function copyCode() {
-    const code = partyState.joinCode || party?.join_code;
+    const code = partyState.joinCode;
     if (!code) return;
+
     try {
       await navigator.clipboard.writeText(code);
-      copied = true;
+      copiedCode = true;
       toast.success('Code copied to clipboard!');
-      setTimeout(() => { copied = false; }, 2000);
+      setTimeout(() => {
+        copiedCode = false;
+      }, 2000);
     } catch {
       toast.error('Failed to copy code');
+    }
+  }
+
+  async function copyLink() {
+    const invitePath = `/party/${partyState.partyId || partyId}`;
+    const inviteLink =
+      typeof window === 'undefined' ? invitePath : new URL(invitePath, window.location.origin).toString();
+
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      copiedLink = true;
+      toast.success('Invite link copied to clipboard!');
+      setTimeout(() => {
+        copiedLink = false;
+      }, 2000);
+    } catch {
+      toast.error('Failed to copy invite link');
     }
   }
 
@@ -125,13 +136,13 @@
       </Card.Content>
     </Card.Root>
   </div>
-{:else if partyState.partyId}
+{:else if partyState.partyId === partyId}
   <div class="container mx-auto px-4 py-6 max-w-2xl space-y-6">
     <!-- Header -->
     <div class="text-center space-y-2">
       <h1 class="text-2xl font-bold">Party Lobby</h1>
       <p class="text-muted-foreground">
-        Share the code below to invite friends
+        Share the code or link below to invite friends
       </p>
     </div>
 
@@ -146,16 +157,25 @@
               >-</span
             >{(partyState.joinCode || '').slice(3)}
           </div>
-          <Button
-            variant="outline"
-            size="icon"
-            onclick={copyCode}
-          >
-            {#if copied}
+        </div>
+
+        <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <Button variant="outline" class="gap-2" onclick={copyCode}>
+            {#if copiedCode}
               <CheckIcon class="h-4 w-4 text-green-500" />
             {:else}
               <CopyIcon class="h-4 w-4" />
             {/if}
+            Copy Code
+          </Button>
+
+          <Button variant="outline" class="gap-2" onclick={copyLink}>
+            {#if copiedLink}
+              <CheckIcon class="h-4 w-4 text-green-500" />
+            {:else}
+              <LinkIcon class="h-4 w-4" />
+            {/if}
+            Copy Link
           </Button>
         </div>
       </Card.Content>
@@ -282,5 +302,9 @@
         {/if}
       </div>
     </div>
+  </div>
+{:else}
+  <div class="flex items-center justify-center h-64">
+    <Spinner class="size-10 text-primary" />
   </div>
 {/if}

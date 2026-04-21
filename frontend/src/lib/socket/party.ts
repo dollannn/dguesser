@@ -87,7 +87,38 @@ function createPartyStore() {
     /** Join a party via socket */
     async joinParty(partyId: string) {
       await socketClient.waitForAuth();
-      socketClient.emit('party:join', { party_id: partyId });
+
+      return new Promise<void>((resolve, reject) => {
+        let offState = () => {};
+        let offError = () => {};
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+          offState();
+          offError();
+        };
+
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('Timed out joining party'));
+        }, 10000);
+
+        offState = socketClient.on<PartyStatePayload>('party:state', (payload) => {
+          if (payload.party_id !== partyId) {
+            return;
+          }
+
+          cleanup();
+          resolve();
+        });
+
+        offError = socketClient.on<{ code: string; message: string }>('party:error', (payload) => {
+          cleanup();
+          reject(new Error(payload.message));
+        });
+
+        socketClient.emit('party:join', { party_id: partyId });
+      });
     },
 
     /** Leave the current party */

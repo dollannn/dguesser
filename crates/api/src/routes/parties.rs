@@ -156,14 +156,14 @@ async fn get_party(
 ) -> Result<Json<PartyDetails>, ApiError> {
     let party = dguesser_db::parties::get_party_by_id(state.db(), &id)
         .await?
-        .ok_or_else(|| ApiError::not_found("Party not found"))?;
+        .ok_or_else(|| ApiError::not_found("Party"))?;
 
     let members = dguesser_db::parties::get_party_members(state.db(), &party.id).await?;
 
     // Verify the user is a member of this party (or it's their own party)
     let is_member = members.iter().any(|m| m.user_id == auth.user_id);
     if !is_member && party.host_id != auth.user_id {
-        return Err(ApiError::not_found("Party not found"));
+        return Err(ApiError::not_found("Party"));
     }
 
     let mut member_details = Vec::new();
