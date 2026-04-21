@@ -311,8 +311,8 @@ pub enum CountryDistribution {
     },
 }
 
-/// Default minimum spread distance between rounds in kilometers.
-/// 500km provides good geographic spread for world maps.
+/// Suggested hard minimum spread distance between rounds in kilometers.
+/// Useful when a map explicitly wants a world-scale spread floor.
 pub const DEFAULT_MIN_SPREAD_DISTANCE_KM: f64 = 500.0;
 
 /// Rules for filtering locations within a map.
@@ -331,17 +331,19 @@ pub struct MapRules {
     /// How to distribute selection across countries
     #[serde(default)]
     pub country_distribution: CountryDistribution,
-    /// Minimum distance (km) between round locations for geographic spread.
-    /// Defaults to 500km for world maps. Set to 0 to disable.
-    /// Smaller maps (countries/regions) should use smaller values (e.g., 50-100km).
+    /// Optional hard minimum distance (km) between round locations.
+    ///
+    /// When unset, the selector still uses relative spread ranking to prefer
+    /// farther-apart candidates, but without a fixed distance floor. Set to 0
+    /// to disable the hard minimum explicitly.
     #[serde(default)]
     pub min_spread_distance_km: Option<f64>,
 }
 
 impl MapRules {
-    /// Get the minimum spread distance, using the default if not set.
-    pub fn min_spread_distance_km(&self) -> f64 {
-        self.min_spread_distance_km.unwrap_or(DEFAULT_MIN_SPREAD_DISTANCE_KM)
+    /// Get the configured hard minimum spread distance, if any.
+    pub fn hard_min_spread_distance_km(&self) -> Option<f64> {
+        self.min_spread_distance_km.filter(|distance| *distance > 0.0)
     }
 }
 
@@ -419,9 +421,35 @@ impl SelectionConstraints {
         Self::default()
     }
 
+    /// Create constraints that use relative spread ranking only.
+    pub fn with_previous_locations(previous_locations: Vec<(f64, f64)>) -> Self {
+        Self { previous_locations, min_distance_meters: 0.0 }
+    }
+
     /// Create constraints with minimum distance from previous locations.
     pub fn with_min_distance(previous_locations: Vec<(f64, f64)>, min_distance_km: f64) -> Self {
         Self { previous_locations, min_distance_meters: min_distance_km * 1000.0 }
+    }
+
+    /// Create constraints with an optional hard minimum distance.
+    pub fn with_optional_min_distance(
+        previous_locations: Vec<(f64, f64)>,
+        min_distance_km: Option<f64>,
+    ) -> Self {
+        match min_distance_km.filter(|distance| *distance > 0.0) {
+            Some(distance) => Self::with_min_distance(previous_locations, distance),
+            None => Self::with_previous_locations(previous_locations),
+        }
+    }
+
+    /// Whether previous locations exist and spread ranking should be applied.
+    pub fn uses_spread_ranking(&self) -> bool {
+        !self.previous_locations.is_empty()
+    }
+
+    /// Whether a hard minimum spread distance is configured.
+    pub fn has_hard_min_distance(&self) -> bool {
+        self.min_distance_meters > 0.0
     }
 }
 
@@ -514,19 +542,34 @@ mod tests {
         assert!(rules.min_year.is_none());
         assert!(!rules.outdoor_only);
         assert!(rules.min_spread_distance_km.is_none());
-        // Default method should return the constant
-        assert_eq!(rules.min_spread_distance_km(), DEFAULT_MIN_SPREAD_DISTANCE_KM);
+        assert_eq!(rules.hard_min_spread_distance_km(), None);
     }
 
     #[test]
     fn test_map_rules_min_spread_distance() {
         // Test custom spread distance
         let rules = MapRules { min_spread_distance_km: Some(100.0), ..Default::default() };
-        assert_eq!(rules.min_spread_distance_km(), 100.0);
+        assert_eq!(rules.hard_min_spread_distance_km(), Some(100.0));
 
         // Test zero disables spread
         let rules = MapRules { min_spread_distance_km: Some(0.0), ..Default::default() };
-        assert_eq!(rules.min_spread_distance_km(), 0.0);
+        assert_eq!(rules.hard_min_spread_distance_km(), None);
+    }
+
+    #[test]
+    fn test_selection_constraints_with_optional_min_distance() {
+        let previous_locations = vec![(1.0, 2.0)];
+
+        let relative_only =
+            SelectionConstraints::with_optional_min_distance(previous_locations.clone(), None);
+        assert!(relative_only.uses_spread_ranking());
+        assert!(!relative_only.has_hard_min_distance());
+
+        let hard_min =
+            SelectionConstraints::with_optional_min_distance(previous_locations, Some(75.0));
+        assert!(hard_min.uses_spread_ranking());
+        assert!(hard_min.has_hard_min_distance());
+        assert_eq!(hard_min.min_distance_meters, 75_000.0);
     }
 
     #[test]

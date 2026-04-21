@@ -3,8 +3,10 @@
 //! This module defines the core types for managing pre-validated Street View locations
 //! and the trait for selecting random locations during gameplay.
 
+mod spread;
 mod types;
 
+pub use spread::{SpreadSelection, select_spread_candidate};
 pub use types::{
     CountryDistribution, DEFAULT_MIN_SPREAD_DISTANCE_KM, GameLocation, Location, LocationError,
     LocationProvider, LocationSource, LocationValidationStatus, Map, MapRules, MapVisibility,

@@ -2,17 +2,16 @@
 //!
 //! This is the main entry point for selecting random locations from R2 packs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use dguesser_core::geo::distance::haversine_distance;
 use dguesser_core::location::{
     CountryDistribution, GameLocation, LocationError, LocationProvider, Map, MapRules,
-    SelectionConstraints,
+    SelectionConstraints, select_spread_candidate,
 };
 
 use crate::bucket::BucketKey;
@@ -533,8 +532,8 @@ impl<R: RangeReader + 'static> LocationProvider for PackProvider<R> {
             let exclude_hashes: Vec<u64> =
                 exclude_ids.iter().map(|id| PackRecord::hash_pano_id(id)).collect();
 
-            // If no distance constraint, use simple selection
-            if constraints.min_distance_meters <= 0.0 || constraints.previous_locations.is_empty() {
+            // If there are no previous round locations, use simple selection.
+            if !constraints.uses_spread_ranking() {
                 let results = self.select_locations(&rules, &exclude_hashes, 1).await?;
                 let (country, record) = results
                     .into_iter()
@@ -543,57 +542,74 @@ impl<R: RangeReader + 'static> LocationProvider for PackProvider<R> {
                 return Ok(record.to_game_location(&country));
             }
 
-            // With distance constraint, fetch multiple candidates and filter
+            // Collect multiple candidates, then rank them by spread.
             const MAX_ATTEMPTS: u32 = 10;
             const CANDIDATES_PER_ATTEMPT: usize = 16;
+            let mut candidates =
+                Vec::with_capacity((MAX_ATTEMPTS as usize) * CANDIDATES_PER_ATTEMPT);
+            let mut seen_hashes = HashSet::new();
 
             for attempt in 0..MAX_ATTEMPTS {
                 let results =
                     self.select_locations(&rules, &exclude_hashes, CANDIDATES_PER_ATTEMPT).await?;
 
-                // Find the first candidate that meets distance requirements
+                let mut added_this_attempt = 0usize;
                 for (country, record) in results {
-                    let is_far_enough =
-                        constraints.previous_locations.iter().all(|(prev_lat, prev_lng)| {
-                            let distance =
-                                haversine_distance(record.lat, record.lng, *prev_lat, *prev_lng);
-                            distance >= constraints.min_distance_meters
-                        });
-
-                    if is_far_enough {
-                        tracing::debug!(
-                            attempt = attempt,
-                            lat = record.lat,
-                            lng = record.lng,
-                            min_distance = constraints.min_distance_meters,
-                            "Found location meeting distance constraint"
-                        );
-                        return Ok(record.to_game_location(&country));
+                    if seen_hashes.insert(record.id_hash) {
+                        candidates.push((country, record));
+                        added_this_attempt += 1;
                     }
                 }
 
                 tracing::debug!(
                     attempt = attempt,
-                    candidates = CANDIDATES_PER_ATTEMPT,
+                    fetched = CANDIDATES_PER_ATTEMPT,
+                    added = added_this_attempt,
+                    collected = candidates.len(),
                     min_distance = constraints.min_distance_meters,
-                    "No candidates met distance constraint, retrying"
+                    "Collected spread-ranking candidates"
                 );
             }
 
-            // If we couldn't find a distant location after max attempts,
-            // fall back to any valid location (better than failing)
-            tracing::warn!(
-                map_id = %map_id,
-                min_distance = constraints.min_distance_meters,
-                previous_count = constraints.previous_locations.len(),
-                "Could not find location meeting distance constraint, falling back"
-            );
+            if candidates.is_empty() {
+                tracing::warn!(
+                    map_id = %map_id,
+                    previous_count = constraints.previous_locations.len(),
+                    "No spread-ranking candidates found, falling back to basic selection"
+                );
 
-            let results = self.select_locations(&rules, &exclude_hashes, 1).await?;
-            let (country, record) = results
-                .into_iter()
-                .next()
+                let results = self.select_locations(&rules, &exclude_hashes, 1).await?;
+                let (country, record) = results
+                    .into_iter()
+                    .next()
+                    .ok_or(LocationError::NoLocationsAvailable(map_id.to_string()))?;
+
+                return Ok(record.to_game_location(&country));
+            }
+
+            let candidate_coords: Vec<(f64, f64)> =
+                candidates.iter().map(|(_, record)| (record.lat, record.lng)).collect();
+            let selection = select_spread_candidate(&candidate_coords, constraints)
                 .ok_or(LocationError::NoLocationsAvailable(map_id.to_string()))?;
+            let (country, record) = candidates.swap_remove(selection.selected_index);
+
+            if constraints.has_hard_min_distance() && !selection.met_min_distance {
+                tracing::warn!(
+                    map_id = %map_id,
+                    spread_score = selection.spread_score_meters,
+                    min_distance = constraints.min_distance_meters,
+                    shortlisted = selection.shortlisted_candidates,
+                    "No candidates met hard minimum distance, using best available spread"
+                );
+            } else {
+                tracing::debug!(
+                    map_id = %map_id,
+                    spread_score = selection.spread_score_meters,
+                    shortlisted = selection.shortlisted_candidates,
+                    hard_min = constraints.min_distance_meters,
+                    "Selected spread-ranked location"
+                );
+            }
 
             Ok(record.to_game_location(&country))
         })

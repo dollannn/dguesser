@@ -1639,28 +1639,29 @@ fn generate_join_code() -> String {
 
 /// Select a location for a round with distance-based spread.
 ///
-/// Uses `SelectionConstraints` to ensure new locations are at least
-/// the map's `min_spread_distance_km` from all previous round locations.
+/// Uses `SelectionConstraints` to rank candidates by spread from previous
+/// round locations, with an optional hard minimum distance when configured.
 async fn select_location(
     provider: &dyn dguesser_core::location::LocationProvider,
     map_id: &str,
     exclude_ids: &[String],
     previous_locations: &[(f64, f64)],
 ) -> LocationData {
-    use dguesser_core::location::{DEFAULT_MIN_SPREAD_DISTANCE_KM, SelectionConstraints};
+    use dguesser_core::location::SelectionConstraints;
 
-    // Get minimum spread distance from the map's rules (or use default)
-    let min_distance_km = provider
-        .get_map(map_id)
-        .await
-        .map(|m| m.rules.min_spread_distance_km())
-        .unwrap_or(DEFAULT_MIN_SPREAD_DISTANCE_KM);
+    // Get optional hard minimum spread distance from the map's rules.
+    let min_distance_km =
+        provider.get_map(map_id).await.ok().and_then(|map| map.rules.hard_min_spread_distance_km());
 
-    // Build constraints from previous locations
-    let constraints = if previous_locations.is_empty() || min_distance_km <= 0.0 {
+    // Build constraints from previous locations. Relative spread applies by default,
+    // and an explicit map rule can add a hard minimum distance floor.
+    let constraints = if previous_locations.is_empty() {
         SelectionConstraints::none()
     } else {
-        SelectionConstraints::with_min_distance(previous_locations.to_vec(), min_distance_km)
+        SelectionConstraints::with_optional_min_distance(
+            previous_locations.to_vec(),
+            min_distance_km,
+        )
     };
 
     match provider.select_location_with_constraints(map_id, exclude_ids, &constraints).await {

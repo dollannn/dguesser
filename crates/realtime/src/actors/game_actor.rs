@@ -912,10 +912,10 @@ impl GameActor {
 
     /// Select a location for a round with distance-based spread.
     ///
-    /// Uses `SelectionConstraints` to ensure new locations are at least
-    /// the map's `min_spread_distance_km` from all previous round locations.
+    /// Uses `SelectionConstraints` to rank candidates by spread from previous
+    /// round locations, with an optional hard minimum distance when configured.
     async fn select_location(&self) -> Result<LocationData, String> {
-        use dguesser_core::location::{DEFAULT_MIN_SPREAD_DISTANCE_KM, SelectionConstraints};
+        use dguesser_core::location::SelectionConstraints;
 
         let state = self.state.as_ref().ok_or("Game not initialized")?;
         let map_id = &state.settings.map_id;
@@ -924,19 +924,20 @@ impl GameActor {
         let previous_locations: Vec<(f64, f64)> =
             state.completed_rounds.iter().map(|r| (r.location_lat, r.location_lng)).collect();
 
-        // Get minimum spread distance from the map's rules (or use default)
+        // Get optional hard minimum spread distance from the map's rules.
         let min_distance_km = self
             .location_provider
             .get_map(map_id)
             .await
-            .map(|m| m.rules.min_spread_distance_km())
-            .unwrap_or(DEFAULT_MIN_SPREAD_DISTANCE_KM);
+            .ok()
+            .and_then(|map| map.rules.hard_min_spread_distance_km());
 
-        // Build constraints from previous locations
-        let constraints = if previous_locations.is_empty() || min_distance_km <= 0.0 {
+        // Build constraints from previous locations. Relative spread applies by default,
+        // and an explicit map rule can add a hard minimum distance floor.
+        let constraints = if previous_locations.is_empty() {
             SelectionConstraints::none()
         } else {
-            SelectionConstraints::with_min_distance(previous_locations, min_distance_km)
+            SelectionConstraints::with_optional_min_distance(previous_locations, min_distance_km)
         };
 
         match self
