@@ -28,7 +28,7 @@
     showReportButton = true,
   }: Props = $props();
 
-  let container: HTMLDivElement;
+  let container = $state<HTMLDivElement | null>(null);
   let panorama: google.maps.StreetViewPanorama | null = null;
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -36,6 +36,9 @@
   let showReportMenu = $state(false);
   let reportSubmitting = $state(false);
   let reportSuccess = $state(false);
+  let activeLoadId = 0;
+  let destroyed = false;
+  let loadTimeout: ReturnType<typeof setTimeout> | null = null;
 
   type ReportReason = 'corrupted' | 'low_quality' | 'indoor' | 'restricted' | 'other';
 
@@ -77,12 +80,80 @@
     }
   }
 
+  function isActiveLoad(loadId: number): boolean {
+    return !destroyed && loadId === activeLoadId;
+  }
+
+  function clearLoadTimeout() {
+    if (loadTimeout) {
+      clearTimeout(loadTimeout);
+      loadTimeout = null;
+    }
+  }
+
+  function startLoad(): number {
+    clearLoadTimeout();
+    activeLoadId += 1;
+    loading = true;
+    error = null;
+    noCoverage = false;
+    showReportMenu = false;
+    loadTimeout = setTimeout(() => {
+      failLoad(activeLoadId, 'Street View is taking too long to load. Please try again.');
+    }, 15000);
+    return activeLoadId;
+  }
+
+  function finishLoad(loadId: number) {
+    if (!isActiveLoad(loadId)) return;
+    clearLoadTimeout();
+    loading = false;
+  }
+
+  function failLoad(loadId: number, message: string) {
+    if (!isActiveLoad(loadId)) return;
+    clearLoadTimeout();
+    error = message;
+    loading = false;
+  }
+
+  function markNoCoverage(loadId: number) {
+    if (!isActiveLoad(loadId)) return;
+    clearLoadTimeout();
+    noCoverage = true;
+    loading = false;
+    void autoReportNoCoverage();
+  }
+
+  function findNearbyPanorama(loadId: number) {
+    const sv = new google.maps.StreetViewService();
+    sv.getPanorama({ location: { lat, lng }, radius: 1000 }, (data, svStatus) => {
+      if (!isActiveLoad(loadId)) return;
+
+      if (svStatus === google.maps.StreetViewStatus.OK && data?.location?.pano) {
+        console.log('[StreetView] Found nearby panorama:', data.location.pano);
+        panorama?.setPano(data.location.pano);
+        return;
+      }
+
+      console.error('[StreetView] No Street View coverage within 1km');
+      markNoCoverage(loadId);
+    });
+  }
+
   onMount(async () => {
     if (!browser) return;
+
+    const loadId = startLoad();
 
     try {
       // Load Google Maps API first
       await loadGoogleMaps();
+      if (!isActiveLoad(loadId)) return;
+      if (!container) {
+        failLoad(loadId, 'Failed to initialize Street View container');
+        return;
+      }
 
       console.log('[StreetView] Initializing with:', { lat, lng, panoramaId, heading });
 
@@ -114,24 +185,25 @@
 
       // Listen for status changes to detect issues
       panorama.addListener('status_changed', () => {
+        if (!isActiveLoad(loadId)) return;
+
         const status = panorama?.getStatus();
         console.log('[StreetView] Status changed:', status);
+
+        if (status === google.maps.StreetViewStatus.OK) {
+          finishLoad(loadId);
+          return;
+        }
+
         if (status === google.maps.StreetViewStatus.ZERO_RESULTS && !triedFallback) {
           triedFallback = true;
           console.warn('[StreetView] Panorama ID failed, falling back to coordinates');
-          // Fallback: use StreetViewService to find nearest panorama
-          const sv = new google.maps.StreetViewService();
-          sv.getPanorama({ location: { lat, lng }, radius: 1000 }, (data, svStatus) => {
-            if (svStatus === google.maps.StreetViewStatus.OK && data?.location?.pano) {
-              console.log('[StreetView] Found nearby panorama:', data.location.pano);
-              panorama?.setPano(data.location.pano);
-            } else {
-              // No coverage found - show error to user (MAP-003)
-              console.error('[StreetView] No Street View coverage within 1km');
-              noCoverage = true;
-              autoReportNoCoverage();
-            }
-          });
+          findNearbyPanorama(loadId);
+          return;
+        }
+
+        if (status === google.maps.StreetViewStatus.ZERO_RESULTS) {
+          markNoCoverage(loadId);
         }
       });
 
@@ -142,18 +214,7 @@
       } else {
         // No panorama ID - use StreetViewService to find one near coordinates
         console.log('[StreetView] No panorama ID, searching near coordinates');
-        const sv = new google.maps.StreetViewService();
-        sv.getPanorama({ location: { lat, lng }, radius: 1000 }, (data, svStatus) => {
-          if (svStatus === google.maps.StreetViewStatus.OK && data?.location?.pano) {
-            console.log('[StreetView] Found panorama:', data.location.pano);
-            panorama?.setPano(data.location.pano);
-          } else {
-            // No coverage found - show error to user (MAP-003)
-            console.error('[StreetView] No Street View coverage at coordinates');
-            noCoverage = true;
-            autoReportNoCoverage();
-          }
-        });
+        findNearbyPanorama(loadId);
       }
 
       // Disable keyboard movement if not allowed
@@ -162,48 +223,20 @@
           clickToGo: false,
         });
       }
-
-      loading = false;
     } catch (e) {
       console.error('Failed to load Google Maps:', e);
-      error = e instanceof Error ? e.message : 'Failed to load Street View';
-      loading = false;
+      failLoad(loadId, e instanceof Error ? e.message : 'Failed to load Street View');
     }
   });
 
   onDestroy(() => {
+    destroyed = true;
+    clearLoadTimeout();
+
     // Clean up Google Maps listeners (MAP-008)
     if (panorama) {
       google.maps.event.clearInstanceListeners(panorama);
       panorama = null;
-    }
-  });
-
-  // React to location changes
-  $effect(() => {
-    if (panorama && Number.isFinite(lat) && Number.isFinite(lng)) {
-      // Reset no coverage state when location changes
-      noCoverage = false;
-      
-      // Set heading if provided
-      if (heading !== null) {
-        panorama.setPov({ heading, pitch: 0 });
-      }
-      
-      if (panoramaId) {
-        console.log('[StreetView] Location changed, setting panorama:', panoramaId);
-        panorama.setPano(panoramaId);
-      } else {
-        console.log('[StreetView] Location changed, searching near:', { lat, lng });
-        const sv = new google.maps.StreetViewService();
-        sv.getPanorama({ location: { lat, lng }, radius: 1000 }, (data, status) => {
-          if (status === google.maps.StreetViewStatus.OK && data?.location?.pano) {
-            panorama?.setPano(data.location.pano);
-          } else {
-            noCoverage = true;
-          }
-        });
-      }
     }
   });
 </script>
@@ -244,6 +277,16 @@
       class:opacity-100={!loading}
       style="transition: opacity 0.3s ease-in-out;"
     ></div>
+
+    {#if loading}
+      <div class="absolute inset-0 z-10 flex items-center justify-center bg-gray-950/70 backdrop-blur-sm">
+        <div class="text-center text-white px-4">
+          <div class="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+          <p class="text-lg font-medium mb-1">Loading Street View...</p>
+          <p class="text-sm text-gray-300">Preparing the panorama for this round.</p>
+        </div>
+      </div>
+    {/if}
 
     <!-- Report Location Button -->
     {#if showReportButton && locationId && !loading}

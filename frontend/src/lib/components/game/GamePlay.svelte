@@ -30,6 +30,16 @@
 
   let gameState = $derived($gameStore);
   let canSubmit = $derived(guessLat !== null && guessLng !== null && !gameState.hasGuessed);
+  let streetViewKey = $derived.by(() => {
+    const location = gameState.location;
+    if (!location) return 'no-location';
+
+    return [
+      gameState.currentRound,
+      location.panorama_id ?? `${location.lat},${location.lng}`,
+      location.heading ?? 'no-heading',
+    ].join(':');
+  });
 
   function handleMapClick(coords: { lat: number; lng: number }) {
     if (gameState.hasGuessed) return;
@@ -128,16 +138,19 @@
   <!-- Street View (full screen background) -->
   {#if gameState.location}
     <div class="absolute inset-0 w-full h-full">
-      <StreetView
-        lat={gameState.location.lat}
-        lng={gameState.location.lng}
-        panoramaId={gameState.location.panorama_id}
-        locationId={gameState.location.location_id}
-        movementAllowed={game.settings.movement_allowed}
-        zoomAllowed={game.settings.zoom_allowed}
-        rotationAllowed={game.settings.rotation_allowed}
-        showReportButton={true}
-      />
+      {#key streetViewKey}
+        <StreetView
+          lat={gameState.location.lat}
+          lng={gameState.location.lng}
+          panoramaId={gameState.location.panorama_id}
+          locationId={gameState.location.location_id}
+          heading={gameState.location.heading}
+          movementAllowed={game.settings.movement_allowed}
+          zoomAllowed={game.settings.zoom_allowed}
+          rotationAllowed={game.settings.rotation_allowed}
+          showReportButton={true}
+        />
+      {/key}
     </div>
   {:else}
     <!-- Loading state when no location -->

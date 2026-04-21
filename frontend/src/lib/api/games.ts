@@ -59,6 +59,7 @@ export interface Location {
   lat: number;
   lng: number;
   panorama_id: string | null;
+  heading?: number | null;
   /** Location ID for reporting (loc_xxxxxxxxxxxx) */
   location_id?: string | null;
 }
