@@ -19,10 +19,11 @@ use dguesser_db::DbPool;
 use dguesser_protocol::socket::events;
 use dguesser_protocol::socket::payloads::{
     FinalStanding, GameAbandonedPayload, GameEndPayload, GameSettingsPayload, GameStatePayload,
-    PlayerDisconnectedPayload, PlayerGuessedPayload, PlayerInfo, PlayerJoinedPayload,
-    PlayerLeftPayload, PlayerReconnectedPayload, PlayerScoreInfo, PlayerTimeoutPayload,
-    RoundEndPayload, RoundLocation, RoundResult, RoundStartPayload, ScoresUpdatePayload,
-    SettingsUpdatedPayload,
+    GameTransitionClearedPayload, GameTransitioningPayload, PlayerDisconnectedPayload,
+    PlayerGuessedPayload, PlayerInfo, PlayerJoinedPayload, PlayerLeftPayload,
+    PlayerReconnectedPayload, PlayerScoreInfo, PlayerTimeoutPayload, RoundEndPayload,
+    RoundLocation, RoundResult, RoundStartPayload, ScoresUpdatePayload, SettingsUpdatedPayload,
+    TransitionPhase,
 };
 use tokio::sync::mpsc;
 
@@ -58,6 +59,10 @@ pub struct GameActor {
     cleanup_tx: Option<mpsc::Sender<String>>,
     /// Channel to notify a party when this game ends (party_id, game_id)
     party_notify_tx: Option<mpsc::Sender<(String, String)>>,
+    /// Currently in-flight transition that has been broadcast to the room but not
+    /// yet superseded by `round:start` / `game:end`. Used to emit a compensating
+    /// `game:transition_cleared` event if the follow-up work fails.
+    pending_transition: Option<TransitionPhase>,
 }
 
 impl GameActor {
@@ -81,6 +86,7 @@ impl GameActor {
             location_provider,
             cleanup_tx: None,
             party_notify_tx: None,
+            pending_transition: None,
         }
     }
 
@@ -558,6 +564,23 @@ impl GameActor {
 
     /// Handle game start
     async fn handle_start(&mut self, user_id: &str) -> Result<(), String> {
+        match self.try_start(user_id).await {
+            Ok(()) => {
+                // `round:start` was broadcast; transition is superseded.
+                self.consume_pending_transition();
+                Ok(())
+            }
+            Err(e) => {
+                // If we had already broadcast the transition before failing, emit a
+                // compensating clear so non-initiator clients don't spin forever.
+                self.clear_transition_if_pending("start_failed").await;
+                Err(e)
+            }
+        }
+    }
+
+    /// Fallible inner start path; wrapped by `handle_start` for cleanup.
+    async fn try_start(&mut self, user_id: &str) -> Result<(), String> {
         let state = self.state.as_ref().ok_or("Game not initialized")?;
         let now = Utc::now();
 
@@ -583,6 +606,11 @@ impl GameActor {
             return Err(self.extract_error_message(&result));
         }
 
+        // Broadcast the transition so every client in the room can show a loading
+        // state while we perform the (potentially slow) DB writes below. The
+        // subsequent `round:start` broadcast supersedes this state.
+        self.broadcast_transitioning(TransitionPhase::Starting, Some(user_id)).await;
+
         // Update database status
         dguesser_db::games::update_game_status(
             &self.db,
@@ -599,7 +627,7 @@ impl GameActor {
             None
         };
 
-        let db_round = dguesser_db::games::create_round(
+        let db_round = match dguesser_db::games::create_round(
             &self.db,
             &self.game_id,
             1,
@@ -611,7 +639,29 @@ impl GameActor {
             time_limit_ms.map(|t| t as i32),
         )
         .await
-        .map_err(|e| e.to_string())?;
+        {
+            Ok(r) => r,
+            Err(create_err) => {
+                // Roll the game status back to Lobby synchronously so the DB
+                // doesn't remain Active-with-no-round. Done inline (not spawned)
+                // to avoid racing subsequent successful starts. The actor loop
+                // is serial, so no further handle_start can run until we return.
+                if let Err(rollback_err) = dguesser_db::games::update_game_status(
+                    &self.db,
+                    &self.game_id,
+                    dguesser_db::GameStatus::Lobby,
+                )
+                .await
+                {
+                    tracing::error!(
+                        error = %rollback_err,
+                        game_id = %self.game_id,
+                        "Failed to roll back game status after round creation failure"
+                    );
+                }
+                return Err(create_err.to_string());
+            }
+        };
 
         if let Err(e) = dguesser_db::games::start_round(&self.db, &db_round.id).await {
             tracing::error!(error = %e, game_id = %self.game_id, "Failed to mark round as started in DB");
@@ -773,7 +823,8 @@ impl GameActor {
 
         // If between-rounds wait expired, advance to next round or end game
         if between_rounds_expired {
-            self.advance_or_end_game().await;
+            // Tick-driven advancement: no user initiator.
+            self.advance_or_end_game(None).await;
         }
     }
 
@@ -854,7 +905,7 @@ impl GameActor {
         self.broadcast_events(&result.events).await;
 
         // Advance immediately
-        self.advance_or_end_game().await;
+        self.advance_or_end_game(Some(user_id)).await;
 
         Ok(())
     }
@@ -877,7 +928,7 @@ impl GameActor {
         self.broadcast_events(&result.events).await;
 
         if vote_passed {
-            self.advance_or_end_game().await;
+            self.advance_or_end_game(Some(user_id)).await;
         }
 
         Ok(())
@@ -885,24 +936,41 @@ impl GameActor {
 
     /// Advance to the next round or end the game.
     ///
-    /// Called when the between-rounds wait is skipped or expires.
-    async fn advance_or_end_game(&mut self) {
+    /// Called when the between-rounds wait is skipped or expires. Broadcasts a
+    /// `game:transitioning` event to every client in the room so they can render
+    /// a loading state while DB writes run. `initiated_by` is `None` for the
+    /// tick-driven path (natural countdown expiry).
+    async fn advance_or_end_game(&mut self, initiated_by: Option<&str>) {
         let should_end = self.state.as_ref().is_some_and(|s| s.round_number >= s.settings.rounds);
+
+        let phase =
+            if should_end { TransitionPhase::EndingGame } else { TransitionPhase::AdvancingRound };
+        self.broadcast_transitioning(phase, initiated_by).await;
 
         let result = if should_end { self.end_game().await } else { self.start_next_round().await };
 
-        if let Err(e) = result {
-            tracing::error!(
-                error = %e,
-                game_id = %self.game_id,
-                "Failed to advance game, re-arming between-rounds timer"
-            );
-            // Re-arm the timer so the tick will retry
-            if let Some(state) = self.state.as_mut() {
-                let retry_ms = 5_000; // Retry in 5 seconds
-                state.between_rounds_ends_at = Some(Utc::now().timestamp_millis() + retry_ms);
+        match result {
+            Ok(()) => {
+                // `round:start` or `game:end` was broadcast; transition is superseded.
+                self.consume_pending_transition();
             }
-            self.force_save_state_to_redis().await;
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    game_id = %self.game_id,
+                    "Failed to advance game, re-arming between-rounds timer"
+                );
+                // Clear the spinner on every client in the room so they aren't stuck
+                // during the retry window.
+                let reason = if should_end { "end_game_failed" } else { "advance_failed" };
+                self.clear_transition_if_pending(reason).await;
+                // Re-arm the timer so the tick will retry.
+                if let Some(state) = self.state.as_mut() {
+                    let retry_ms = 5_000; // Retry in 5 seconds
+                    state.between_rounds_ends_at = Some(Utc::now().timestamp_millis() + retry_ms);
+                }
+                self.force_save_state_to_redis().await;
+            }
         }
     }
 
@@ -1409,6 +1477,72 @@ impl GameActor {
             .emit_to_room(&self.game_id, events::server::PLAYER_GUESSED, &payload)
             .await
             .ok();
+    }
+
+    /// Broadcast a game transition (starting, advancing round, ending game).
+    ///
+    /// Clients render a loading state while the server performs the next step;
+    /// the subsequent `round:start` or `game:end` broadcast clears it, OR
+    /// `clear_transition_if_pending()` emits a compensating `game:transition_cleared`
+    /// on failure.
+    async fn broadcast_transitioning(
+        &mut self,
+        phase: TransitionPhase,
+        initiated_by: Option<&str>,
+    ) {
+        let payload =
+            GameTransitioningPayload { phase, initiated_by: initiated_by.map(str::to_string) };
+        match self
+            .emitter
+            .emit_to_room(&self.game_id, events::server::GAME_TRANSITIONING, &payload)
+            .await
+        {
+            Ok(_) => {
+                self.pending_transition = Some(phase);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    game_id = %self.game_id,
+                    ?phase,
+                    "Failed to broadcast game:transitioning"
+                );
+            }
+        }
+    }
+
+    /// Clear any pending transition broadcast by emitting `game:transition_cleared`.
+    ///
+    /// Called from the error paths that follow a `broadcast_transitioning(...)`
+    /// call to recover non-initiator clients that would otherwise be stuck on a
+    /// loading indicator forever.
+    ///
+    /// Also called implicitly by the success paths (which emit `round:start` /
+    /// `game:end` and do not need a clear event) — in that case this is a no-op.
+    async fn clear_transition_if_pending(&mut self, reason: &'static str) {
+        let Some(phase) = self.pending_transition.take() else { return };
+        let payload = GameTransitionClearedPayload { phase, reason: Some(reason.to_string()) };
+        if let Err(e) = self
+            .emitter
+            .emit_to_room(&self.game_id, events::server::GAME_TRANSITION_CLEARED, &payload)
+            .await
+        {
+            tracing::warn!(
+                error = %e,
+                game_id = %self.game_id,
+                ?phase,
+                reason,
+                "Failed to broadcast game:transition_cleared"
+            );
+        }
+    }
+
+    /// Mark any pending transition as consumed without broadcasting a clear.
+    ///
+    /// Called by the success paths (`round:start`, `game:end`) which implicitly
+    /// supersede the transition on the client side.
+    fn consume_pending_transition(&mut self) {
+        self.pending_transition = None;
     }
 
     /// Broadcast round start

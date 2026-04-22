@@ -311,7 +311,7 @@
 
         <!-- Submit -->
         <div class="pt-4">
-          <Button onclick={createMap} disabled={creating} class="w-full">
+          <Button onclick={createMap} loading={creating} class="w-full">
             {creating ? 'Creating...' : 'Create Map & Add Locations'}
           </Button>
         </div>

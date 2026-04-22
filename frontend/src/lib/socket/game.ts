@@ -130,6 +130,34 @@ export interface GameAbandonedPayload {
   reason: string;
 }
 
+/** Phase of a server-broadcast game transition */
+export type TransitionPhase = 'starting' | 'advancing_round' | 'ending_game';
+
+/** Broadcast: the game is transitioning between phases (server → client). */
+export interface GameTransitioningPayload {
+  phase: TransitionPhase;
+  /** User ID that triggered the transition (null for server-driven transitions). */
+  initiated_by?: string | null;
+}
+
+/** Broadcast: an in-flight game transition was cleared (e.g. DB write failed). */
+export interface GameTransitionClearedPayload {
+  phase: TransitionPhase;
+  /** Optional reason code (e.g. 'start_failed', 'advance_failed'). */
+  reason?: string | null;
+}
+
+/** Active game transition tracked in the store. */
+export interface GameTransition {
+  phase: TransitionPhase;
+  initiatedBy: string | null;
+  /** Timestamp (ms) the transition broadcast was received, for watchdog. */
+  startedAt: number;
+}
+
+/** Watchdog window after which clients clear a stuck transition locally. */
+export const TRANSITION_WATCHDOG_MS = 15_000;
+
 /** Live scores update payload */
 export interface ScoresUpdatePayload {
   round_number: number;
@@ -194,6 +222,8 @@ export interface GameState {
   skipVotesRequired: number;
   /** Whether the current user has voted to skip */
   hasVotedToSkip: boolean;
+  /** Active server-broadcast transition, or null if none in flight. */
+  transition: GameTransition | null;
 }
 
 function createGameStore() {
@@ -220,9 +250,36 @@ function createGameStore() {
     skipVotes: 0,
     skipVotesRequired: 0,
     hasVotedToSkip: false,
+    transition: null,
   };
 
   const { subscribe, set, update } = writable<GameState>(initialState);
+
+  /** Local watchdog timer: if a transition doesn't resolve within N seconds,
+   *  we clear it ourselves so the UI recovers even if the server fails to emit
+   *  a `round:start` / `game:end` / `game:transition_cleared` follow-up. */
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+
+  function clearWatchdog() {
+    if (watchdog !== null) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    }
+  }
+
+  function armWatchdog() {
+    clearWatchdog();
+    watchdog = setTimeout(() => {
+      watchdog = null;
+      update((s) => (s.transition ? { ...s, transition: null } : s));
+    }, TRANSITION_WATCHDOG_MS);
+  }
+
+  /** Helper: merge a clear of any in-flight transition into a state patch. */
+  function withClearedTransition<T extends Partial<GameState>>(patch: T): T & { transition: null } {
+    clearWatchdog();
+    return { ...patch, transition: null };
+  }
 
   return {
     subscribe,
@@ -242,6 +299,7 @@ function createGameStore() {
         socketClient.emit('game:leave', { game_id: currentState.gameId });
       }
       socketClient.setActiveGame(null, null);
+      clearWatchdog();
       set(initialState);
     },
 
@@ -367,6 +425,7 @@ function createGameStore() {
         status = 'round_end' as GameState['status'];
       }
 
+      clearWatchdog();
       update((s) => ({
         ...s,
         gameId: payload.game_id,
@@ -387,33 +446,64 @@ function createGameStore() {
         skipVotes: payload.skip_votes?.votes ?? 0,
         skipVotesRequired: payload.skip_votes?.required ?? 0,
         hasVotedToSkip: payload.skip_vote_user_ids?.includes(getCurrentUserId() ?? '') ?? false,
+        // Full state sync is authoritative: clear any in-flight transition.
+        transition: null,
       }));
+    },
+
+    /** Handle server broadcast that the game is transitioning phases. */
+    handleGameTransitioning(payload: GameTransitioningPayload): void {
+      armWatchdog();
+      update((s) => ({
+        ...s,
+        transition: {
+          phase: payload.phase,
+          initiatedBy: payload.initiated_by ?? null,
+          startedAt: Date.now(),
+        },
+      }));
+    },
+
+    /** Handle server broadcast that an in-flight transition was cleared. */
+    handleGameTransitionCleared(payload: GameTransitionClearedPayload): void {
+      update((s) => {
+        // Only clear if we're still on the matching phase. A late/stale clear
+        // for a phase we've since moved past must not cancel a newer transition.
+        if (!s.transition || s.transition.phase !== payload.phase) {
+          return s;
+        }
+        clearWatchdog();
+        return { ...s, transition: null };
+      });
     },
 
     handleRoundStart(payload: RoundStartPayload): void {
       // Game is now active - update phase for reconnection logic
       socketClient.setActiveGamePhase('active');
+      clearWatchdog();
 
-      update((s) => ({
-        ...s,
-        status: 'playing',
-        currentRound: payload.round_number,
-        totalRounds: payload.total_rounds,
-        location: payload.location,
-        timeLimit: payload.time_limit_ms,
-        roundStartedAt: payload.started_at,
-        timeRemainingMs: payload.time_limit_ms,
-        hasGuessed: false,
-        results: [],
-        players: new Map(
-          [...s.players].map(([id, p]) => [id, { ...p, hasGuessed: false }])
-        ),
-        // Reset between-rounds state
-        nextRoundAt: null,
-        skipVotes: 0,
-        skipVotesRequired: 0,
-        hasVotedToSkip: false,
-      }));
+      update((s) =>
+        withClearedTransition({
+          ...s,
+          status: 'playing',
+          currentRound: payload.round_number,
+          totalRounds: payload.total_rounds,
+          location: payload.location,
+          timeLimit: payload.time_limit_ms,
+          roundStartedAt: payload.started_at,
+          timeRemainingMs: payload.time_limit_ms,
+          hasGuessed: false,
+          results: [],
+          players: new Map(
+            [...s.players].map(([id, p]) => [id, { ...p, hasGuessed: false }])
+          ),
+          // Reset between-rounds state
+          nextRoundAt: null,
+          skipVotes: 0,
+          skipVotesRequired: 0,
+          hasVotedToSkip: false,
+        }),
+      );
     },
 
     handlePlayerGuessed(payload: PlayerGuessedPayload): void {
@@ -479,11 +569,14 @@ function createGameStore() {
 
     handleGameEnd(payload: GameEndPayload): void {
       socketClient.setActiveGame(null, null);
-      update((s) => ({
-        ...s,
-        status: 'finished',
-        finalStandings: payload.final_standings,
-      }));
+      clearWatchdog();
+      update((s) =>
+        withClearedTransition({
+          ...s,
+          status: 'finished',
+          finalStandings: payload.final_standings,
+        }),
+      );
     },
 
     hydrateSoloFinished(payload: {
@@ -492,30 +585,35 @@ function createGameStore() {
       rounds: RoundEndPayload[];
     }): void {
       socketClient.setActiveGame(null, null);
-      update((s) => ({
-        ...s,
-        gameId: payload.game_id,
-        status: 'finished',
-        currentRound: payload.rounds.length,
-        totalRounds: payload.rounds.length,
-        results: payload.rounds.at(-1)?.results ?? [],
-        location: payload.rounds.at(-1)?.correct_location ?? null,
-        roundHistory: payload.rounds.map((round) => round.results),
-        roundLocations: payload.rounds.map((round) => round.correct_location),
-        finalStandings: payload.final_standings,
-        nextRoundAt: null,
-        skipVotes: 0,
-        skipVotesRequired: 0,
-        hasVotedToSkip: false,
-      }));
+      clearWatchdog();
+      update((s) =>
+        withClearedTransition({
+          ...s,
+          gameId: payload.game_id,
+          status: 'finished',
+          currentRound: payload.rounds.length,
+          totalRounds: payload.rounds.length,
+          results: payload.rounds.at(-1)?.results ?? [],
+          location: payload.rounds.at(-1)?.correct_location ?? null,
+          roundHistory: payload.rounds.map((round) => round.results),
+          roundLocations: payload.rounds.map((round) => round.correct_location),
+          finalStandings: payload.final_standings,
+          nextRoundAt: null,
+          skipVotes: 0,
+          skipVotesRequired: 0,
+          hasVotedToSkip: false,
+        }),
+      );
     },
 
     /** Handle game abandoned (all players disconnected for too long) */
     handleGameAbandoned(payload: GameAbandonedPayload): void {
       socketClient.setActiveGame(null, null);
+      clearWatchdog();
       update((s) => ({
         ...s,
         status: 'finished',
+        transition: null,
         finalStandings: [],
       }));
       toastStore.add('error', `Game abandoned: ${payload.reason}`);
@@ -542,6 +640,7 @@ function createGameStore() {
       if (payload.user_id === currentUserId) {
         // We were removed from the game - clear state and prevent auto-rejoin
         socketClient.setActiveGame(null, null);
+        clearWatchdog();
         set(initialState);
         toastStore.add('info', 'You have left the game.');
         return;
@@ -628,6 +727,7 @@ function createGameStore() {
 
     reset(): void {
       socketClient.setActiveGame(null, null);
+      clearWatchdog();
       set(initialState);
     },
   };
@@ -662,6 +762,12 @@ export function initGameSocketListeners(): () => void {
     }),
     socketClient.on<GameEndPayload>('game:end', (data) => {
       gameStore.handleGameEnd(data);
+    }),
+    socketClient.on<GameTransitioningPayload>('game:transitioning', (data) => {
+      gameStore.handleGameTransitioning(data);
+    }),
+    socketClient.on<GameTransitionClearedPayload>('game:transition_cleared', (data) => {
+      gameStore.handleGameTransitionCleared(data);
     }),
     socketClient.on<GameAbandonedPayload>('game:abandoned', (data) => {
       gameStore.handleGameAbandoned(data);

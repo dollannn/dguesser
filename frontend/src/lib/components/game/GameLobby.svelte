@@ -4,12 +4,12 @@
   import { user } from '$lib/stores/auth';
   import { gameStore } from '$lib/socket/game';
   import { Button } from '$lib/components/ui/button';
+  import { Spinner } from '$lib/components/ui/spinner';
   import * as Card from '$lib/components/ui/card';
   import { Badge } from '$lib/components/ui/badge';
   import * as Avatar from '$lib/components/ui/avatar';
   import { Separator } from '$lib/components/ui/separator';
   import GameSettingsForm from './GameSettingsForm.svelte';
-  import LoaderIcon from '@lucide/svelte/icons/loader';
   import PlayIcon from '@lucide/svelte/icons/play';
   import UsersIcon from '@lucide/svelte/icons/users';
   import TargetIcon from '@lucide/svelte/icons/target';
@@ -238,22 +238,33 @@
     <Card.Footer class="pt-6">
       <div class="w-full text-center">
         {#if canJoin}
-          <Button onclick={joinGame} size="lg" class="w-full sm:w-auto px-8" disabled={isJoining}>
-            <UsersIcon class="size-5" />
+          <Button onclick={joinGame} size="lg" class="w-full sm:w-auto px-8" loading={isJoining}>
+            {#if !isJoining}
+              <UsersIcon class="size-5" />
+            {/if}
             {isJoining ? 'Joining...' : 'Join Game'}
           </Button>
         {:else if canStart}
-          <Button onclick={onStart} size="lg" class="w-full sm:w-auto px-8" disabled={isStarting}>
-            {#if isStarting}
-              <LoaderIcon class="size-5 animate-spin" />
-              Starting...
-            {:else}
+          <Button onclick={onStart} size="lg" class="w-full sm:w-auto px-8" loading={isStarting}>
+            {#if !isStarting}
               <PlayIcon class="size-5" />
-              Start Game
             {/if}
+            {isStarting ? 'Starting...' : 'Start Game'}
           </Button>
         {:else if !isHost}
-          <p class="text-muted-foreground">Waiting for host to start the game...</p>
+          {#if isStarting}
+            <!-- Status row (announced to screen readers via role="status"). -->
+            <div
+              class="inline-flex items-center justify-center gap-2 text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              <Spinner aria-hidden="true" class="size-4" />
+              <span>Host is starting the game...</span>
+            </div>
+          {:else}
+            <p class="text-muted-foreground">Waiting for host to start the game...</p>
+          {/if}
         {:else}
           <p class="text-muted-foreground">Need at least 2 players to start</p>
         {/if}

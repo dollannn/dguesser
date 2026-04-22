@@ -24,6 +24,10 @@ pub mod server {
     pub const GAME_ABANDONED: &str = "game:abandoned";
     /// Skip vote update (broadcast current vote count)
     pub const SKIP_VOTE_UPDATE: &str = "round:skip_votes";
+    /// Game transition announcement (starting, advancing to next round, ending)
+    pub const GAME_TRANSITIONING: &str = "game:transitioning";
+    /// Game transition was cancelled (e.g. DB write failed). Clients clear loading UI.
+    pub const GAME_TRANSITION_CLEARED: &str = "game:transition_cleared";
 }
 
 /// Socket.IO event names (client -> server)

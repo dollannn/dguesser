@@ -21,7 +21,9 @@
   let error = $state('');
   let autoStarting = $state(false);
   let isStarting = $state(false);
+  let isAdvancing = $state(false);
   let startTimeout: ReturnType<typeof setTimeout> | null = null;
+  let autoStartTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Game ID from route params - guaranteed to exist for [id] route
   let gameId = $derived($page.params.id as string);
@@ -66,6 +68,14 @@
             setTimeout(() => {
               gameStore.startGame();
             }, 500);
+            // Watchdog: if the server never confirms the start, recover to the
+            // lobby UI so the host isn't stuck on the auto-start spinner.
+            autoStartTimeout = setTimeout(() => {
+              if (autoStarting) {
+                autoStarting = false;
+                toast.error('Failed to auto-start game. Please try again.');
+              }
+            }, 15000);
           }
         }
         // New players will click "Join Game" button
@@ -149,38 +159,72 @@
   $effect(() => {
     if (gameState.status === 'playing' || gameState.status === 'round_end') {
       isStarting = false;
+      autoStarting = false;
       if (startTimeout) {
         clearTimeout(startTimeout);
         startTimeout = null;
       }
+      if (autoStartTimeout) {
+        clearTimeout(autoStartTimeout);
+        autoStartTimeout = null;
+      }
+    }
+    // Clear solo round-advance flag once the next round is active
+    if (gameState.status === 'playing') {
+      isAdvancing = false;
     }
   });
 
-  // Clear starting state on socket errors
+  // Clear starting state on socket errors or explicit transition-cleared events.
   $effect(() => {
     if (!$page.params.id) return;
 
-    const unsub = socketClient.on<{ code: string; message: string }>('error', (data) => {
+    const clearStartingFlags = () => {
+      isStarting = false;
+      autoStarting = false;
+      if (startTimeout) {
+        clearTimeout(startTimeout);
+        startTimeout = null;
+      }
+      if (autoStartTimeout) {
+        clearTimeout(autoStartTimeout);
+        autoStartTimeout = null;
+      }
+    };
+
+    const unsubError = socketClient.on<{ code: string; message: string }>('error', (data) => {
       if (
-        isStarting &&
+        (isStarting || autoStarting) &&
         (data.code === 'START_FAILED' ||
           data.code === 'NOT_HOST' ||
           data.code === 'GAME_NOT_FOUND')
       ) {
-        isStarting = false;
-        if (startTimeout) {
-          clearTimeout(startTimeout);
-          startTimeout = null;
-        }
+        clearStartingFlags();
       }
     });
 
-    return unsub;
+    // If the server cancels the transition (e.g. start failed mid-flight), clear
+    // local optimistic flags too.
+    const unsubCleared = socketClient.on<{ phase: string; reason?: string | null }>(
+      'game:transition_cleared',
+      (data) => {
+        if (data.phase === 'starting' && (isStarting || autoStarting)) {
+          clearStartingFlags();
+          toast.error('Failed to start game. Please try again.');
+        }
+      }
+    );
+
+    return () => {
+      unsubError();
+      unsubCleared();
+    };
   });
 
   onDestroy(() => {
     gameStore.leaveGame();
     if (startTimeout) clearTimeout(startTimeout);
+    if (autoStartTimeout) clearTimeout(autoStartTimeout);
   });
 
   async function startGame() {
@@ -220,7 +264,8 @@
   }
 
   async function handleNextRound() {
-    if (!game || !gameId) return;
+    if (!game || !gameId || isAdvancing) return;
+    isAdvancing = true;
 
     try {
       const round = await gamesApi.nextRound(gameId);
@@ -233,6 +278,7 @@
       });
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to start next round';
+      isAdvancing = false;
     }
   }
 </script>
@@ -255,11 +301,17 @@
       <p class="text-lg text-muted-foreground">Starting game...</p>
     </div>
   {:else if gameState.status === 'idle' || gameState.status === 'lobby'}
-    <GameLobby {game} onStart={startGame} {isStarting} />
+    <!-- `isStarting` is set locally by the clicking host; we also show the spinner
+         to every other client when the server broadcasts a `starting` transition. -->
+    <GameLobby
+      {game}
+      onStart={startGame}
+      isStarting={isStarting || gameState.transition?.phase === 'starting'}
+    />
   {:else if gameState.status === 'playing'}
     <GamePlay {game} />
   {:else if gameState.status === 'round_end'}
-    <GameRoundEnd {game} onNextRound={handleNextRound} />
+    <GameRoundEnd {game} onNextRound={handleNextRound} {isAdvancing} />
   {:else if gameState.status === 'finished'}
     <GameFinished {game} />
   {/if}

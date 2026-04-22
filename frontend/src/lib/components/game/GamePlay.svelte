@@ -6,7 +6,6 @@
   import { user } from '$lib/stores/auth';
   import Send from '@lucide/svelte/icons/send';
   import CheckCircle from '@lucide/svelte/icons/check-circle';
-  import Loader2 from '@lucide/svelte/icons/loader-2';
 
   import StreetView from './StreetView.svelte';
   import LeafletMap from './LeafletMap.svelte';
@@ -255,12 +254,12 @@
         {#if !gameState.hasGuessed}
           <Button
             onclick={submitGuess}
-            disabled={!canSubmit || submitting}
+            disabled={!canSubmit}
+            loading={submitting}
             size="lg"
             class="w-full shadow-lg gap-2"
           >
             {#if submitting}
-              <Loader2 class="w-5 h-5 animate-spin" />
               Guessing...
             {:else}
               <Send class="w-5 h-5" />

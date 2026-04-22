@@ -356,8 +356,10 @@
 
           <!-- Save button -->
           <div class="flex items-center gap-3 pt-2">
-            <Button onclick={saveMap} disabled={saving}>
-              <SaveIcon class="w-4 h-4 mr-2" />
+            <Button onclick={saveMap} loading={saving}>
+              {#if !saving}
+                <SaveIcon class="w-4 h-4" />
+              {/if}
               {saving ? 'Saving...' : 'Save Changes'}
             </Button>
             {#if saved}

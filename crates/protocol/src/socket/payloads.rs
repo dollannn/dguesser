@@ -502,3 +502,46 @@ pub struct PartyErrorPayload {
     pub code: String,
     pub message: String,
 }
+
+/// Phase of a broadcast game transition.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionPhase {
+    /// Game is starting from the lobby.
+    Starting,
+    /// Advancing from between-rounds to the next round.
+    AdvancingRound,
+    /// Final round wrapping up, moving to end-of-game results.
+    EndingGame,
+}
+
+/// Server broadcast: the game is transitioning between phases.
+///
+/// Emitted to every client in the game room so all participants can render
+/// a loading state while the server performs the (potentially slow) work of
+/// advancing the game. The subsequent `round:start` or `game:end` event
+/// supersedes this state.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GameTransitioningPayload {
+    /// What kind of transition is happening.
+    pub phase: TransitionPhase,
+    /// User that triggered the transition, if any.
+    /// `None` means the server triggered it (e.g. between-rounds timer expired).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initiated_by: Option<String>,
+}
+
+/// Server broadcast: an in-flight game transition was cleared/cancelled.
+///
+/// Emitted when the server-side work following a `game:transitioning` broadcast
+/// fails (e.g. a DB write error). Clients clear their loading UI and may show
+/// a recoverable error; the authoritative game state is unchanged from before
+/// the transition broadcast.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GameTransitionClearedPayload {
+    /// Which transition was cleared (matches the phase we previously emitted).
+    pub phase: TransitionPhase,
+    /// Optional short code describing why it was cleared (e.g. `"start_failed"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}

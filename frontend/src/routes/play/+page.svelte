@@ -22,11 +22,13 @@
   import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 
   let joinCode = $state('');
-  let loading = $state(false);
+  let loadingAction = $state<'solo' | 'multiplayer' | 'party' | 'join' | null>(null);
+  let loading = $derived(loadingAction !== null);
   let error = $state('');
 
   async function startSoloGame() {
-    loading = true;
+    if (loading) return;
+    loadingAction = 'solo';
     error = '';
 
     try {
@@ -35,16 +37,17 @@
       }
 
       const game = await gamesApi.create({ mode: 'solo' });
-      goto(`/game/${game.id}`);
+      await goto(`/game/${game.id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to start game';
     } finally {
-      loading = false;
+      loadingAction = null;
     }
   }
 
   async function createMultiplayerGame() {
-    loading = true;
+    if (loading) return;
+    loadingAction = 'multiplayer';
     error = '';
 
     try {
@@ -53,18 +56,18 @@
       }
 
       const game = await gamesApi.create({ mode: 'multiplayer' });
-      goto(`/game/${game.id}`);
+      await goto(`/game/${game.id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to create game';
     } finally {
-      loading = false;
+      loadingAction = null;
     }
   }
 
   async function joinByCode() {
-    if (!joinCode.trim()) return;
+    if (!joinCode.trim() || loading) return;
 
-    loading = true;
+    loadingAction = 'join';
     error = '';
 
     try {
@@ -75,19 +78,20 @@
       // Unified lookup: checks parties first, then games
       const result = await partiesApi.joinByCode(joinCode.trim().toUpperCase());
       if (result.type === 'party') {
-        goto(`/party/${result.id}`);
+        await goto(`/party/${result.id}`);
       } else {
-        goto(`/game/${result.id}`);
+        await goto(`/game/${result.id}`);
       }
     } catch (e) {
       error = e instanceof Error ? e.message : 'Invalid code';
     } finally {
-      loading = false;
+      loadingAction = null;
     }
   }
 
   async function createParty() {
-    loading = true;
+    if (loading) return;
+    loadingAction = 'party';
     error = '';
 
     try {
@@ -96,11 +100,11 @@
       }
 
       const party = await partiesApi.create();
-      goto(`/party/${party.id}`);
+      await goto(`/party/${party.id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to create party';
     } finally {
-      loading = false;
+      loadingAction = null;
     }
   }
 
@@ -165,9 +169,16 @@
         </ul>
       </Card.Content>
       <Card.Footer>
-        <Button onclick={startSoloGame} disabled={loading} class="w-full">
-          <PlayIcon class="size-4" />
-          {loading ? 'Starting...' : 'Play Solo'}
+        <Button
+          onclick={startSoloGame}
+          disabled={loading && loadingAction !== 'solo'}
+          loading={loadingAction === 'solo'}
+          class="w-full"
+        >
+          {#if loadingAction !== 'solo'}
+            <PlayIcon class="size-4" />
+          {/if}
+          {loadingAction === 'solo' ? 'Starting...' : 'Play Solo'}
         </Button>
       </Card.Footer>
     </Card.Root>
@@ -187,12 +198,28 @@
       </Card.Header>
       <Card.Content class="space-y-4">
         <div class="grid grid-cols-2 gap-2">
-          <Button variant="outline" onclick={createMultiplayerGame} disabled={loading} class="w-full">
-            <UsersIcon class="size-4" />
+          <Button
+            variant="outline"
+            onclick={createMultiplayerGame}
+            disabled={loading && loadingAction !== 'multiplayer'}
+            loading={loadingAction === 'multiplayer'}
+            class="w-full"
+          >
+            {#if loadingAction !== 'multiplayer'}
+              <UsersIcon class="size-4" />
+            {/if}
             Quick Game
           </Button>
-          <Button variant="outline" onclick={createParty} disabled={loading} class="w-full">
-            <PartyPopperIcon class="size-4" />
+          <Button
+            variant="outline"
+            onclick={createParty}
+            disabled={loading && loadingAction !== 'party'}
+            loading={loadingAction === 'party'}
+            class="w-full"
+          >
+            {#if loadingAction !== 'party'}
+              <PartyPopperIcon class="size-4" />
+            {/if}
             Create Party
           </Button>
         </div>
@@ -218,10 +245,13 @@
           <Button
             variant="secondary"
             onclick={joinByCode}
-            disabled={loading || !joinCode.trim()}
+            disabled={(loading && loadingAction !== 'join') || !joinCode.trim()}
+            loading={loadingAction === 'join'}
           >
-            Join
-            <ArrowRightIcon class="size-4" />
+            {loadingAction === 'join' ? 'Joining...' : 'Join'}
+            {#if loadingAction !== 'join'}
+              <ArrowRightIcon class="size-4" />
+            {/if}
           </Button>
         </div>
       </Card.Content>

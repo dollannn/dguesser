@@ -6,6 +6,7 @@
   import { toast } from 'svelte-sonner';
   import { formatScore } from '$lib/utils';
   import { Button } from '$lib/components/ui/button';
+  import { Spinner } from '$lib/components/ui/spinner';
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
   import { Badge } from '$lib/components/ui/badge';
@@ -25,7 +26,6 @@
   import LogOutIcon from '@lucide/svelte/icons/log-out';
   import CheckIcon from '@lucide/svelte/icons/check';
   import XIcon from '@lucide/svelte/icons/x';
-  import LoaderIcon from '@lucide/svelte/icons/loader';
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
   import SEO from '$lib/components/SEO.svelte';
 
@@ -316,15 +316,14 @@
                   </div>
 
                   <div class="flex gap-2">
-                    <Button 
-                      onclick={saveProfile} 
-                      disabled={isSavingProfile || !!usernameError}
+                    <Button
+                      onclick={saveProfile}
+                      disabled={!!usernameError}
+                      loading={isSavingProfile}
                       size="sm"
                     >
-                      {#if isSavingProfile}
-                        <LoaderIcon class="w-4 h-4 mr-2 animate-spin" />
-                      {:else}
-                        <CheckIcon class="w-4 h-4 mr-2" />
+                      {#if !isSavingProfile}
+                        <CheckIcon class="w-4 h-4" />
                       {/if}
                       Save Changes
                     </Button>
@@ -518,15 +517,16 @@
                       </p>
                     </div>
                     {#if !session.is_current}
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onclick={() => revokeSession(session.id)}
-                        disabled={revokingSession === session.id}
+                        loading={revokingSession === session.id}
+                        aria-label={revokingSession === session.id
+                          ? 'Revoking session...'
+                          : 'Revoke session'}
                       >
-                        {#if revokingSession === session.id}
-                          <LoaderIcon class="w-4 h-4 animate-spin" />
-                        {:else}
+                        {#if revokingSession !== session.id}
                           <XIcon class="w-4 h-4" />
                         {/if}
                       </Button>
@@ -584,7 +584,7 @@
                       <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
                       <AlertDialog.Action onclick={deleteAccount} disabled={isDeleting}>
                         {#if isDeleting}
-                          <LoaderIcon class="w-4 h-4 mr-2 animate-spin" />
+                          <Spinner aria-hidden="true" class="mr-2" />
                         {/if}
                         Yes, delete my account
                       </AlertDialog.Action>

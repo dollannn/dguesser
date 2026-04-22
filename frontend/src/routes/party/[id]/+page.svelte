@@ -229,6 +229,7 @@
                   size="icon"
                   class="h-7 w-7 text-muted-foreground hover:text-destructive"
                   onclick={() => handleKick(member.user_id)}
+                  aria-label="Kick {member.display_name}"
                 >
                   <XIcon class="h-4 w-4" />
                 </Button>
@@ -261,10 +262,13 @@
         <Button
           size="lg"
           class="w-full gap-2"
-          disabled={!canStart || starting}
+          disabled={!canStart}
+          loading={starting}
           onclick={handleStart}
         >
-          <PlayIcon class="h-5 w-5" />
+          {#if !starting}
+            <PlayIcon class="h-5 w-5" />
+          {/if}
           {#if memberCount < 2}
             Need at least 2 players
           {:else if starting}

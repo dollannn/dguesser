@@ -6,6 +6,7 @@
   import { getRankDisplay, getRankClass, formatScore, formatDistance } from '$lib/utils.js';
   import { MARKER_CONFIG } from '$lib/config/map';
   import { Button } from '$lib/components/ui/button';
+  import { Spinner } from '$lib/components/ui/spinner';
   import { Badge } from '$lib/components/ui/badge';
   import * as Card from '$lib/components/ui/card';
   import * as Table from '$lib/components/ui/table';
@@ -13,7 +14,6 @@
   import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import MapPinIcon from '@lucide/svelte/icons/map-pin';
-  import Loader2Icon from '@lucide/svelte/icons/loader-2';
   import SkipForwardIcon from '@lucide/svelte/icons/skip-forward';
   import VoteIcon from '@lucide/svelte/icons/hand';
   import CheckIcon from '@lucide/svelte/icons/check';
@@ -22,14 +22,20 @@
   interface Props {
     game: GameDetails;
     onNextRound?: () => void;
+    isAdvancing?: boolean;
   }
 
-  let { game, onNextRound }: Props = $props();
+  let { game, onNextRound, isAdvancing = false }: Props = $props();
 
   let gameState = $derived($gameStore);
   let results = $derived(gameState.results);
   let correctLocation = $derived(gameState.location);
-  
+
+  // Server-broadcast transition flags (shown to everyone in the room).
+  // Derived from the single `transition` object in the store.
+  let isTransitioningRound = $derived(gameState.transition?.phase === 'advancing_round');
+  let isTransitioningEnd = $derived(gameState.transition?.phase === 'ending_game');
+
   // For solo mode: auto-transition to finished after last round
   let isLastRound = $derived(gameState.currentRound >= gameState.totalRounds);
   
@@ -285,58 +291,80 @@
     <div class="flex flex-col items-center gap-3 pt-2">
       {#if gameState.currentRound < gameState.totalRounds}
         {#if game.mode === 'solo' && onNextRound}
-          <Button size="lg" onclick={onNextRound} class="gap-2">
-            Continue to Round {gameState.currentRound + 1}
-            <ArrowRightIcon class="h-5 w-5" />
+          <Button size="lg" onclick={onNextRound} loading={isAdvancing} class="gap-2">
+            {#if isAdvancing}
+              Loading Round {gameState.currentRound + 1}...
+            {:else}
+              Continue to Round {gameState.currentRound + 1}
+              <ArrowRightIcon class="h-5 w-5" />
+            {/if}
           </Button>
         {:else}
           <!-- Multiplayer between-rounds: countdown + skip/vote controls -->
           <Card.Root class="w-full max-w-sm">
             <Card.Content class="flex flex-col items-center gap-4 py-5 px-6">
-              <!-- Countdown timer -->
-              {#if countdownSeconds !== null && countdownSeconds > 0}
+              {#if isTransitioningRound}
+                <!-- Transition in progress: single status row, no button clutter. -->
+                <div
+                  class="flex items-center gap-2 text-primary"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Spinner aria-hidden="true" class="h-5 w-5" />
+                  <span class="font-medium">Starting next round...</span>
+                </div>
+              {:else if countdownSeconds !== null && countdownSeconds > 0}
                 <div class="flex items-center gap-2 text-muted-foreground">
                   <TimerIcon class="h-5 w-5" />
                   <span class="font-medium">
                     Next round in <span class="text-foreground font-bold tabular-nums">{countdownSeconds}s</span>
                   </span>
                 </div>
+
+                <!-- Skip/Vote controls only visible while waiting. -->
+                {#if isHost}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onclick={() => gameStore.skipWait()}
+                    class="gap-2"
+                  >
+                    <SkipForwardIcon class="h-4 w-4" />
+                    Skip Wait
+                  </Button>
+                {:else}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onclick={() => gameStore.voteSkip()}
+                    disabled={gameState.hasVotedToSkip}
+                    class="gap-2"
+                  >
+                    {#if gameState.hasVotedToSkip}
+                      <CheckIcon class="h-4 w-4" />
+                      Voted to Skip
+                    {:else}
+                      <VoteIcon class="h-4 w-4" />
+                      Vote to Skip
+                    {/if}
+                  </Button>
+                {/if}
+
+                {#if gameState.skipVotesRequired > 0}
+                  <p class="text-xs text-muted-foreground">
+                    {gameState.skipVotes}/{gameState.skipVotesRequired} voted to skip
+                  </p>
+                {/if}
               {:else}
-                <div class="flex items-center gap-2">
-                  <Loader2Icon class="h-5 w-5 animate-spin text-primary" />
+                <!-- Countdown hit zero but server hasn't broadcast yet. -->
+                <div
+                  class="flex items-center gap-2 text-primary"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Spinner aria-hidden="true" class="h-5 w-5" />
                   <span class="font-medium">Starting next round...</span>
                 </div>
-              {/if}
-
-              <!-- Skip/Vote controls -->
-              {#if isHost}
-                <Button size="sm" variant="secondary" onclick={() => gameStore.skipWait()} class="gap-2">
-                  <SkipForwardIcon class="h-4 w-4" />
-                  Skip Wait
-                </Button>
-              {:else}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onclick={() => gameStore.voteSkip()}
-                  disabled={gameState.hasVotedToSkip}
-                  class="gap-2"
-                >
-                  {#if gameState.hasVotedToSkip}
-                    <CheckIcon class="h-4 w-4" />
-                    Voted to Skip
-                  {:else}
-                    <VoteIcon class="h-4 w-4" />
-                    Vote to Skip
-                  {/if}
-                </Button>
-              {/if}
-
-              <!-- Vote count -->
-              {#if gameState.skipVotesRequired > 0}
-                <p class="text-xs text-muted-foreground">
-                  {gameState.skipVotes}/{gameState.skipVotesRequired} voted to skip
-                </p>
               {/if}
             </Card.Content>
           </Card.Root>
@@ -345,9 +373,8 @@
         <!-- Last round -->
         {#if game.mode === 'solo'}
           <!-- Solo: skip to results -->
-          <Button size="lg" onclick={skipToResults} disabled={isTransitioning} class="gap-2">
+          <Button size="lg" onclick={skipToResults} loading={isTransitioning} class="gap-2">
             {#if isTransitioning}
-              <Loader2Icon class="h-5 w-5 animate-spin" />
               Loading Results...
             {:else}
               <TrophyIcon class="h-5 w-5" />
@@ -363,47 +390,65 @@
           <!-- Multiplayer last round: same countdown + skip UI, server sends game:end -->
           <Card.Root class="w-full max-w-sm">
             <Card.Content class="flex flex-col items-center gap-4 py-5 px-6">
-              {#if countdownSeconds !== null && countdownSeconds > 0}
+              {#if isTransitioningEnd}
+                <div
+                  class="flex items-center gap-2 text-primary"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Spinner aria-hidden="true" class="h-5 w-5" />
+                  <span class="font-medium">Loading final results...</span>
+                </div>
+              {:else if countdownSeconds !== null && countdownSeconds > 0}
                 <div class="flex items-center gap-2 text-muted-foreground">
                   <TimerIcon class="h-5 w-5" />
                   <span class="font-medium">
                     Final results in <span class="text-foreground font-bold tabular-nums">{countdownSeconds}s</span>
                   </span>
                 </div>
+
+                {#if isHost}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onclick={() => gameStore.skipWait()}
+                    class="gap-2"
+                  >
+                    <SkipForwardIcon class="h-4 w-4" />
+                    Skip Wait
+                  </Button>
+                {:else}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onclick={() => gameStore.voteSkip()}
+                    disabled={gameState.hasVotedToSkip}
+                    class="gap-2"
+                  >
+                    {#if gameState.hasVotedToSkip}
+                      <CheckIcon class="h-4 w-4" />
+                      Voted to Skip
+                    {:else}
+                      <VoteIcon class="h-4 w-4" />
+                      Vote to Skip
+                    {/if}
+                  </Button>
+                {/if}
+
+                {#if gameState.skipVotesRequired > 0}
+                  <p class="text-xs text-muted-foreground">
+                    {gameState.skipVotes}/{gameState.skipVotesRequired} voted to skip
+                  </p>
+                {/if}
               {:else}
-                <div class="flex items-center gap-2">
-                  <Loader2Icon class="h-5 w-5 animate-spin text-primary" />
+                <div
+                  class="flex items-center gap-2 text-primary"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Spinner aria-hidden="true" class="h-5 w-5" />
                   <span class="font-medium">Loading final results...</span>
                 </div>
-              {/if}
-
-              {#if isHost}
-                <Button size="sm" variant="secondary" onclick={() => gameStore.skipWait()} class="gap-2">
-                  <SkipForwardIcon class="h-4 w-4" />
-                  Skip Wait
-                </Button>
-              {:else}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onclick={() => gameStore.voteSkip()}
-                  disabled={gameState.hasVotedToSkip}
-                  class="gap-2"
-                >
-                  {#if gameState.hasVotedToSkip}
-                    <CheckIcon class="h-4 w-4" />
-                    Voted to Skip
-                  {:else}
-                    <VoteIcon class="h-4 w-4" />
-                    Vote to Skip
-                  {/if}
-                </Button>
-              {/if}
-
-              {#if gameState.skipVotesRequired > 0}
-                <p class="text-xs text-muted-foreground">
-                  {gameState.skipVotes}/{gameState.skipVotesRequired} voted to skip
-                </p>
               {/if}
             </Card.Content>
           </Card.Root>
