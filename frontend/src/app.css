@@ -356,6 +356,375 @@
 }
 
 /* =============================================================================
+ * Results Map — Cluster Token & Spread
+ *
+ * When multiple player pins would overlap on screen, they collapse into a
+ * single "cluster token": a small circular marker with a count. On click the
+ * cluster either spreads its members radially (<6 members) or opens a list
+ * popover (>=6 members). Desktop users also get a hover-preview popover after
+ * a short delay.
+ * ============================================================================= */
+
+/* Cluster token (collapsed state) */
+.cluster-token-icon {
+  /* Remove Leaflet's default icon background. */
+  background: transparent !important;
+  border: none !important;
+}
+
+.cluster-token {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--cluster-size);
+  height: var(--cluster-size);
+  border-radius: 9999px;
+  background: var(--cluster-fill);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 4px 10px rgba(15, 23, 42, 0.22);
+  cursor: pointer;
+  transition:
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out,
+    background-color 120ms ease-out;
+  outline: none;
+}
+
+.cluster-token:hover,
+.cluster-token:focus-visible {
+  transform: translateY(-1px) scale(1.04);
+  background: var(--cluster-fill-dark);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 1),
+    0 6px 14px rgba(15, 23, 42, 0.32);
+}
+
+.cluster-token:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.9);
+  outline-offset: 3px;
+}
+
+.cluster-token.is-active {
+  background: var(--cluster-fill-dark);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 1),
+    0 0 0 4px rgba(59, 130, 246, 0.35),
+    0 6px 14px rgba(15, 23, 42, 0.32);
+}
+
+.cluster-token.is-highlighted {
+  animation: cluster-token-pulse 1.2s ease-in-out infinite;
+}
+
+/* Thin decorative segmented ring previewing member colors. */
+.cluster-token-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  background: var(--cluster-ring);
+  opacity: 0.9;
+  pointer-events: none;
+  /* Ring sits *behind* the body — use a mask to create a 2px ring shape. */
+  -webkit-mask:
+    radial-gradient(circle, transparent 0 52%, black 53%);
+  mask:
+    radial-gradient(circle, transparent 0 52%, black 53%);
+}
+
+.cluster-token-body {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+}
+
+.cluster-token-label {
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+
+@keyframes cluster-token-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(255, 255, 255, 1),
+      0 0 0 4px rgba(59, 130, 246, 0.25),
+      0 4px 10px rgba(15, 23, 42, 0.22);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(255, 255, 255, 1),
+      0 0 0 8px rgba(59, 130, 246, 0.15),
+      0 6px 14px rgba(15, 23, 42, 0.32);
+  }
+}
+
+/* Highlight ring on a singleton pin when its row is hovered in the table. */
+.map-pin-container.is-highlighted {
+  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.55)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.3));
+  transform: scale(1.1);
+  transition:
+    transform 120ms cubic-bezier(0.16, 1, 0.3, 1),
+    filter 120ms ease-out;
+}
+
+/* Spread-out members when a cluster is opened in radial mode. */
+.cluster-spread-member {
+  animation: cluster-spread-in var(--spread-duration, 150ms) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.cluster-spread-member.cluster-spread-out {
+  animation: cluster-spread-out 90ms ease-in both;
+}
+
+@keyframes cluster-spread-in {
+  from {
+    transform: translate(var(--spread-from-x, 0), var(--spread-from-y, 0));
+    opacity: 0;
+  }
+  to {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes cluster-spread-out {
+  from {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  to {
+    transform: translate(var(--spread-from-x, 0), var(--spread-from-y, 0));
+    opacity: 0;
+  }
+}
+
+/* Tooltips on spread members fade in concurrently with the spread motion. */
+.leaflet-tooltip.cluster-spread-tooltip {
+  animation: cluster-tooltip-reveal 150ms ease-out both;
+}
+
+@keyframes cluster-tooltip-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =============================================================================
+ * Cluster Popover (list reveal)
+ *
+ * Used for 6+ member clusters on click, and for any cluster on desktop hover
+ * preview. Absolutely positioned inside the results map wrapper.
+ * ============================================================================= */
+
+.cluster-popover {
+  position: absolute;
+  z-index: 900;
+  min-width: 220px;
+  max-width: 300px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 12px 28px rgba(15, 23, 42, 0.22);
+  animation: cluster-popover-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.cluster-popover-preview {
+  pointer-events: auto;
+}
+
+@keyframes cluster-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.cluster-popover-arrow {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.cluster-popover-below .cluster-popover-arrow {
+  top: -6px;
+  bottom: auto;
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+
+.cluster-popover-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cluster-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--foreground);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  outline: none;
+  transition: background-color 100ms ease-out;
+}
+
+.cluster-popover-row:hover,
+.cluster-popover-row:focus-visible {
+  background-color: rgba(59, 130, 246, 0.12);
+}
+
+.cluster-popover-row:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.7);
+  outline-offset: -2px;
+}
+
+.cluster-popover-row.is-you {
+  background-color: rgba(59, 130, 246, 0.08);
+  font-weight: 600;
+}
+
+.cluster-popover-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.cluster-popover-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cluster-popover-you {
+  font-size: 10px;
+  font-weight: 600;
+  color: #2563eb;
+  background: rgba(59, 130, 246, 0.14);
+  padding: 1px 6px;
+  border-radius: 9999px;
+  letter-spacing: 0.02em;
+}
+
+.cluster-popover-distance {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dark mode */
+.dark .cluster-popover {
+  background: rgba(30, 30, 40, 0.96);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.dark .cluster-popover-arrow {
+  background: rgba(30, 30, 40, 0.96);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.dark .cluster-popover-row:hover,
+.dark .cluster-popover-row:focus-visible {
+  background-color: rgba(59, 130, 246, 0.18);
+}
+.dark .cluster-popover-row.is-you {
+  background-color: rgba(59, 130, 246, 0.12);
+}
+.dark .cluster-popover-you {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.24);
+}
+
+/* =============================================================================
+ * Reduced motion overrides
+ *
+ * The cluster UI favors accessibility over flourish when the user has
+ * prefers-reduced-motion set: no spread animation, no pulse, no scale.
+ * Reveal and popover entrance still fade but without transform.
+ * ============================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  .cluster-spread-member,
+  .cluster-spread-member.cluster-spread-out {
+    animation: none;
+  }
+  .leaflet-tooltip.cluster-spread-tooltip {
+    animation: none;
+  }
+  .cluster-popover {
+    animation: none;
+  }
+  .cluster-token.is-highlighted {
+    animation: none;
+    box-shadow:
+      0 0 0 2px rgba(255, 255, 255, 1),
+      0 0 0 6px rgba(59, 130, 246, 0.3),
+      0 4px 10px rgba(15, 23, 42, 0.22);
+  }
+  .cluster-token:hover,
+  .cluster-token:focus-visible {
+    transform: none;
+  }
+  .map-pin-container.is-highlighted {
+    transform: none;
+  }
+}
+
+/* =============================================================================
  * Summary Map Styles (GameFinished)
  * ============================================================================= */
 

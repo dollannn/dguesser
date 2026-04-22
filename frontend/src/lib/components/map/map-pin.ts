@@ -242,6 +242,122 @@ export function createTargetIcon(
 }
 
 /**
+ * Options for the overlapping-player cluster token icon.
+ */
+export interface ClusterTokenOptions {
+  /** Total number of players represented by this token. */
+  count: number;
+  /** True when the current user is one of the cluster members. */
+  containsCurrentUser: boolean;
+  /** Member colors in display order; used for the segmented ring preview. */
+  memberColors: string[];
+  /** Size in pixels (default 34). */
+  size?: number;
+  /** Optional accessible label for the underlying button element. */
+  ariaLabel?: string;
+  /** Optional extra class(es) for the container (e.g., focus / active state). */
+  className?: string;
+}
+
+/**
+ * Creates a Leaflet DivIcon representing a group of overlapping player pins.
+ *
+ * Design:
+ *   - 34px circular token (dark slate, or blue when the current user is inside)
+ *   - White numeric label in the center: "N" or "You +N" when appropriate
+ *   - Subtle segmented conic-gradient ring previewing member colors (not the
+ *     primary identity signal — just a hint that multiple distinct players
+ *     live inside)
+ *   - `role="button"` + `tabindex="0"` so keyboard users can activate it
+ */
+export function createClusterTokenIcon(
+  L: typeof import('leaflet'),
+  options: ClusterTokenOptions,
+): L.DivIcon {
+  const {
+    count,
+    containsCurrentUser,
+    memberColors,
+    size = 34,
+    ariaLabel,
+    className = '',
+  } = options;
+
+  const fill = containsCurrentUser ? '#3b82f6' : '#1e293b';
+  const darkFill = containsCurrentUser ? '#2563eb' : '#0f172a';
+  const labelText = containsCurrentUser
+    ? `You +${Math.max(0, count - 1)}`
+    : `${count}`;
+
+  // Build the segmented conic gradient ring. Colors repeat if there are fewer
+  // than 6 unique palette entries; the ring is purely decorative.
+  const ring = buildSegmentedRing(memberColors);
+
+  const aria = ariaLabel
+    ? `role="button" tabindex="0" aria-label="${escapeAttr(ariaLabel)}"`
+    : 'role="button" tabindex="0"';
+
+  const fontSize = containsCurrentUser ? Math.round(size * 0.34) : Math.round(size * 0.44);
+  const paddingX = containsCurrentUser ? Math.round(size * 0.12) : 0;
+
+  const html = `
+    <div
+      class="cluster-token ${className}"
+      ${aria}
+      style="
+        --cluster-size: ${size}px;
+        --cluster-fill: ${fill};
+        --cluster-fill-dark: ${darkFill};
+        --cluster-ring: ${ring};
+        width: ${size}px;
+        height: ${size}px;
+      "
+    >
+      <div class="cluster-token-ring"></div>
+      <div class="cluster-token-body">
+        <span class="cluster-token-label" style="font-size: ${fontSize}px; padding: 0 ${paddingX}px;">${escapeAttr(labelText)}</span>
+      </div>
+    </div>
+  `.trim();
+
+  return L.divIcon({
+    className: 'map-pin-icon cluster-token-icon',
+    html,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2], // centered — unlike teardrop pins
+  });
+}
+
+function buildSegmentedRing(colors: string[]): string {
+  if (colors.length === 0) {
+    return 'conic-gradient(rgba(255,255,255,0.35) 0 360deg)';
+  }
+  // Use at most 8 segments so the ring stays readable; repeat if fewer.
+  const segments = colors.slice(0, 8);
+  const step = 360 / segments.length;
+  const gapDeg = 4; // small dark gap between segments
+  const parts: string[] = [];
+  for (let i = 0; i < segments.length; i += 1) {
+    const start = i * step;
+    const end = (i + 1) * step - gapDeg;
+    const gapStart = end;
+    const gapEnd = (i + 1) * step;
+    parts.push(`${segments[i]} ${start}deg ${end}deg`);
+    parts.push(`rgba(15, 23, 42, 0.55) ${gapStart}deg ${gapEnd}deg`);
+  }
+  return `conic-gradient(from -90deg, ${parts.join(', ')})`;
+}
+
+function escapeAttr(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+/**
  * Creates a Leaflet DivIcon with a numbered circle.
  * Used in game summary map for round markers.
  */

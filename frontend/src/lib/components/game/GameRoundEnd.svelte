@@ -174,6 +174,24 @@
 
   // Current user's ID for the map component
   let currentUserId = $derived($user?.id ?? '');
+
+  // Bi-directional highlight state shared between the table and the map.
+  // Hover / focus on a table row highlights the corresponding marker (or
+  // cluster containing that member); hover on a marker highlights the row.
+  let highlightedUserId = $state<string | null>(null);
+
+  function handleRowHover(userId: string, hasMarker: boolean) {
+    if (!hasMarker) return;
+    highlightedUserId = userId;
+  }
+
+  function handleRowLeave(userId: string) {
+    if (highlightedUserId === userId) highlightedUserId = null;
+  }
+
+  function handleMarkerHover(userId: string | null) {
+    highlightedUserId = userId;
+  }
 </script>
 
 <div class="min-h-screen bg-background p-4 md:p-6 pt-20 md:pt-24">
@@ -206,6 +224,8 @@
                 color: playerColorMap.get(r.user_id),
               }))}
             {currentUserId}
+            {highlightedUserId}
+            onMarkerHover={handleMarkerHover}
           />
         {/if}
       </div>
@@ -238,8 +258,19 @@
               {@const markerColor = playerColorMap.get(result.user_id)}
               {@const displayName = getResultDisplayName(result.display_name, result.isCurrentUser)}
               {@const hasMarker = result.distance_meters >= 0}
-              <Table.Row 
-                class={result.isCurrentUser ? 'bg-primary/5' : ''}
+              {@const isHighlighted = highlightedUserId === result.user_id && hasMarker}
+              <Table.Row
+                class={[
+                  result.isCurrentUser ? 'bg-primary/5' : '',
+                  isHighlighted ? 'bg-accent/60' : '',
+                  hasMarker ? 'cursor-pointer transition-colors' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onmouseenter={() => handleRowHover(result.user_id, hasMarker)}
+                onmouseleave={() => handleRowLeave(result.user_id)}
+                onfocusin={() => handleRowHover(result.user_id, hasMarker)}
+                onfocusout={() => handleRowLeave(result.user_id)}
               >
                 <Table.Cell class="pl-6 font-semibold">
                   <span class={getRankClass(result.rank)}>
