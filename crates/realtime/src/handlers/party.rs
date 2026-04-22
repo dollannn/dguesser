@@ -278,6 +278,8 @@ pub async fn handle_join_party<A: Adapter>(
         }
     };
 
+    socket.join(party.id.clone());
+
     // Send join command
     let (tx, rx) = oneshot::channel();
     if handle
@@ -292,20 +294,22 @@ pub async fn handle_join_party<A: Adapter>(
         .await
         .is_err()
     {
+        socket.leave(party.id.clone());
         emit_error(&socket, "PARTY_ERROR", "Failed to join party");
         return;
     }
 
     match rx.await {
         Ok(Ok(())) => {
-            socket.join(party.id.clone());
             socket.emit("party:joined", &serde_json::json!({ "party_id": party.id })).ok();
             tracing::info!(user_id = %user_id, party_id = %party.id, "User joined party");
         }
         Ok(Err(err)) => {
+            socket.leave(party.id.clone());
             emit_error(&socket, "JOIN_FAILED", &err);
         }
         Err(_) => {
+            socket.leave(party.id.clone());
             emit_error(&socket, "PARTY_ERROR", "Party actor unavailable");
         }
     }
@@ -324,8 +328,11 @@ pub async fn handle_leave_party<A: Adapter>(
         None => return,
     };
 
-    let should_notify_actor = match dguesser_db::parties::get_active_party_for_user(state.db(), &user_id)
-        .await
+    let should_notify_actor = match dguesser_db::parties::get_active_party_for_user(
+        state.db(),
+        &user_id,
+    )
+    .await
     {
         Ok(Some(active_party)) => active_party.id == payload.party_id,
         Ok(None) => false,
@@ -335,9 +342,7 @@ pub async fn handle_leave_party<A: Adapter>(
         }
     };
 
-    if should_notify_actor
-        && let Some(handle) = state.get_party(&payload.party_id).await
-    {
+    if should_notify_actor && let Some(handle) = state.get_party(&payload.party_id).await {
         let _ = handle.tx.send(PartyCommand::Leave { user_id: user_id.clone() }).await;
     }
 

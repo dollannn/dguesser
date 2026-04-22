@@ -437,7 +437,7 @@ pub struct PartyStatePayload {
     pub settings: GameSettingsPayload,
     /// Current game ID (if a game is in progress)
     pub current_game_id: Option<String>,
-    /// Party phase: "lobby" or "in_game"
+    /// Party phase: "lobby", "starting", or "in_game"
     pub phase: String,
 }
 

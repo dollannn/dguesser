@@ -46,6 +46,7 @@ pub struct PartyActor {
     socket_ids: HashMap<String, String>, // user_id -> socket_id
     settings: GameSettings,
     join_code: String,
+    start_in_progress: bool,
     current_game_id: Option<String>,
     emitter: BroadcastEmitter,
     cleanup_tx: Option<mpsc::Sender<String>>,
@@ -73,6 +74,7 @@ impl PartyActor {
             socket_ids: HashMap::new(),
             settings,
             join_code: join_code.to_string(),
+            start_in_progress: false,
             current_game_id: None,
             emitter,
             cleanup_tx: None,
@@ -393,6 +395,10 @@ impl PartyActor {
             return Err("Only the host can start a game".to_string());
         }
 
+        if self.start_in_progress {
+            return Err("A game is already starting".to_string());
+        }
+
         // Must not already be in a game
         if self.current_game_id.is_some() {
             return Err("A game is already in progress".to_string());
@@ -403,6 +409,14 @@ impl PartyActor {
         if connected_count < 2 {
             return Err("Need at least 2 connected members to start a game".to_string());
         }
+
+        self.start_in_progress = true;
+
+        let state_payload = self.build_state_payload();
+        let _ = self
+            .emitter
+            .emit_to_room(&self.party_id, events::party::PARTY_STATE, &state_payload)
+            .await;
 
         // Generate game ID and join code
         let game_id = dguesser_core::generate_game_id();
@@ -422,6 +436,14 @@ impl PartyActor {
         )
         .await
         {
+            self.start_in_progress = false;
+
+            let state_payload = self.build_state_payload();
+            let _ = self
+                .emitter
+                .emit_to_room(&self.party_id, events::party::PARTY_STATE, &state_payload)
+                .await;
+
             return Err(format!("Failed to create game: {e}"));
         }
 
@@ -444,7 +466,14 @@ impl PartyActor {
             }
         }
 
+        self.start_in_progress = false;
         self.current_game_id = Some(game_id.clone());
+
+        let state_payload = self.build_state_payload();
+        let _ = self
+            .emitter
+            .emit_to_room(&self.party_id, events::party::PARTY_STATE, &state_payload)
+            .await;
 
         // Broadcast game starting to all party members
         let payload = PartyGameStartingPayload { game_id: game_id.clone() };
@@ -718,7 +747,13 @@ impl PartyActor {
             })
             .collect();
 
-        let phase = if self.current_game_id.is_some() { "in_game" } else { "lobby" };
+        let phase = if self.start_in_progress {
+            "starting"
+        } else if self.current_game_id.is_some() {
+            "in_game"
+        } else {
+            "lobby"
+        };
 
         PartyStatePayload {
             party_id: self.party_id.clone(),

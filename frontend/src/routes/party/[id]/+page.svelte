@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { partyStore } from '$lib/socket/party';
+  import { socketClient } from '$lib/socket/client';
   import { user } from '$lib/stores/auth';
   import { authStore } from '$lib/stores/auth';
   import { Button } from '$lib/components/ui/button';
@@ -31,12 +32,14 @@
   let copiedCode = $state(false);
   let copiedLink = $state(false);
   let starting = $state(false);
+  let startTimeout: ReturnType<typeof setTimeout> | null = null;
 
   let partyState = $derived($partyStore);
   let isHost = $derived(partyState.hostId === $user?.id);
   let memberCount = $derived(partyState.members.size);
   let canStart = $derived(isHost && memberCount >= 2);
   let membersArray = $derived(Array.from(partyState.members.values()));
+  let isStarting = $derived(starting || partyState.status === 'starting');
 
   onMount(async () => {
     try {
@@ -54,6 +57,43 @@
       loading = false;
     }
   });
+
+  onMount(() => {
+    const unsubError = socketClient.on<{ code: string; message: string }>('party:error', () => {
+      if (starting) {
+        clearStartPending();
+      }
+    });
+
+    return () => {
+      unsubError();
+      clearStartPending();
+    };
+  });
+
+  $effect(() => {
+    if ((partyState.status === 'starting' || partyState.status === 'in_game') && starting) {
+      clearStartPending();
+    }
+  });
+
+  $effect(() => {
+    if (loading || error || partyState.partyId !== partyId) {
+      return;
+    }
+
+    if (partyState.status === 'in_game' && partyState.currentGameId) {
+      goto(`/game/${partyState.currentGameId}`);
+    }
+  });
+
+  function clearStartPending() {
+    starting = false;
+    if (startTimeout) {
+      clearTimeout(startTimeout);
+      startTimeout = null;
+    }
+  }
 
   async function copyCode() {
     const code = partyState.joinCode;
@@ -88,16 +128,23 @@
     }
   }
 
-  async function handleStart() {
-    if (starting) return;
+  function handleStart() {
+    if (isStarting) return;
+
     starting = true;
-    try {
-      partyStore.startGame();
-    } catch {
-      toast.error('Failed to start game');
-    } finally {
-      starting = false;
+
+    if (startTimeout) {
+      clearTimeout(startTimeout);
     }
+
+    startTimeout = setTimeout(() => {
+      if (starting || partyState.status === 'starting') {
+        clearStartPending();
+        toast.error('Failed to start game');
+      }
+    }, 15000);
+
+    partyStore.startGame();
   }
 
   function handleLeave() {
@@ -262,21 +309,26 @@
         <Button
           size="lg"
           class="w-full gap-2"
-          disabled={!canStart}
-          loading={starting}
+          disabled={!canStart || isStarting}
+          loading={isStarting}
           onclick={handleStart}
         >
-          {#if !starting}
+          {#if !isStarting}
             <PlayIcon class="h-5 w-5" />
           {/if}
           {#if memberCount < 2}
             Need at least 2 players
-          {:else if starting}
+          {:else if isStarting}
             Starting...
           {:else}
             Start Game
           {/if}
         </Button>
+      {:else if partyState.status === 'starting'}
+        <div class="flex flex-col items-center justify-center gap-3 py-3 text-center text-muted-foreground">
+          <Spinner class="size-6 text-primary" />
+          <p>Host is starting the game...</p>
+        </div>
       {:else}
         <div class="text-center text-muted-foreground py-3">
           Waiting for host to start the game...

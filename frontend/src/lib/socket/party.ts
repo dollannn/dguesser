@@ -21,7 +21,7 @@ export interface PartyStatePayload {
   members: PartyMemberInfo[];
   settings: GameSettings;
   current_game_id: string | null;
-  phase: 'lobby' | 'in_game';
+  phase: 'lobby' | 'starting' | 'in_game';
 }
 
 export interface PartyMemberJoinedPayload {
@@ -68,7 +68,7 @@ export interface PartyState {
   hostId: string | null;
   members: Map<string, PartyMemberInfo>;
   settings: GameSettings | null;
-  status: 'idle' | 'lobby' | 'in_game';
+  status: 'idle' | 'lobby' | 'starting' | 'in_game';
   currentGameId: string | null;
 }
 
@@ -199,7 +199,7 @@ function createPartyStore() {
         hostId: payload.host_id,
         members,
         settings: payload.settings,
-        status: payload.phase === 'in_game' ? 'in_game' : 'lobby',
+        status: payload.phase,
         currentGameId: payload.current_game_id,
       });
     },
