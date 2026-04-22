@@ -35,7 +35,7 @@
     authStore.initialize();
 
     const cleanupListeners = initGameSocketListeners();
-    initPartySocketListeners();
+    const cleanupPartyListeners = initPartySocketListeners();
 
     const unsubscribe = authStore.subscribe(($auth) => {
       if ($auth.user && !socketClient.connected) {
@@ -48,6 +48,7 @@
 
     return () => {
       cleanupListeners();
+      cleanupPartyListeners();
       unsubscribe();
       socketClient.disconnect();
     };

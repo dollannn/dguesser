@@ -278,6 +278,12 @@ impl PartyActor {
                 .emitter
                 .emit_to_room(&self.party_id, events::party::MEMBER_JOINED, &joined_payload)
                 .await;
+        } else {
+            let state_payload = self.build_state_payload();
+            let _ = self
+                .emitter
+                .emit_to_room(&self.party_id, events::party::PARTY_STATE, &state_payload)
+                .await;
         }
 
         Ok(())
@@ -510,16 +516,7 @@ impl PartyActor {
         let display_name =
             self.members.get(target_user_id).map(|m| m.display_name.clone()).unwrap_or_default();
 
-        // Emit kicked event to the target socket BEFORE removing
-        if let Some(target_socket_id) = self.socket_ids.get(target_user_id) {
-            let kicked_payload = dguesser_protocol::socket::payloads::PartyKickedPayload {
-                user_id: target_user_id.to_string(),
-            };
-            let _ = self
-                .emitter
-                .emit_to_socket(target_socket_id, events::party::KICKED, &kicked_payload)
-                .await;
-        }
+        let target_socket_id = self.socket_ids.get(target_user_id).cloned();
 
         // Remove from state
         self.members.remove(target_user_id);
@@ -540,6 +537,17 @@ impl PartyActor {
             .emitter
             .emit_to_room(&self.party_id, events::party::MEMBER_LEFT, &left_payload)
             .await;
+
+        // Tell the kicked member to leave after server state has been updated.
+        if let Some(target_socket_id) = target_socket_id {
+            let kicked_payload = dguesser_protocol::socket::payloads::PartyKickedPayload {
+                user_id: target_user_id.to_string(),
+            };
+            let _ = self
+                .emitter
+                .emit_to_socket(&target_socket_id, events::party::KICKED, &kicked_payload)
+                .await;
+        }
 
         Ok(())
     }

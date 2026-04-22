@@ -324,11 +324,25 @@ pub async fn handle_leave_party<A: Adapter>(
         None => return,
     };
 
-    if let Some(handle) = state.get_party(&payload.party_id).await {
+    let should_notify_actor = match dguesser_db::parties::get_active_party_for_user(state.db(), &user_id)
+        .await
+    {
+        Ok(Some(active_party)) => active_party.id == payload.party_id,
+        Ok(None) => false,
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %user_id, party_id = %payload.party_id, "Failed to check active party before leave");
+            false
+        }
+    };
+
+    if should_notify_actor
+        && let Some(handle) = state.get_party(&payload.party_id).await
+    {
         let _ = handle.tx.send(PartyCommand::Leave { user_id: user_id.clone() }).await;
-        socket.leave(payload.party_id.clone());
-        tracing::info!(user_id = %user_id, party_id = %payload.party_id, "User left party");
     }
+
+    socket.leave(payload.party_id.clone());
+    tracing::info!(user_id = %user_id, party_id = %payload.party_id, "User left party");
 }
 
 /// Handle starting a game from the party

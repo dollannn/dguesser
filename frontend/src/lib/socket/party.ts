@@ -45,6 +45,10 @@ export interface PartyDisbandedPayload {
   reason: string;
 }
 
+export interface PartyKickedPayload {
+  user_id: string;
+}
+
 export interface PartyHostChangedPayload {
   new_host_id: string;
   new_host_name: string;
@@ -202,15 +206,23 @@ function createPartyStore() {
 
     handleMemberJoined(payload: PartyMemberJoinedPayload) {
       update((state) => {
-        state.members.set(payload.member.user_id, payload.member);
-        return state;
+        const members = new Map(state.members);
+        members.set(payload.member.user_id, payload.member);
+        return {
+          ...state,
+          members,
+        };
       });
     },
 
     handleMemberLeft(payload: PartyMemberLeftPayload) {
       update((state) => {
-        state.members.delete(payload.user_id);
-        return state;
+        const members = new Map(state.members);
+        members.delete(payload.user_id);
+        return {
+          ...state,
+          members,
+        };
       });
     },
 
@@ -259,7 +271,12 @@ function createPartyStore() {
       }));
     },
 
-    handleKicked() {
+    handleKicked(_payload: PartyKickedPayload) {
+      const state = get({ subscribe });
+      if (state.partyId) {
+        socketClient.emit('party:leave', { party_id: state.partyId });
+      }
+
       set({ ...initialState });
       toastStore.add('error', 'You were kicked from the party');
       goto('/play');
@@ -273,44 +290,67 @@ export const partyStore = createPartyStore();
 // Socket Listeners
 // =============================================================================
 
-export function initPartySocketListeners() {
-  socketClient.on('party:state', (payload: PartyStatePayload) => {
-    partyStore.handlePartyState(payload);
+export function initPartySocketListeners(): () => void {
+  const unsubscribers = [
+    socketClient.on('party:state', (payload: PartyStatePayload) => {
+      partyStore.handlePartyState(payload);
+    }),
+
+    socketClient.on('party:member_joined', (payload: PartyMemberJoinedPayload) => {
+      partyStore.handleMemberJoined(payload);
+    }),
+
+    socketClient.on('party:member_left', (payload: PartyMemberLeftPayload) => {
+      partyStore.handleMemberLeft(payload);
+    }),
+
+    socketClient.on('party:game_starting', (payload: PartyGameStartingPayload) => {
+      partyStore.handleGameStarting(payload);
+    }),
+
+    socketClient.on('party:game_ended', (payload: PartyGameEndedPayload) => {
+      partyStore.handleGameEnded(payload);
+    }),
+
+    socketClient.on('party:disbanded', (payload: PartyDisbandedPayload) => {
+      partyStore.handleDisbanded(payload);
+    }),
+
+    socketClient.on('party:host_changed', (payload: PartyHostChangedPayload) => {
+      partyStore.handleHostChanged(payload);
+    }),
+
+    socketClient.on('party:settings_updated', (payload: PartySettingsUpdatedPayload) => {
+      partyStore.handleSettingsUpdated(payload);
+    }),
+
+    socketClient.on('party:kicked', (payload: PartyKickedPayload) => {
+      partyStore.handleKicked(payload);
+    }),
+
+    socketClient.on('party:error', (payload: { code: string; message: string }) => {
+      toastStore.add('error', payload.message);
+    }),
+  ];
+
+  const offReconnect = socketClient.onReconnect(() => {
+    const state = get(partyStore);
+    if (!state.partyId) {
+      return;
+    }
+
+    void socketClient
+      .waitForAuth()
+      .then(() => {
+        socketClient.emit('party:join', { party_id: state.partyId });
+      })
+      .catch((error) => {
+        console.warn('Failed to rejoin party after reconnect:', error);
+      });
   });
 
-  socketClient.on('party:member_joined', (payload: PartyMemberJoinedPayload) => {
-    partyStore.handleMemberJoined(payload);
-  });
-
-  socketClient.on('party:member_left', (payload: PartyMemberLeftPayload) => {
-    partyStore.handleMemberLeft(payload);
-  });
-
-  socketClient.on('party:game_starting', (payload: PartyGameStartingPayload) => {
-    partyStore.handleGameStarting(payload);
-  });
-
-  socketClient.on('party:game_ended', (payload: PartyGameEndedPayload) => {
-    partyStore.handleGameEnded(payload);
-  });
-
-  socketClient.on('party:disbanded', (payload: PartyDisbandedPayload) => {
-    partyStore.handleDisbanded(payload);
-  });
-
-  socketClient.on('party:host_changed', (payload: PartyHostChangedPayload) => {
-    partyStore.handleHostChanged(payload);
-  });
-
-  socketClient.on('party:settings_updated', (payload: PartySettingsUpdatedPayload) => {
-    partyStore.handleSettingsUpdated(payload);
-  });
-
-  socketClient.on('party:kicked', () => {
-    partyStore.handleKicked();
-  });
-
-  socketClient.on('party:error', (payload: { code: string; message: string }) => {
-    toastStore.add('error', payload.message);
-  });
+  return () => {
+    unsubscribers.forEach((unsubscribe) => unsubscribe());
+    offReconnect();
+  };
 }
