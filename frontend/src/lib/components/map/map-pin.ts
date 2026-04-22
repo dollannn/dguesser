@@ -249,9 +249,7 @@ export interface ClusterTokenOptions {
   count: number;
   /** True when the current user is one of the cluster members. */
   containsCurrentUser: boolean;
-  /** Member colors in display order; used for the segmented ring preview. */
-  memberColors: string[];
-  /** Size in pixels (default 34). */
+  /** Size in pixels (default 28). */
   size?: number;
   /** Optional accessible label for the underlying button element. */
   ariaLabel?: string;
@@ -262,13 +260,8 @@ export interface ClusterTokenOptions {
 /**
  * Creates a Leaflet DivIcon representing a group of overlapping player pins.
  *
- * Design:
- *   - 34px circular token (dark slate, or blue when the current user is inside)
- *   - White numeric label in the center: "N" or "You +N" when appropriate
- *   - Subtle segmented conic-gradient ring previewing member colors (not the
- *     primary identity signal — just a hint that multiple distinct players
- *     live inside)
- *   - `role="button"` + `tabindex="0"` so keyboard users can activate it
+ * The token intentionally reuses the regular pin silhouette so clusters still
+ * feel like map markers rather than a second visual system layered on top.
  */
 export function createClusterTokenIcon(
   L: typeof import('leaflet'),
@@ -277,75 +270,42 @@ export function createClusterTokenIcon(
   const {
     count,
     containsCurrentUser,
-    memberColors,
-    size = 34,
+    size = 28,
     ariaLabel,
     className = '',
   } = options;
 
-  const fill = containsCurrentUser ? '#3b82f6' : '#1e293b';
-  const darkFill = containsCurrentUser ? '#2563eb' : '#0f172a';
-  const labelText = containsCurrentUser
-    ? `You +${Math.max(0, count - 1)}`
-    : `${count}`;
-
-  // Build the segmented conic gradient ring. Colors repeat if there are fewer
-  // than 6 unique palette entries; the ring is purely decorative.
-  const ring = buildSegmentedRing(memberColors);
+  const fill = containsCurrentUser ? '#1d4ed8' : '#334155';
+  const countText = count > 99 ? '99+' : `${count}`;
+  const height = Math.round(size * 1.33);
+  const svg = createMapPinSvg({ color: fill, size });
 
   const aria = ariaLabel
     ? `role="button" tabindex="0" aria-label="${escapeAttr(ariaLabel)}"`
     : 'role="button" tabindex="0"';
 
-  const fontSize = containsCurrentUser ? Math.round(size * 0.34) : Math.round(size * 0.44);
-  const paddingX = containsCurrentUser ? Math.round(size * 0.12) : 0;
-
   const html = `
     <div
-      class="cluster-token ${className}"
+      class="cluster-pin-container ${containsCurrentUser ? 'contains-current-user' : ''} ${className}"
       ${aria}
       style="
         --cluster-size: ${size}px;
-        --cluster-fill: ${fill};
-        --cluster-fill-dark: ${darkFill};
-        --cluster-ring: ${ring};
         width: ${size}px;
-        height: ${size}px;
+        height: ${height}px;
       "
     >
-      <div class="cluster-token-ring"></div>
-      <div class="cluster-token-body">
-        <span class="cluster-token-label" style="font-size: ${fontSize}px; padding: 0 ${paddingX}px;">${escapeAttr(labelText)}</span>
-      </div>
+      ${svg}
+      <span class="cluster-pin-count">${escapeAttr(countText)}</span>
+      ${containsCurrentUser ? '<span class="cluster-pin-current-user-dot" aria-hidden="true"></span>' : ''}
     </div>
   `.trim();
 
   return L.divIcon({
-    className: 'map-pin-icon cluster-token-icon',
+    className: 'map-pin-icon cluster-pin-icon',
     html,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2], // centered — unlike teardrop pins
+    iconSize: [size, height],
+    iconAnchor: [size / 2, height],
   });
-}
-
-function buildSegmentedRing(colors: string[]): string {
-  if (colors.length === 0) {
-    return 'conic-gradient(rgba(255,255,255,0.35) 0 360deg)';
-  }
-  // Use at most 8 segments so the ring stays readable; repeat if fewer.
-  const segments = colors.slice(0, 8);
-  const step = 360 / segments.length;
-  const gapDeg = 4; // small dark gap between segments
-  const parts: string[] = [];
-  for (let i = 0; i < segments.length; i += 1) {
-    const start = i * step;
-    const end = (i + 1) * step - gapDeg;
-    const gapStart = end;
-    const gapEnd = (i + 1) * step;
-    parts.push(`${segments[i]} ${start}deg ${end}deg`);
-    parts.push(`rgba(15, 23, 42, 0.55) ${gapStart}deg ${gapEnd}deg`);
-  }
-  return `conic-gradient(from -90deg, ${parts.join(', ')})`;
 }
 
 function escapeAttr(value: string): string {

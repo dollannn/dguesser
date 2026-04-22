@@ -90,43 +90,11 @@ export const RESULTS_ANIMATION = {
 /**
  * Clustering behavior for overlapping player markers on the results map.
  *
- * When player guesses are close enough on screen that their pins or nametag
- * labels would overlap, we group them into a single cluster token. On click /
- * tap / keyboard activation the cluster reveals its members (radial spread for
- * small clusters, popover list for larger ones).
+ * Group only genuinely overlapping pins so the map keeps its geographic feel.
+ * Labels are intentionally handled separately; we prefer hiding excess labels
+ * over collapsing nearby-but-distinct guesses into a cluster.
  */
 export const CLUSTER_CONFIG = {
   /** Half of the pin visual footprint (px) — used for pin-proximity collision */
-  pinRadiusPx: 18,
-  /** Extra padding added around each tooltip bounding box (px) */
-  labelPaddingPx: 8,
-  /** Font used to estimate nametag widths (must match .results-tooltip CSS) */
-  labelFont: '500 12px "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif',
-  /** Approximate tooltip line height (px) — single-line labels only */
-  labelLineHeightPx: 22,
-  /** Estimated horizontal offset between pin anchor and tooltip start (px) */
-  labelAnchorOffsetPx: 12,
-
-  /** Radial spread: minimum radius (px) */
-  radialMinRadiusPx: 52,
-  /** Radial spread: additional radius per additional member (px) */
-  radialPerMemberPx: 18,
-  /** Radial spread: maximum radius, regardless of member count (px) */
-  radialMaxRadiusPx: 108,
-  /** Members-at-or-above this threshold use the popover list instead of radial */
-  popoverThreshold: 6,
-  /** Margin from map edges kept clear when biasing the spread inward (px) */
-  edgeBiasMarginPx: 20,
-
-  /** Delay before desktop hover shows a preview popover (ms) */
-  hoverPreviewDelayMs: 180,
-  /** Grace period before collapsing hover-preview on mouseleave (ms) */
-  hoverLeaveGraceMs: 160,
-
-  /** Spread-in animation duration (ms) */
-  spreadDurationMs: 150,
-  /** Collapse animation duration (ms) */
-  collapseDurationMs: 90,
-  /** Crossfade duration between single markers and cluster tokens (ms) */
-  crossfadeMs: 160,
+  pinRadiusPx: 16,
 };

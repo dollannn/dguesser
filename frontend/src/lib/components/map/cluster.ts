@@ -1,19 +1,10 @@
 /**
- * Cluster computation for overlapping map markers.
+ * Cluster computation for genuinely overlapping map markers.
  *
- * Given a list of guesses and a Leaflet map, this module:
- *   1. Projects each guess to container-pixel space.
- *   2. Estimates each guess's label bounding box (name + distance, drawn to the
- *      right of the pin like the existing permanent tooltips).
- *   3. Builds a collision graph: two guesses are connected if either their pin
- *      circles or their label bounding boxes overlap.
- *   4. Groups connected components via union-find.
- *   5. Returns clusters (groups of >= 2) and singletons, with stable cluster
- *      ids so animations and open-state can persist across recomputes.
- *
- * The clustering is order-independent (union-find over the full collision
- * graph) and computes cluster centroids in container-pixel space, then
- * converts back to LatLng — this avoids antimeridian edge cases.
+ * The results map should stay readable and map-like, so grouping is based on
+ * actual pin proximity in container-pixel space rather than label-box
+ * collisions. This keeps clustering focused on true marker overlap instead of
+ * hiding nearby-but-distinct guesses behind a synthetic centroid.
  */
 import type L from 'leaflet';
 
@@ -25,8 +16,6 @@ export interface ClusterGuess {
   distanceMeters: number;
   color?: string;
   isCurrentUser?: boolean;
-  /** Pre-formatted label text used to estimate label width. */
-  labelText: string;
 }
 
 export interface Cluster {
@@ -50,11 +39,6 @@ export interface ClusterResult {
 
 export interface ClusterOptions {
   pinRadiusPx: number;
-  labelPaddingPx: number;
-  /** Function that returns the label's rendered bounding box. */
-  labelBoxFn: (g: ClusterGuess) => { width: number; height: number };
-  /** Horizontal offset of the tooltip anchor from the pin center. */
-  labelAnchorOffsetPx: number;
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -64,28 +48,18 @@ export interface ClusterOptions {
 interface ProjectedPoint extends ClusterGuess {
   x: number;
   y: number;
-  /** Label bounding box in container pixels (axis-aligned rectangle). */
-  labelBox: { minX: number; minY: number; maxX: number; maxY: number };
+  sourceIndex: number;
 }
 
 function project(
   guesses: ClusterGuess[],
   map: L.Map,
-  opts: ClusterOptions,
 ): ProjectedPoint[] {
   const out: ProjectedPoint[] = [];
-  for (const g of guesses) {
+  guesses.forEach((g, sourceIndex) => {
     const pt = map.latLngToContainerPoint([g.lat, g.lng]);
-    const box = opts.labelBoxFn(g);
-    const pad = opts.labelPaddingPx;
-    // Label is drawn to the right of the pin with an anchor offset.
-    // Use the pin center (pt.y) as vertical center of the label.
-    const minX = pt.x + opts.labelAnchorOffsetPx - pad;
-    const maxX = pt.x + opts.labelAnchorOffsetPx + box.width + pad;
-    const minY = pt.y - box.height / 2 - pad;
-    const maxY = pt.y + box.height / 2 + pad;
-    out.push({ ...g, x: pt.x, y: pt.y, labelBox: { minX, minY, maxX, maxY } });
-  }
+    out.push({ ...g, x: pt.x, y: pt.y, sourceIndex });
+  });
   return out;
 }
 
@@ -96,24 +70,12 @@ function pinsOverlap(a: ProjectedPoint, b: ProjectedPoint, radius: number): bool
   return dx * dx + dy * dy <= rr;
 }
 
-function boxesOverlap(
-  a: ProjectedPoint['labelBox'],
-  b: ProjectedPoint['labelBox'],
-): boolean {
-  return !(a.maxX < b.minX || b.maxX < a.minX || a.maxY < b.minY || b.maxY < a.minY);
-}
-
-/**
- * An edge exists when EITHER the pin circles overlap OR the label rectangles
- * overlap. This makes clustering label-aware, addressing the label-overlap
- * case where two pins are comfortably apart but their nametags still collide.
- */
 function shouldCluster(
   a: ProjectedPoint,
   b: ProjectedPoint,
   pinRadius: number,
 ): boolean {
-  return pinsOverlap(a, b, pinRadius) || boxesOverlap(a.labelBox, b.labelBox);
+  return pinsOverlap(a, b, pinRadius);
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -163,14 +125,13 @@ class UnionFind {
 export function buildClusters(
   guesses: ClusterGuess[],
   map: L.Map,
-  L: typeof import('leaflet'),
   options: ClusterOptions,
 ): ClusterResult {
   if (guesses.length === 0) {
     return { clusters: [], singletons: [] };
   }
 
-  const projected = project(guesses, map, options);
+  const projected = project(guesses, map);
   const uf = new UnionFind(projected.length);
 
   // Build collision graph. O(n^2) over at most ~16 players — trivial.
@@ -211,7 +172,7 @@ export function buildClusters(
     }
     const cx = sx / indices.length;
     const cy = sy / indices.length;
-    const centroidLatLng = map.containerPointToLatLng([cx, cy] as unknown as L.PointExpression);
+    const centroidLatLng = map.containerPointToLatLng([cx, cy]);
 
     // Order members: current user first, then by original input order for stability.
     const members = indices
@@ -219,8 +180,7 @@ export function buildClusters(
       .sort((a, b) => {
         if (a.isCurrentUser && !b.isCurrentUser) return -1;
         if (!a.isCurrentUser && b.isCurrentUser) return 1;
-        return guesses.indexOf(a as unknown as ClusterGuess) -
-          guesses.indexOf(b as unknown as ClusterGuess);
+        return a.sourceIndex - b.sourceIndex;
       })
       .map(stripProjection);
 
@@ -245,7 +205,7 @@ export function buildClusters(
 }
 
 function stripProjection(p: ProjectedPoint): ClusterGuess {
-  const { x: _x, y: _y, labelBox: _labelBox, ...rest } = p;
+  const { x: _x, y: _y, sourceIndex: _sourceIndex, ...rest } = p;
   return rest;
 }
 

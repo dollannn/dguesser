@@ -1,7 +1,6 @@
 <script lang="ts">
   /**
-   * Floating list popover used to reveal members of a large cluster (>=6) or
-   * during the desktop hover-preview of any cluster.
+   * Floating list popover used to reveal members of an overlapping cluster.
    *
    * Positioned in container-pixel space relative to its parent (the results
    * map wrapper). The parent is expected to be `position: relative` so the
@@ -12,7 +11,7 @@
    *   - Enter / Space selects / keeps the member highlighted
    *   - Escape closes (delegated to parent)
    */
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { formatDistance } from '$lib/utils';
 
   export interface PopoverMember {
@@ -33,7 +32,7 @@
     containerHeight: number;
     /** Members in display order (current user first). */
     members: PopoverMember[];
-    /** Whether the popover is in non-sticky hover-preview mode. */
+    /** Whether the popover should skip outside-click handling. */
     hoverPreview?: boolean;
     /** Fires when the pointer hovers or keyboard focus moves to a member. */
     onMemberHover?: (userId: string | null) => void;
@@ -146,7 +145,7 @@
     // Clicks on a cluster token are handled by the marker's click listener
     // (which toggles the popover). Ignoring them here prevents a race where
     // both handlers fire and the popover closes then re-opens.
-    if (typeof target.closest === 'function' && target.closest('.cluster-token')) return;
+    if (typeof target.closest === 'function' && target.closest('.cluster-pin-container')) return;
     if (rootEl.contains(target)) return;
     onClose?.();
   }
@@ -163,18 +162,6 @@
     };
   });
 
-  onDestroy(() => {
-    // Nothing to do; highlight state is cleared by explicit mouseleave / close
-    // events so the popover unmount doesn't drop an externally-driven hover.
-  });
-
-  function initial(name: string): string {
-    const trimmed = name.trim();
-    if (!trimmed) return '?';
-    const codepoint = trimmed.codePointAt(0);
-    if (codepoint === undefined) return '?';
-    return String.fromCodePoint(codepoint).toUpperCase();
-  }
 </script>
 
 <div
@@ -210,13 +197,7 @@
           }}
           onclick={() => onMemberSelect?.(member.userId)}
         >
-          <span
-            class="cluster-popover-chip"
-            style="background-color: {member.color}; color: #fff;"
-            aria-hidden="true"
-          >
-            {initial(member.displayName)}
-          </span>
+          <span class="cluster-popover-dot" style="background-color: {member.color};" aria-hidden="true"></span>
           <span class="cluster-popover-name">
             {member.displayName}
             {#if member.isCurrentUser}
