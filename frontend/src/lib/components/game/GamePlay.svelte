@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { gameAudio } from '$lib/audio/game-audio';
   import { onMount } from 'svelte';
   import type { GameDetails } from '$lib/api/games';
   import { gameStore } from '$lib/socket/game';
@@ -44,6 +45,7 @@
     if (gameState.hasGuessed) return;
     guessLat = coords.lat;
     guessLng = coords.lng;
+    gameAudio.playPinPlace();
   }
 
   function showSoloRoundEnd(result: Awaited<ReturnType<typeof gamesApi.submitGuess>>, lat: number, lng: number) {
@@ -81,10 +83,12 @@
           timeTaken
         );
 
+        gameAudio.playGuessSubmitted();
         showSoloRoundEnd(result, guessLat, guessLng);
       } else {
         // Multiplayer - use socket
         gameStore.submitGuess(guessLat, guessLng, timeTaken);
+        gameAudio.playGuessSubmitted();
       }
     } catch (e) {
       console.error('Failed to submit guess:', e);

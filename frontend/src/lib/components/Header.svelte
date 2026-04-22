@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { gameAudio } from '$lib/audio/game-audio';
+  import { soundSettings } from '$lib/audio/settings';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { user, isGuest, authStore } from '$lib/stores/auth';
@@ -18,6 +20,8 @@
   import PlayIcon from '@lucide/svelte/icons/play';
   import SettingsIcon from '@lucide/svelte/icons/settings';
   import MapIcon from '@lucide/svelte/icons/map';
+  import Volume2Icon from '@lucide/svelte/icons/volume-2';
+  import VolumeXIcon from '@lucide/svelte/icons/volume-x';
 
   // Game state detection for pill header
   let gameState = $derived($gameStore);
@@ -33,6 +37,16 @@
 
   function isActive(path: string): boolean {
     return $page.url.pathname === path || $page.url.pathname.startsWith(path + '/');
+  }
+
+  function toggleSound(): void {
+    const wasEnabled = $soundSettings.enabled;
+    soundSettings.toggleEnabled();
+    void gameAudio.unlock();
+
+    if (!wasEnabled) {
+      gameAudio.playGuessSubmitted();
+    }
   }
 </script>
 
@@ -52,6 +66,20 @@
     <!-- User Section -->
     {#if $user}
       <div class="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onclick={toggleSound}
+          aria-label={$soundSettings.enabled ? 'Mute game sounds' : 'Enable game sounds'}
+          title={$soundSettings.enabled ? 'Mute game sounds' : 'Enable game sounds'}
+        >
+          {#if $soundSettings.enabled}
+            <Volume2Icon class="size-4" />
+          {:else}
+            <VolumeXIcon class="size-4 text-muted-foreground" />
+          {/if}
+        </Button>
+
         <ConnectionStatus minimal />
         
         <DropdownMenu.Root>
@@ -177,6 +205,20 @@
       <!-- Right Section -->
       <div class="ml-auto flex items-center gap-2">
         {#if $user}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onclick={toggleSound}
+            aria-label={$soundSettings.enabled ? 'Mute game sounds' : 'Enable game sounds'}
+            title={$soundSettings.enabled ? 'Mute game sounds' : 'Enable game sounds'}
+          >
+            {#if $soundSettings.enabled}
+              <Volume2Icon class="size-4" />
+            {:else}
+              <VolumeXIcon class="size-4 text-muted-foreground" />
+            {/if}
+          </Button>
+
           <ConnectionStatus />
           
           <DropdownMenu.Root>

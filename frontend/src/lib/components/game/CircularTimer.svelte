@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { gameAudio } from '$lib/audio/game-audio';
   import { onMount, onDestroy } from 'svelte';
 
   interface Props {
@@ -20,6 +21,7 @@
   let remaining = $state(0);
   let intervalId: ReturnType<typeof setInterval>;
   let hasCalledTimeUp = $state(false);
+  let lastCountdownSecond = $state<number | null>(null);
 
   // SVG calculations - derived from props
   let radius = $derived((size - strokeWidth) / 2);
@@ -55,6 +57,7 @@
       remaining = durationMs;
     }
     hasCalledTimeUp = false;
+    lastCountdownSecond = null;
   });
 
   onMount(() => {
@@ -69,10 +72,21 @@
       if (startedAt === null) return;
 
       remaining = Math.max(0, durationMs - (Date.now() - startedAt));
+      const wholeSecondsRemaining = Math.ceil(remaining / 1000);
+
+      if (
+        wholeSecondsRemaining > 0 &&
+        wholeSecondsRemaining <= 30 &&
+        wholeSecondsRemaining !== lastCountdownSecond
+      ) {
+        lastCountdownSecond = wholeSecondsRemaining;
+        gameAudio.playCountdownTick(wholeSecondsRemaining);
+      }
 
       if (remaining <= 0 && !hasCalledTimeUp) {
         hasCalledTimeUp = true;
         clearInterval(intervalId);
+        gameAudio.playTimeUp();
         onTimeUp?.();
       }
     }, 50);

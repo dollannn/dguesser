@@ -1,6 +1,8 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
+  import { gameAudio } from '$lib/audio/game-audio';
+  import { soundSettings } from '$lib/audio/settings';
   import { authStore, isLoading } from '$lib/stores/auth';
   import { socketClient } from '$lib/socket/client';
   import { initGameSocketListeners } from '$lib/socket/game';
@@ -33,9 +35,17 @@
 
   onMount(() => {
     authStore.initialize();
+    soundSettings.initialize();
 
     const cleanupListeners = initGameSocketListeners();
     const cleanupPartyListeners = initPartySocketListeners();
+
+    const unlockAudio = () => {
+      void gameAudio.unlock();
+    };
+
+    window.addEventListener('pointerdown', unlockAudio, { once: true });
+    window.addEventListener('keydown', unlockAudio, { once: true });
 
     const unsubscribe = authStore.subscribe(($auth) => {
       if ($auth.user && !socketClient.connected) {
@@ -50,6 +60,8 @@
       cleanupListeners();
       cleanupPartyListeners();
       unsubscribe();
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
       socketClient.disconnect();
     };
   });

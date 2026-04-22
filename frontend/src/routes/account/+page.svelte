@@ -1,5 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { gameAudio } from '$lib/audio/game-audio';
+  import { soundSettings } from '$lib/audio/settings';
   import { user, isGuest, authStore } from '$lib/stores/auth';
   import { authModalOpen } from '$lib/stores/authModal';
   import { usersApi, sessionsApi, ApiClientError, type SessionInfo } from '$lib/api';
@@ -14,6 +16,7 @@
   import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
   import * as Card from '$lib/components/ui/card';
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
+  import { Slider } from '$lib/components/ui/slider';
   import { Switch } from '$lib/components/ui/switch';
   import UserIcon from '@lucide/svelte/icons/user';
   import AtSignIcon from '@lucide/svelte/icons/at-sign';
@@ -27,6 +30,8 @@
   import CheckIcon from '@lucide/svelte/icons/check';
   import XIcon from '@lucide/svelte/icons/x';
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
+  import Volume2Icon from '@lucide/svelte/icons/volume-2';
+  import VolumeXIcon from '@lucide/svelte/icons/volume-x';
   import SEO from '$lib/components/SEO.svelte';
 
   // Profile editing state
@@ -48,6 +53,14 @@
   // Delete account state
   let showDeleteDialog = $state(false);
   let isDeleting = $state(false);
+
+  // Sound settings state
+  let soundVolumePercent = $state(35);
+
+  $effect(() => {
+    soundSettings.initialize();
+    soundVolumePercent = Math.round($soundSettings.volume * 100);
+  });
 
   // Sync state with user changes
   $effect(() => {
@@ -222,6 +235,25 @@
     else if (ua.includes('Safari')) browser = 'Safari';
 
     return { device, browser };
+  }
+
+  function toggleSoundEffects(checked: boolean): void {
+    soundSettings.setEnabled(checked);
+    void gameAudio.unlock();
+
+    if (checked) {
+      gameAudio.playGuessSubmitted();
+    }
+  }
+
+  function handleSoundVolumeChange(): void {
+    soundSettings.setVolume(soundVolumePercent / 100);
+    void gameAudio.unlock();
+  }
+
+  function previewSound(): void {
+    void gameAudio.unlock();
+    gameAudio.playGuessSubmitted();
   }
 </script>
 
@@ -420,6 +452,73 @@
           </Card.Content>
         </Card.Root>
       {/if}
+
+      <Card.Root>
+        <Card.Header>
+          <div class="flex items-center gap-3">
+            <div class="p-2 rounded-lg bg-sky-500/10">
+              {#if $soundSettings.enabled}
+                <Volume2Icon class="w-5 h-5 text-sky-500" />
+              {:else}
+                <VolumeXIcon class="w-5 h-5 text-sky-500" />
+              {/if}
+            </div>
+            <div>
+              <Card.Title>Sound Effects</Card.Title>
+              <Card.Description>Control gameplay cue volume and mute state on this device</Card.Description>
+            </div>
+          </div>
+        </Card.Header>
+        <Card.Content>
+          <div class="space-y-5">
+            <div class="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+              <div class="flex-1 mr-4">
+                <p class="font-medium">Enable sound cues</p>
+                <p class="text-sm text-muted-foreground mt-1">
+                  Plays subtle cues for round starts, countdown ticks, round results, and wins.
+                </p>
+              </div>
+              <Switch checked={$soundSettings.enabled} onCheckedChange={toggleSoundEffects} />
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex items-center justify-between gap-4">
+                <Label class="text-sm font-medium">Effects volume</Label>
+                <span class="text-sm font-semibold tabular-nums text-muted-foreground">
+                  {soundVolumePercent}%
+                </span>
+              </div>
+
+              <Slider
+                type="single"
+                bind:value={soundVolumePercent}
+                min={0}
+                max={100}
+                step={1}
+                disabled={!$soundSettings.enabled}
+                onValueChange={handleSoundVolumeChange}
+              />
+
+              <div class="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Quiet</span>
+                <span>Louder</span>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <p class="text-sm font-medium">Preview cue</p>
+                <p class="text-xs text-muted-foreground mt-1">
+                  Plays a short confirmation sound at your current volume.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onclick={previewSound} disabled={!$soundSettings.enabled}>
+                Test sound
+              </Button>
+            </div>
+          </div>
+        </Card.Content>
+      </Card.Root>
 
       <!-- Statistics Section -->
       <Card.Root>

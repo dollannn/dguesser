@@ -1,4 +1,5 @@
 import { writable, get } from 'svelte/store';
+import { gameAudio } from '$lib/audio/game-audio';
 import { socketClient, toastStore, type GamePhase } from './client';
 import type { GameSettings } from '$lib/api/games';
 import { authStore } from '$lib/stores/auth';
@@ -157,6 +158,10 @@ export interface GameTransition {
 
 /** Watchdog window after which clients clear a stuck transition locally. */
 export const TRANSITION_WATCHDOG_MS = 15_000;
+
+interface SoundHookOptions {
+  silent?: boolean;
+}
 
 /** Live scores update payload */
 export interface ScoresUpdatePayload {
@@ -453,6 +458,10 @@ function createGameStore() {
 
     /** Handle server broadcast that the game is transitioning phases. */
     handleGameTransitioning(payload: GameTransitioningPayload): void {
+      if (payload.phase === 'starting') {
+        gameAudio.playGameStarting();
+      }
+
       armWatchdog();
       update((s) => ({
         ...s,
@@ -477,10 +486,14 @@ function createGameStore() {
       });
     },
 
-    handleRoundStart(payload: RoundStartPayload): void {
+    handleRoundStart(payload: RoundStartPayload, options?: SoundHookOptions): void {
       // Game is now active - update phase for reconnection logic
       socketClient.setActiveGamePhase('active');
       clearWatchdog();
+
+      if (!options?.silent) {
+        gameAudio.playRoundStart(payload.round_number);
+      }
 
       update((s) =>
         withClearedTransition({
@@ -526,7 +539,11 @@ function createGameStore() {
       });
     },
 
-    handleRoundEnd(payload: RoundEndPayload): void {
+    handleRoundEnd(payload: RoundEndPayload, options?: SoundHookOptions): void {
+      if (!options?.silent) {
+        gameAudio.playRoundComplete();
+      }
+
       update((s) => {
         // Update player scores from results
         const players = new Map(s.players);
@@ -567,9 +584,20 @@ function createGameStore() {
       }));
     },
 
-    handleGameEnd(payload: GameEndPayload): void {
+    handleGameEnd(payload: GameEndPayload, options?: SoundHookOptions): void {
       socketClient.setActiveGame(null, null);
       clearWatchdog();
+
+      if (!options?.silent) {
+        const currentUserId = getCurrentUserId();
+        const currentUserWon =
+          currentUserId !== null &&
+          payload.final_standings.some(
+            (standing) => standing.user_id === currentUserId && standing.rank === 1,
+          );
+        gameAudio.playGameEnd(currentUserWon);
+      }
+
       update((s) =>
         withClearedTransition({
           ...s,
@@ -579,13 +607,21 @@ function createGameStore() {
       );
     },
 
-    hydrateSoloFinished(payload: {
+    hydrateSoloFinished(
+      payload: {
       game_id: string;
       final_standings: FinalStanding[];
       rounds: RoundEndPayload[];
-    }): void {
+      },
+      options?: SoundHookOptions,
+    ): void {
       socketClient.setActiveGame(null, null);
       clearWatchdog();
+
+      if (!options?.silent) {
+        gameAudio.playGameEnd(true);
+      }
+
       update((s) =>
         withClearedTransition({
           ...s,

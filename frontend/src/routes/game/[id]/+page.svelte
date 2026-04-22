@@ -115,7 +115,7 @@
               score: currentRound.user_guess.score,
               total_score: player?.score ?? currentRound.user_guess.score,
             }],
-          });
+          }, { silent: true });
           
           // Also set round/total info
           gameStore.setRoundInfo(currentRound.round_number, currentRound.total_rounds);
@@ -132,7 +132,7 @@
             location: currentRound.location,
             time_limit_ms: timeLimit !== null ? Math.round(timeLimit) : null,
             started_at: new Date(currentRound.started_at).getTime(),
-          });
+          }, { silent: true });
         }
       } catch (e) {
         console.error('Failed to restore solo game state:', e);
@@ -150,7 +150,7 @@
           correct_location: round.correct_location,
           results: round.results,
         })),
-      });
+      }, { silent: true });
     }
     // If status is 'lobby', gameStore defaults to 'idle' which shows the lobby
   }
