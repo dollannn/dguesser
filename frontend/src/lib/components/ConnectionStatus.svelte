@@ -1,7 +1,6 @@
 <script lang="ts">
   import { socketClient, type ConnectionStatus } from '$lib/socket/client';
   import * as Tooltip from '$lib/components/ui/tooltip';
-  import WifiIcon from '@lucide/svelte/icons/wifi';
   import WifiOffIcon from '@lucide/svelte/icons/wifi-off';
   import LoaderIcon from '@lucide/svelte/icons/loader';
 
@@ -42,7 +41,6 @@
 
   const isLoading = $derived($state.status === 'reconnecting');
   const isDisconnected = $derived($state.status === 'disconnected');
-  const isHealthy = $derived($state.status === 'authenticated');
   const statusInfo = $derived(getStatusInfo($state.status, $state.reconnectAttempt, $state.maxReconnectAttempts));
   
   // Only show when authenticated or there's a problem (disconnected/reconnecting)
@@ -81,7 +79,7 @@
       </Tooltip.Content>
     </Tooltip.Root>
   {:else}
-    <!-- Full: icon with dot indicator -->
+    <!-- Full: dot-only when healthy, icons only for issues -->
     <Tooltip.Root>
       <Tooltip.Trigger>
         {#snippet child({ props })}
@@ -99,14 +97,16 @@
             {:else if isDisconnected}
               <WifiOffIcon class="size-4" />
             {:else}
-              <WifiIcon class="size-4" />
+              <span class="size-2.5 rounded-full {statusInfo.bgColor}"></span>
             {/if}
             
-            <!-- Status dot indicator -->
-            <span 
-              class="absolute -top-0.5 -right-0.5 size-2 rounded-full ring-2 ring-background {statusInfo.bgColor}
-                {isLoading ? 'animate-pulse' : ''}"
-            ></span>
+            {#if isLoading || isDisconnected}
+              <!-- Status dot indicator -->
+              <span 
+                class="absolute -top-0.5 -right-0.5 size-2 rounded-full ring-2 ring-background {statusInfo.bgColor}
+                  {isLoading ? 'animate-pulse' : ''}"
+              ></span>
+            {/if}
           </button>
         {/snippet}
       </Tooltip.Trigger>
