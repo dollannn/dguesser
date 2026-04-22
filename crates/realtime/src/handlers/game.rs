@@ -96,6 +96,11 @@ pub async fn handle_join<A: Adapter>(
     // Get or create game actor (game_id is String: gam_xxxxxxxxxxxx)
     let handle = state.get_or_create_game(&payload.game_id).await;
 
+    // Join the room before awaiting the actor so this socket cannot miss room
+    // broadcasts if the host starts immediately after the actor acknowledges
+    // the join.
+    socket.join(payload.game_id.clone());
+
     // Send join command to actor
     let (tx, rx) = oneshot::channel();
     if handle
@@ -108,24 +113,24 @@ pub async fn handle_join<A: Adapter>(
         .await
         .is_err()
     {
+        socket.leave(payload.game_id.clone());
         emit_error(&socket, "GAME_ERROR", "Failed to join game");
         return;
     }
 
     match rx.await {
         Ok(Ok(())) => {
-            // Join socket.io room
-            socket.join(payload.game_id.clone());
-
             // Emit success
             socket.emit("game:joined", &serde_json::json!({ "game_id": payload.game_id })).ok();
 
             tracing::info!("User {} joined game {}", user_id, payload.game_id);
         }
         Ok(Err(err)) => {
+            socket.leave(payload.game_id.clone());
             emit_error(&socket, "JOIN_FAILED", &err);
         }
         Err(_) => {
+            socket.leave(payload.game_id.clone());
             emit_error(&socket, "GAME_ERROR", "Game actor unavailable");
         }
     }
