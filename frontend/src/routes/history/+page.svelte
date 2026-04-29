@@ -105,6 +105,19 @@
     }
   }
 
+  function getActionLabel(game: GameSummary): string {
+    switch (game.status) {
+      case 'active':
+        return 'Resume';
+      case 'finished':
+        return 'View Recap';
+      case 'abandoned':
+        return 'Review';
+      default:
+        return 'Open';
+    }
+  }
+
   function viewGame(gameId: string) {
     goto(`/game/${gameId}`);
   }
@@ -258,11 +271,12 @@
           <tbody class="divide-y divide-border">
             {#each filteredGames as game (game.id)}
               <tr
-                class="transition-colors hover:bg-muted/50 cursor-pointer"
+                class="group transition-colors hover:bg-muted/50 cursor-pointer"
                 onclick={() => viewGame(game.id)}
                 onkeydown={(e) => e.key === 'Enter' && viewGame(game.id)}
                 tabindex="0"
                 role="button"
+                aria-label={`${getActionLabel(game)} ${getModeLabel(game.mode)} game from ${formatDate(game.played_at)}`}
               >
                 <td class="px-4 sm:px-6 py-4">
                   <div class="text-foreground font-medium">
@@ -296,8 +310,11 @@
                   </span>
                 </td>
                 <td class="px-4 sm:px-6 py-4 text-right">
+                  <span class="hidden sm:inline-flex rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors group-hover:bg-muted">
+                    {getActionLabel(game)}
+                  </span>
                   <svg
-                    class="w-5 h-5 text-muted-foreground inline-block"
+                    class="w-5 h-5 text-muted-foreground inline-block sm:hidden"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"

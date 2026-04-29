@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
-  import { gamesApi, type GameDetails } from '$lib/api/games';
+  import { gamesApi, type GameDetails, type GameResultsResponse } from '$lib/api/games';
   import { gameStore } from '$lib/socket/game';
   import { socketClient } from '$lib/socket/client';
   import { partyStore } from '$lib/socket/party';
@@ -12,11 +12,13 @@
   import GamePlay from '$lib/components/game/GamePlay.svelte';
   import GameRoundEnd from '$lib/components/game/GameRoundEnd.svelte';
   import GameFinished from '$lib/components/game/GameFinished.svelte';
+  import GameHistoryReview from '$lib/components/game/GameHistoryReview.svelte';
   import SEO from '$lib/components/SEO.svelte';
   import { Spinner } from '$lib/components/ui/spinner';
   import { toast } from 'svelte-sonner';
 
   let game: GameDetails | null = $state(null);
+  let historicalResults: GameResultsResponse | null = $state(null);
   let loading = $state(true);
   let error = $state('');
   let autoStarting = $state(false);
@@ -45,6 +47,16 @@
 
       // Load game data
       game = await gamesApi.get(gameId);
+
+      // Historical games are read-only. Avoid joining sockets or restoring the
+      // live game store, because finished multiplayer games no longer accept
+      // realtime joins and abandoned games must not render as startable lobbies.
+      if (game.status === 'finished' || game.status === 'abandoned') {
+        gameStore.leaveGame();
+        historicalResults = await gamesApi.getResults(game.id);
+        loading = false;
+        return;
+      }
 
       // Handle based on game mode and status
       if (game.mode === 'multiplayer') {
@@ -293,6 +305,16 @@
     <p class="text-red-600 mb-4">{error}</p>
     <a href="/" class="inline-block px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Back to Home</a>
   </div>
+{:else if game && (game.status === 'finished' || game.status === 'abandoned')}
+  {#if historicalResults}
+    <GameHistoryReview {game} results={historicalResults} />
+  {:else}
+    <div class="max-w-lg mx-auto mt-12 p-6 bg-card rounded-xl text-center shadow">
+      <h2 class="text-xl font-semibold text-foreground mb-2">No history available</h2>
+      <p class="text-muted-foreground mb-4">This game does not have persisted results to review.</p>
+      <a href="/history" class="inline-block px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">Back to History</a>
+    </div>
+  {/if}
 {:else if game}
   {#if autoStarting || (gameState.status === 'idle' || gameState.status === 'lobby') && $partyStore.partyId && $partyStore.status === 'in_game'}
     <!-- Party game: show loading screen while auto-starting -->

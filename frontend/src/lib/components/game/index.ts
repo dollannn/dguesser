@@ -3,6 +3,7 @@ export { default as GameLobby } from './GameLobby.svelte';
 export { default as GamePlay } from './GamePlay.svelte';
 export { default as GameRoundEnd } from './GameRoundEnd.svelte';
 export { default as GameFinished } from './GameFinished.svelte';
+export { default as GameHistoryReview } from './GameHistoryReview.svelte';
 export { default as GameTimer } from './GameTimer.svelte';
 export { default as GameScoreboard } from './GameScoreboard.svelte';
 export { default as RoundInfo } from './RoundInfo.svelte';

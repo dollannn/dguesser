@@ -200,6 +200,8 @@ pub struct LocationInfo {
     pub lng: f64,
     /// Street View panorama ID (if applicable)
     pub panorama_id: Option<String>,
+    /// Optional heading/direction for Street View panorama (degrees, 0-360)
+    pub heading: Option<f64>,
     /// Location ID for reporting (if from location database)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location_id: Option<String>,
@@ -274,7 +276,7 @@ pub struct CompletedRoundInfo {
     pub results: Vec<RoundResultInfo>,
 }
 
-/// Persisted game results for a finished solo game.
+/// Persisted game results for a finished or abandoned game.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct GameResultsResponse {
     /// Game ID (prefixed nanoid)
@@ -399,16 +401,42 @@ async fn build_game_results(
 
         player_names.insert(player.user_id.clone(), display_name.clone());
         final_standings.push(FinalStandingInfo {
-            rank: 0,
+            rank: player
+                .final_rank
+                .and_then(|rank| u8::try_from(rank).ok())
+                .filter(|rank| *rank > 0)
+                .unwrap_or(0),
             user_id: player.user_id.clone(),
             display_name,
             total_score: player.score_total.max(0) as u32,
         });
     }
 
-    final_standings.sort_by(|a, b| b.total_score.cmp(&a.total_score));
-    for (index, standing) in final_standings.iter_mut().enumerate() {
-        standing.rank = (index + 1) as u8;
+    final_standings.sort_by(|a, b| {
+        b.total_score
+            .cmp(&a.total_score)
+            .then_with(|| a.display_name.cmp(&b.display_name))
+            .then_with(|| a.user_id.cmp(&b.user_id))
+    });
+
+    if final_standings.iter().all(|standing| standing.rank > 0) {
+        final_standings.sort_by(|a, b| {
+            a.rank
+                .cmp(&b.rank)
+                .then_with(|| b.total_score.cmp(&a.total_score))
+                .then_with(|| a.display_name.cmp(&b.display_name))
+                .then_with(|| a.user_id.cmp(&b.user_id))
+        });
+    } else {
+        let mut current_rank = 0u8;
+        let mut previous_score: Option<u32> = None;
+        for (index, standing) in final_standings.iter_mut().enumerate() {
+            if previous_score != Some(standing.total_score) {
+                current_rank = (index + 1) as u8;
+                previous_score = Some(standing.total_score);
+            }
+            standing.rank = current_rank;
+        }
     }
 
     let mut cumulative_scores = HashMap::<String, u32>::new();
@@ -444,6 +472,7 @@ async fn build_game_results(
                 lat: round.location_lat,
                 lng: round.location_lng,
                 panorama_id: round.panorama_id,
+                heading: round.heading,
                 location_id: round.location_id,
             },
             results,
@@ -890,7 +919,7 @@ pub async fn get_game(
     }))
 }
 
-/// Get persisted results for a finished solo game.
+/// Get persisted results for a finished or abandoned game.
 #[utoipa::path(
     get,
     path = "/api/v1/games/{id}/results",
@@ -898,8 +927,8 @@ pub async fn get_game(
         ("id" = String, Path, description = "Game ID")
     ),
     responses(
-        (status = 200, description = "Finished game results", body = GameResultsResponse),
-        (status = 400, description = "Game is not finished or not solo"),
+        (status = 200, description = "Finished or abandoned game results", body = GameResultsResponse),
+        (status = 400, description = "Game is not finished or abandoned"),
         (status = 403, description = "Not a player in this game"),
         (status = 404, description = "Game not found"),
     ),
@@ -916,17 +945,10 @@ pub async fn get_game_results(
         .await?
         .ok_or_else(|| ApiError::not_found("Game"))?;
 
-    if game.mode != GameMode::Solo {
-        return Err(ApiError::bad_request(
-            "INVALID_MODE",
-            "Persisted results via API are only available for solo games",
-        ));
-    }
-
-    if game.status != GameStatus::Finished {
+    if !matches!(game.status, GameStatus::Finished | GameStatus::Abandoned) {
         return Err(ApiError::bad_request(
             "GAME_NOT_FINISHED",
-            "Game results are only available after the game has finished",
+            "Game results are only available after the game has finished or been abandoned",
         ));
     }
 
@@ -1015,6 +1037,7 @@ pub async fn start_game(
             lat: location.lat,
             lng: location.lng,
             panorama_id: location.panorama_id,
+            heading: location.heading,
             location_id: location.location_id,
         },
         started_at: now,
@@ -1084,6 +1107,7 @@ pub async fn get_current_round(
             lat: round.location_lat,
             lng: round.location_lng,
             panorama_id: round.panorama_id.clone(),
+            heading: round.heading,
             location_id: round.location_id.clone(),
         },
         started_at: round.started_at,
@@ -1220,6 +1244,7 @@ pub async fn next_round(
             lat: location.lat,
             lng: location.lng,
             panorama_id: location.panorama_id,
+            heading: location.heading,
             location_id: location.location_id,
         },
         started_at: now,
@@ -1338,6 +1363,7 @@ pub async fn submit_guess(
             lat: current_round.location_lat,
             lng: current_round.location_lng,
             panorama_id: current_round.panorama_id.clone(),
+            heading: current_round.heading,
             location_id: current_round.location_id.clone(),
         },
     }))
@@ -1436,6 +1462,7 @@ pub async fn timeout_round(
             lat: current_round.location_lat,
             lng: current_round.location_lng,
             panorama_id: current_round.panorama_id.clone(),
+            heading: current_round.heading,
             location_id: current_round.location_id.clone(),
         },
     }))
@@ -1473,7 +1500,7 @@ pub async fn get_game_history(
             mode: game.mode.to_string(),
             status: game.status.to_string(),
             score: player_score,
-            played_at: game.created_at,
+            played_at: game.ended_at.or(game.started_at).unwrap_or(game.created_at),
         });
     }
 
