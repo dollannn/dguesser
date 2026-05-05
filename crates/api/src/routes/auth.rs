@@ -287,12 +287,28 @@ async fn google_callback(
     );
 
     // Determine redirect URL (use stored redirect_to if safe, otherwise default)
-    let redirect_url = stored_state
-        .redirect_to
-        .filter(|url| is_safe_redirect(url, state.frontend_url()))
-        .unwrap_or_else(|| format!("{}/auth/success", state.frontend_url()));
+    let redirect_url = post_auth_redirect_url(stored_state.redirect_to, state.frontend_url());
 
     Ok(([(SET_COOKIE, cookie)], Redirect::temporary(&redirect_url)).into_response())
+}
+
+/// Resolve a post-auth redirect URL against the configured frontend URL.
+///
+/// Safe relative paths need to be expanded to the frontend origin because OAuth callbacks are
+/// handled on the API origin. Redirecting to `/leaderboard` from `api.example.com` would otherwise
+/// send the browser to `api.example.com/leaderboard` instead of the frontend app.
+fn post_auth_redirect_url(redirect_to: Option<String>, frontend_url: &str) -> String {
+    let frontend_url = frontend_url.trim_end_matches('/');
+
+    let Some(url) = redirect_to.filter(|url| is_safe_redirect(url, frontend_url)) else {
+        return format!("{frontend_url}/auth/success");
+    };
+
+    if url.starts_with('/') && !url.starts_with("//") {
+        format!("{frontend_url}{url}")
+    } else {
+        url
+    }
 }
 
 /// Check if a redirect URL is safe (same-origin or relative path).
@@ -301,6 +317,8 @@ async fn google_callback(
 /// - Relative paths starting with `/`
 /// - Absolute URLs that match the frontend origin exactly (followed by `/`, `?`, `#`, or end)
 fn is_safe_redirect(url: &str, frontend_url: &str) -> bool {
+    let frontend_url = frontend_url.trim_end_matches('/');
+
     // Allow relative paths starting with /
     if url.starts_with('/') && !url.starts_with("//") {
         return true;
@@ -360,6 +378,44 @@ mod tests {
         // These should be rejected as they don't start with the exact frontend URL
         assert!(!is_safe_redirect("https://dguesser.com.evil.com/path", frontend));
         assert!(!is_safe_redirect("https://notdguesser.com/path", frontend));
+    }
+
+    #[test]
+    fn test_post_auth_redirect_resolves_relative_paths_to_frontend() {
+        let redirect = post_auth_redirect_url(
+            Some("/leaderboard?period=weekly".to_string()),
+            "https://dguesser.com",
+        );
+
+        assert_eq!(redirect, "https://dguesser.com/leaderboard?period=weekly");
+    }
+
+    #[test]
+    fn test_post_auth_redirect_keeps_frontend_absolute_urls() {
+        let redirect = post_auth_redirect_url(
+            Some("https://dguesser.com/leaderboard".to_string()),
+            "https://dguesser.com",
+        );
+
+        assert_eq!(redirect, "https://dguesser.com/leaderboard");
+    }
+
+    #[test]
+    fn test_post_auth_redirect_defaults_when_unsafe() {
+        let redirect = post_auth_redirect_url(
+            Some("https://evil.com/phishing".to_string()),
+            "https://dguesser.com",
+        );
+
+        assert_eq!(redirect, "https://dguesser.com/auth/success");
+    }
+
+    #[test]
+    fn test_post_auth_redirect_handles_trailing_frontend_slash() {
+        let redirect =
+            post_auth_redirect_url(Some("/leaderboard".to_string()), "https://dguesser.com/");
+
+        assert_eq!(redirect, "https://dguesser.com/leaderboard");
     }
 
     #[test]
@@ -475,10 +531,7 @@ async fn microsoft_callback(
     );
 
     // Determine redirect URL (use stored redirect_to if safe, otherwise default)
-    let redirect_url = stored_state
-        .redirect_to
-        .filter(|url| is_safe_redirect(url, state.frontend_url()))
-        .unwrap_or_else(|| format!("{}/auth/success", state.frontend_url()));
+    let redirect_url = post_auth_redirect_url(stored_state.redirect_to, state.frontend_url());
 
     Ok(([(SET_COOKIE, cookie)], Redirect::temporary(&redirect_url)).into_response())
 }
