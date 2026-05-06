@@ -6,7 +6,7 @@
   import { authStore, isLoading } from '$lib/stores/auth';
   import { socketClient } from '$lib/socket/client';
   import { initGameSocketListeners } from '$lib/socket/game';
-  import { initPartySocketListeners } from '$lib/socket/party';
+  import { initPartySocketListeners, partyStore } from '$lib/socket/party';
   import Header from '$lib/components/Header.svelte';
   import AuthModal from '$lib/components/AuthModal.svelte';
   import ReconnectingOverlay from '$lib/components/ReconnectingOverlay.svelte';
@@ -47,12 +47,37 @@
     window.addEventListener('pointerdown', unlockAudio, { once: true });
     window.addEventListener('keydown', unlockAudio, { once: true });
 
+    let hydratedPartyUserId: string | null = null;
+
     const unsubscribe = authStore.subscribe(($auth) => {
-      if ($auth.user && !socketClient.connected) {
+      if (!$auth.user) {
+        hydratedPartyUserId = null;
+        partyStore.reset();
+
+        if (socketClient.connected) {
+          // Disconnect socket when user logs out
+          socketClient.disconnect();
+        }
+
+        return;
+      }
+
+      if (!socketClient.connected) {
         socketClient.connect();
-      } else if (!$auth.user && socketClient.connected) {
-        // Disconnect socket when user logs out
-        socketClient.disconnect();
+      }
+
+      if (hydratedPartyUserId !== $auth.user.id) {
+        hydratedPartyUserId = $auth.user.id;
+        void partyStore
+          .loadActiveParty()
+          .then((party) => {
+            if (party) {
+              return partyStore.joinParty(party.id);
+            }
+          })
+          .catch((error) => {
+            console.warn('Failed to hydrate active party:', error);
+          });
       }
     });
 

@@ -166,6 +166,25 @@ pub async fn remove_party_member(
     Ok(())
 }
 
+/// Leave a party and keep party ownership consistent.
+///
+/// If the leaving member is the host, ownership transfers to the longest-tenured
+/// remaining active member. If no active members remain, the party is disbanded.
+pub async fn leave_party(pool: &DbPool, party: &Party, user_id: &str) -> Result<(), sqlx::Error> {
+    remove_party_member(pool, &party.id, user_id).await?;
+
+    if party.host_id == user_id {
+        let remaining_members = get_party_members(pool, &party.id).await?;
+        if let Some(new_host) = remaining_members.first() {
+            update_party_host(pool, &party.id, &new_host.user_id).await?;
+        } else {
+            disband_party(pool, &party.id).await?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Get active members of a party (left_at IS NULL), ordered by join time
 pub async fn get_party_members(
     pool: &DbPool,
@@ -254,4 +273,25 @@ pub async fn get_game_party_id(
         .fetch_optional(pool)
         .await?;
     Ok(row.and_then(|r| r.0))
+}
+
+/// Get the latest active/lobby game for a party, if one exists.
+pub async fn get_current_game_for_party(
+    pool: &DbPool,
+    party_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let row: Option<(String,)> = sqlx::query_as(
+        r#"
+        SELECT id
+        FROM games
+        WHERE party_id = $1 AND status IN ('lobby', 'active')
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(party_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| r.0))
 }

@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { goto } from '$app/navigation';
+import { partiesApi, type ActivePartyDetails } from '$lib/api/parties';
 import { socketClient, toastStore } from './client';
 import type { GameSettings } from '$lib/api/games';
 
@@ -85,8 +86,46 @@ const initialState: PartyState = {
 function createPartyStore() {
   const { subscribe, set, update } = writable<PartyState>({ ...initialState });
 
+  function stateFromActiveParty(party: ActivePartyDetails): PartyState {
+    const members = new Map<string, PartyMemberInfo>();
+    for (const member of party.members) {
+      members.set(member.user_id, {
+        user_id: member.user_id,
+        display_name: member.display_name,
+        avatar_url: member.avatar_url,
+        connected: true,
+      });
+    }
+
+    return {
+      partyId: party.id,
+      joinCode: party.join_code,
+      hostId: party.host_id,
+      members,
+      settings: party.settings as GameSettings,
+      status: party.phase === 'in_game' ? 'in_game' : 'lobby',
+      currentGameId: party.current_game_id,
+    };
+  }
+
   return {
     subscribe,
+
+    /** Hydrate from the REST active-party endpoint response */
+    hydrateActiveParty(party: ActivePartyDetails) {
+      set(stateFromActiveParty(party));
+    },
+
+    /** Load the current user's active party from the REST API */
+    async loadActiveParty() {
+      const party = await partiesApi.getActive();
+      if (party) {
+        set(stateFromActiveParty(party));
+      } else {
+        set({ ...initialState });
+      }
+      return party;
+    },
 
     /** Join a party via socket */
     async joinParty(partyId: string) {
@@ -132,6 +171,10 @@ function createPartyStore() {
         socketClient.emit('party:leave', { party_id: state.partyId });
       }
       set({ ...initialState });
+
+      void partiesApi.leaveActive().catch((error) => {
+        console.warn('Failed to persist party leave:', error);
+      });
     },
 
     /** Create a new party via socket */

@@ -486,7 +486,7 @@ fn handle_end_game(mut state: GameState) -> ReducerResult {
         .values()
         .map(|p| (p.user_id.clone(), p.display_name.clone(), p.total_score))
         .collect();
-    standings.sort_by(|a, b| b.2.cmp(&a.2));
+    standings.sort_by_key(|standing| std::cmp::Reverse(standing.2));
 
     let final_standings: Vec<FinalStandingData> = standings
         .iter()
@@ -744,7 +744,7 @@ fn build_scores_update(state: &GameState) -> GameEvent {
         .collect();
 
     // Sort by total score descending
-    scores.sort_by(|a, b| b.3.cmp(&a.3));
+    scores.sort_by_key(|score| std::cmp::Reverse(score.3));
 
     let scores: Vec<ScoreData> = scores
         .iter()

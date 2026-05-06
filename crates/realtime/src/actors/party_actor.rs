@@ -137,8 +137,20 @@ impl PartyActor {
         match dguesser_db::parties::get_party_by_id(&self.db, &self.party_id).await {
             Ok(Some(party)) => {
                 self.host_id = party.host_id;
-                // Check if there's an active game linked to this party
-                // (A simple heuristic: query games with this party_id that aren't finished)
+                match dguesser_db::parties::get_current_game_for_party(&self.db, &self.party_id)
+                    .await
+                {
+                    Ok(current_game_id) => {
+                        self.current_game_id = current_game_id;
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            party_id = %self.party_id,
+                            "Failed to hydrate current party game from DB"
+                        );
+                    }
+                }
             }
             Ok(None) => {}
             Err(e) => {

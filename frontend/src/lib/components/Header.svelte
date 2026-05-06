@@ -6,6 +6,7 @@
   import { user, isGuest, authStore } from '$lib/stores/auth';
   import { authModalOpen } from '$lib/stores/authModal';
   import { gameStore } from '$lib/socket/game';
+  import { partyStore } from '$lib/socket/party';
   import ConnectionStatus from './ConnectionStatus.svelte';
   import { Button } from '$lib/components/ui/button';
   import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
@@ -18,6 +19,7 @@
   import HistoryIcon from '@lucide/svelte/icons/history';
   import TrophyIcon from '@lucide/svelte/icons/trophy';
   import PlayIcon from '@lucide/svelte/icons/play';
+  import UsersIcon from '@lucide/svelte/icons/users';
   import SettingsIcon from '@lucide/svelte/icons/settings';
   import MapIcon from '@lucide/svelte/icons/map';
   import Volume2Icon from '@lucide/svelte/icons/volume-2';
@@ -29,6 +31,20 @@
     gameState.status === 'lobby' ||
       gameState.status === 'playing' ||
       gameState.status === 'round_end'
+  );
+
+  let partyState = $derived($partyStore);
+  let isInParty = $derived(Boolean(partyState.partyId));
+  let partyMemberCount = $derived(partyState.members.size);
+  let partyHref = $derived(
+    partyState.currentGameId && partyState.status === 'in_game'
+      ? `/game/${partyState.currentGameId}`
+      : partyState.partyId
+        ? `/party/${partyState.partyId}`
+        : '/play'
+  );
+  let partyLabel = $derived(
+    partyState.currentGameId && partyState.status === 'in_game' ? 'Party Game' : 'Party'
   );
 
   async function handleLogout() {
@@ -48,6 +64,21 @@
       gameAudio.playGuessSubmitted();
     }
   }
+
+  function handleLeaveParty(): void {
+    const currentPartyId = partyState.partyId;
+    const currentPartyGameId = partyState.currentGameId;
+
+    partyStore.leaveParty();
+
+    if (
+      $page.url.pathname.startsWith('/party/') ||
+      (currentPartyGameId && $page.url.pathname === `/game/${currentPartyGameId}`) ||
+      (currentPartyId && $page.url.pathname === `/party/${currentPartyId}`)
+    ) {
+      goto('/play');
+    }
+  }
 </script>
 
 {#if isInGame}
@@ -62,6 +93,25 @@
     </a>
 
     <div class="w-px h-6 bg-border/50"></div>
+
+    {#if $user && isInParty}
+      <Button
+        variant="secondary"
+        size="sm"
+        href={partyHref}
+        class="hidden sm:flex h-8 rounded-full px-3"
+        title={partyState.joinCode ? `Party ${partyState.joinCode}` : 'Current party'}
+      >
+        <UsersIcon class="size-4" />
+        <span>{partyLabel}</span>
+        {#if partyState.joinCode}
+          <span class="hidden lg:inline font-mono text-xs text-muted-foreground">
+            {partyState.joinCode}
+          </span>
+        {/if}
+        <Badge variant="outline" class="h-5 px-1.5 text-[10px]">{partyMemberCount}</Badge>
+      </Button>
+    {/if}
 
     <!-- User Section -->
     {#if $user}
@@ -118,6 +168,18 @@
               </div>
             </DropdownMenu.Label>
             <DropdownMenu.Separator />
+
+            {#if isInParty}
+              <DropdownMenu.Item onSelect={() => goto(partyHref)}>
+                <UsersIcon />
+                {partyLabel}
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={handleLeaveParty} variant="destructive">
+                <LogOutIcon />
+                Leave Party
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+            {/if}
 
             {#if $isGuest}
               <DropdownMenu.Item onSelect={() => authModalOpen.open()}>
@@ -220,7 +282,36 @@
           </Button>
 
           <ConnectionStatus />
-          
+
+          {#if isInParty}
+            <Button
+              variant="outline"
+              size="sm"
+              href={partyHref}
+              class="hidden sm:flex rounded-full max-w-[180px]"
+              title={partyState.joinCode ? `Party ${partyState.joinCode}` : 'Current party'}
+            >
+              <UsersIcon class="size-4" />
+              <span class="truncate">{partyLabel}</span>
+              {#if partyState.joinCode}
+                <span class="hidden lg:inline font-mono text-xs text-muted-foreground">
+                  {partyState.joinCode}
+                </span>
+              {/if}
+              <Badge variant="secondary" class="h-5 px-1.5 text-[10px]">{partyMemberCount}</Badge>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              href={partyHref}
+              class="sm:hidden rounded-full"
+              aria-label={partyLabel}
+              title={partyState.joinCode ? `Party ${partyState.joinCode}` : 'Current party'}
+            >
+              <UsersIcon class="size-4" />
+            </Button>
+          {/if}
+           
           <DropdownMenu.Root>
             <DropdownMenu.Trigger>
               {#snippet child({ props })}
@@ -257,7 +348,19 @@
                 </div>
               </DropdownMenu.Label>
               <DropdownMenu.Separator />
-              
+
+              {#if isInParty}
+                <DropdownMenu.Item onSelect={() => goto(partyHref)}>
+                  <UsersIcon />
+                  {partyLabel}
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={handleLeaveParty} variant="destructive">
+                  <LogOutIcon />
+                  Leave Party
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+              {/if}
+               
               <!-- Mobile-only nav items -->
               <DropdownMenu.Group class="md:hidden">
                 <DropdownMenu.Item onSelect={() => goto('/play')}>

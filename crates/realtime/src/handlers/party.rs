@@ -31,6 +31,7 @@ pub struct CreatePartyPayload {
 pub struct JoinPartyPayload {
     pub party_id: String,
     /// Optional legacy join code (party ID links are sufficient)
+    #[allow(dead_code)]
     pub code: Option<String>,
 }
 
@@ -328,22 +329,34 @@ pub async fn handle_leave_party<A: Adapter>(
         None => return,
     };
 
-    let should_notify_actor = match dguesser_db::parties::get_active_party_for_user(
-        state.db(),
-        &user_id,
-    )
-    .await
+    let active_party = match dguesser_db::parties::get_active_party_for_user(state.db(), &user_id)
+        .await
     {
-        Ok(Some(active_party)) => active_party.id == payload.party_id,
-        Ok(None) => false,
+        Ok(Some(active_party)) if active_party.id == payload.party_id => Some(active_party),
+        Ok(Some(_)) | Ok(None) => None,
         Err(e) => {
             tracing::error!(error = %e, user_id = %user_id, party_id = %payload.party_id, "Failed to check active party before leave");
-            false
+            None
         }
     };
 
-    if should_notify_actor && let Some(handle) = state.get_party(&payload.party_id).await {
-        let _ = handle.tx.send(PartyCommand::Leave { user_id: user_id.clone() }).await;
+    if let Some(active_party) = active_party {
+        let mut persisted_by_actor = false;
+
+        if let Some(handle) = state.get_party(&payload.party_id).await {
+            persisted_by_actor =
+                handle.tx.send(PartyCommand::Leave { user_id: user_id.clone() }).await.is_ok();
+        }
+
+        // If the actor is unavailable (for example after a realtime restart),
+        // leave directly via the database so users are never stuck in a party
+        // they can no longer see in the UI.
+        if !persisted_by_actor
+            && let Err(e) =
+                dguesser_db::parties::leave_party(state.db(), &active_party, &user_id).await
+        {
+            tracing::error!(error = %e, user_id = %user_id, party_id = %payload.party_id, "Failed to persist party leave");
+        }
     }
 
     socket.leave(payload.party_id.clone());

@@ -700,6 +700,26 @@ pub async fn create_game(
         _ => return Err(ApiError::bad_request("INVALID_MODE", "Invalid game mode")),
     };
 
+    // Users in an active party should start multiplayer games from the party
+    // lobby. Creating a standalone multiplayer lobby here makes the party feel
+    // lost and leaves membership active in the background.
+    if mode == GameMode::Multiplayer
+        && let Some(party) =
+            dguesser_db::parties::get_active_party_for_user(state.db(), &auth.user_id).await?
+    {
+        let current_game_id =
+            dguesser_db::parties::get_current_game_for_party(state.db(), &party.id).await?;
+        return Err(ApiError::conflict(
+            "ACTIVE_PARTY",
+            "You are already in a party. Return to the party or leave it before starting a quick game.",
+        )
+        .with_details(serde_json::json!({
+            "party_id": party.id,
+            "join_code": party.join_code,
+            "current_game_id": current_game_id,
+        })));
+    }
+
     // Build settings
     let settings = serde_json::json!({
         "rounds": req.rounds.unwrap_or(5),

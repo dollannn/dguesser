@@ -1610,7 +1610,7 @@ impl GameActor {
 
         // Sort players by score
         let mut players: Vec<_> = state.players.values().collect();
-        players.sort_by(|a, b| b.total_score.cmp(&a.total_score));
+        players.sort_by_key(|player| std::cmp::Reverse(player.total_score));
 
         let final_standings: Vec<FinalStanding> = players
             .iter()
@@ -1676,7 +1676,7 @@ impl GameActor {
         }
 
         let mut players: Vec<_> = state.players.values().collect();
-        players.sort_by(|a, b| b.total_score.cmp(&a.total_score));
+        players.sort_by_key(|player| std::cmp::Reverse(player.total_score));
 
         let scores: Vec<PlayerScoreInfo> = players
             .iter()

@@ -3,9 +3,11 @@
 use axum::{
     Json, Router,
     extract::State,
+    http::StatusCode,
     routing::{get, post},
 };
 use dguesser_auth::middleware::AuthUser;
+use dguesser_core::game::GameSettings;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -15,6 +17,8 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", post(create_party))
+        .route("/active", get(get_active_party))
+        .route("/active/leave", post(leave_active_party))
         .route("/join", post(join_party_by_code))
         .route("/{id}", get(get_party))
 }
@@ -62,6 +66,20 @@ pub struct PartyDetails {
     pub settings: serde_json::Value,
     pub members: Vec<PartyMemberDetail>,
     pub created_at: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ActivePartyDetails {
+    pub id: String,
+    pub host_id: String,
+    pub join_code: String,
+    pub status: String,
+    pub settings: serde_json::Value,
+    pub members: Vec<PartyMemberDetail>,
+    pub created_at: String,
+    pub current_game_id: Option<String>,
+    /// Party phase: "lobby" or "in_game".
+    pub phase: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -148,6 +166,42 @@ async fn join_party_by_code(
     Err(ApiError::not_found("No party or game found with this code"))
 }
 
+/// Get the authenticated user's active party, if any.
+async fn get_active_party(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<Option<ActivePartyDetails>>, ApiError> {
+    let Some(party) =
+        dguesser_db::parties::get_active_party_for_user(state.db(), &auth.user_id).await?
+    else {
+        return Ok(Json(None));
+    };
+
+    Ok(Json(Some(build_active_party_details(state.db(), party).await?)))
+}
+
+/// Leave the authenticated user's active party, if any.
+async fn leave_active_party(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<StatusCode, ApiError> {
+    let Some(party) =
+        dguesser_db::parties::get_active_party_for_user(state.db(), &auth.user_id).await?
+    else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+
+    dguesser_db::parties::leave_party(state.db(), &party, &auth.user_id).await?;
+
+    tracing::info!(
+        user_id = %auth.user_id,
+        party_id = %party.id,
+        "User left active party via REST"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Get party details
 async fn get_party(
     State(state): State<AppState>,
@@ -205,4 +259,52 @@ fn generate_join_code() -> String {
             CHARSET[idx] as char
         })
         .collect()
+}
+
+async fn build_active_party_details(
+    db: &dguesser_db::DbPool,
+    party: dguesser_db::Party,
+) -> Result<ActivePartyDetails, ApiError> {
+    let members = build_party_member_details(db, &party).await?;
+    let current_game_id = dguesser_db::parties::get_current_game_for_party(db, &party.id).await?;
+    let phase = if current_game_id.is_some() { "in_game" } else { "lobby" }.to_string();
+
+    Ok(ActivePartyDetails {
+        id: party.id,
+        host_id: party.host_id,
+        join_code: party.join_code,
+        status: party.status,
+        settings: normalize_party_settings(party.settings),
+        members,
+        created_at: party.created_at.to_rfc3339(),
+        current_game_id,
+        phase,
+    })
+}
+
+async fn build_party_member_details(
+    db: &dguesser_db::DbPool,
+    party: &dguesser_db::Party,
+) -> Result<Vec<PartyMemberDetail>, ApiError> {
+    let members = dguesser_db::parties::get_party_members(db, &party.id).await?;
+    let mut member_details = Vec::new();
+    for m in members {
+        let user = dguesser_db::users::get_by_id(db, &m.user_id).await?;
+        let (display_name, avatar_url) = user
+            .map(|u| (u.display_name, u.avatar_url))
+            .unwrap_or_else(|| ("Unknown".to_string(), None));
+        member_details.push(PartyMemberDetail {
+            user_id: m.user_id.clone(),
+            display_name,
+            avatar_url,
+            is_host: m.user_id == party.host_id,
+        });
+    }
+
+    Ok(member_details)
+}
+
+fn normalize_party_settings(settings: serde_json::Value) -> serde_json::Value {
+    let settings: GameSettings = serde_json::from_value(settings).unwrap_or_default();
+    serde_json::to_value(settings).unwrap_or_default()
 }

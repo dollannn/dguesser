@@ -3,6 +3,8 @@
   import { user, authStore } from '$lib/stores/auth';
   import { gamesApi } from '$lib/api/games';
   import { partiesApi } from '$lib/api/parties';
+  import { ApiClientError } from '$lib/api/client';
+  import { partyStore } from '$lib/socket/party';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import * as Card from '$lib/components/ui/card';
@@ -25,6 +27,22 @@
   let loadingAction = $state<'solo' | 'multiplayer' | 'party' | 'join' | null>(null);
   let loading = $derived(loadingAction !== null);
   let error = $state('');
+  let partyState = $derived($partyStore);
+  let isInParty = $derived(Boolean(partyState.partyId));
+  let partyDestination = $derived(
+    partyState.currentGameId && partyState.status === 'in_game'
+      ? `/game/${partyState.currentGameId}`
+      : partyState.partyId
+        ? `/party/${partyState.partyId}`
+        : '/play'
+  );
+  let quickGameLabel = $derived(
+    isInParty
+      ? partyState.currentGameId && partyState.status === 'in_game'
+        ? 'Return to Game'
+        : 'Return to Party'
+      : 'Quick Game'
+  );
 
   async function startSoloGame() {
     if (loading) return;
@@ -55,9 +73,22 @@
         await authStore.createGuest();
       }
 
+      if (partyState.partyId) {
+        await goto(partyDestination);
+        return;
+      }
+
       const game = await gamesApi.create({ mode: 'multiplayer' });
       await goto(`/game/${game.id}`);
     } catch (e) {
+      if (e instanceof ApiClientError && e.code === 'ACTIVE_PARTY') {
+        const party = await partyStore.loadActiveParty().catch(() => null);
+        if (party) {
+          await goto(party.current_game_id ? `/game/${party.current_game_id}` : `/party/${party.id}`);
+          return;
+        }
+      }
+
       error = e instanceof Error ? e.message : 'Failed to create game';
     } finally {
       loadingAction = null;
@@ -99,6 +130,11 @@
         await authStore.createGuest();
       }
 
+      if (partyState.partyId) {
+        await goto(`/party/${partyState.partyId}`);
+        return;
+      }
+
       const party = await partiesApi.create();
       await goto(`/party/${party.id}`);
     } catch (e) {
@@ -112,6 +148,10 @@
     if (e.key === 'Enter') {
       joinByCode();
     }
+  }
+
+  function leaveParty() {
+    partyStore.leaveParty();
   }
 </script>
 
@@ -140,6 +180,27 @@
         <AlertCircleIcon class="size-4" />
         <Alert.Title>Error</Alert.Title>
         <Alert.Description>{error}</Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    {#if isInParty}
+      <Alert.Root>
+        <PartyPopperIcon class="size-4" />
+        <Alert.Title>You're in a party</Alert.Title>
+        <Alert.Description>
+          <div class="mt-1 flex flex-col gap-3">
+            <p>
+              Quick Game starts a separate lobby. Return to your party to keep playing with your
+              group, or leave the party first.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <Button href={partyDestination} size="sm">
+                {partyState.status === 'in_game' ? 'Return to Game' : 'Return to Party'}
+              </Button>
+              <Button variant="outline" size="sm" onclick={leaveParty}>Leave Party</Button>
+            </div>
+          </div>
+        </Alert.Description>
       </Alert.Root>
     {/if}
 
@@ -208,7 +269,7 @@
             {#if loadingAction !== 'multiplayer'}
               <UsersIcon class="size-4" />
             {/if}
-            Quick Game
+            {quickGameLabel}
           </Button>
           <Button
             variant="outline"
@@ -220,7 +281,7 @@
             {#if loadingAction !== 'party'}
               <PartyPopperIcon class="size-4" />
             {/if}
-            Create Party
+            {isInParty ? 'Current Party' : 'Create Party'}
           </Button>
         </div>
 

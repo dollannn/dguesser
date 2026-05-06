@@ -23,6 +23,11 @@ export interface PartyDetails {
   created_at: string;
 }
 
+export interface ActivePartyDetails extends PartyDetails {
+  current_game_id: string | null;
+  phase: 'lobby' | 'in_game';
+}
+
 export interface JoinByCodeResponse {
   type: 'party' | 'game';
   id: string;
@@ -33,6 +38,16 @@ export const partiesApi = {
   /** Create a new party */
   async create(settings?: Partial<GameSettings>): Promise<CreatePartyResponse> {
     return api.post<CreatePartyResponse>('/parties', { settings });
+  },
+
+  /** Get the current user's active party, if any */
+  async getActive(): Promise<ActivePartyDetails | null> {
+    return api.get<ActivePartyDetails | null>('/parties/active');
+  },
+
+  /** Leave the current user's active party, if any */
+  async leaveActive(): Promise<void> {
+    return api.post<void>('/parties/active/leave');
   },
 
   /** Get party details */
